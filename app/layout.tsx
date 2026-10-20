@@ -4,6 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
 import ThemeSync from "@/components/shell/ThemeSync";
 import { JsonLd } from "@/components/seo/JsonLd";
+import SeoIntro from "@/components/seo/SeoIntro";
 import {
   AUTHOR,
   IS_PRODUCTION_DEPLOY,
@@ -117,6 +118,7 @@ export default function RootLayout({
             ],
           }}
         />
+        <SeoIntro />
         {children}
       </body>
     </html>
