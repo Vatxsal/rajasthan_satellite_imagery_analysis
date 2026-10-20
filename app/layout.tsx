@@ -3,6 +3,18 @@ import { IBM_Plex_Mono, Public_Sans } from "next/font/google";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
 import ThemeSync from "@/components/shell/ThemeSync";
+import { JsonLd } from "@/components/seo/JsonLd";
+import SeoIntro from "@/components/seo/SeoIntro";
+import {
+  AUTHOR,
+  IS_PRODUCTION_DEPLOY,
+  REPO_URL,
+  SITE_DESCRIPTION,
+  SITE_KEYWORDS,
+  SITE_NAME,
+  SITE_TITLE,
+  SITE_URL,
+} from "@/lib/seo";
 
 const publicSans = Public_Sans({
   subsets: ["latin"],
@@ -19,12 +31,45 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Rajasthan Imagery Explorer",
-  description: "Satellite imagery catalogue explorer for Rajasthan.",
+  metadataBase: new URL(SITE_URL),
+  title: { default: SITE_TITLE, template: `%s | ${SITE_NAME}` },
+  description: SITE_DESCRIPTION,
+  keywords: SITE_KEYWORDS,
+  applicationName: SITE_NAME,
+  authors: [AUTHOR],
+  creator: AUTHOR.name,
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    url: "/",
+    siteName: SITE_NAME,
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    locale: "en_IN",
+  },
+  twitter: { card: "summary_large_image", title: SITE_TITLE, description: SITE_DESCRIPTION },
+  robots: IS_PRODUCTION_DEPLOY
+    ? {
+        index: true,
+        follow: true,
+        googleBot: {
+          index: true,
+          follow: true,
+          "max-image-preview": "large",
+          "max-snippet": -1,
+        },
+      }
+    : { index: false, follow: false },
+  verification: { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#F6F5F1",
+  width: "device-width",
+  initialScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#F6F5F1" },
+    { media: "(prefers-color-scheme: dark)", color: "#14151A" },
+  ],
 };
 
 export default function RootLayout({
@@ -36,6 +81,44 @@ export default function RootLayout({
     <html lang="en" data-theme="light" suppressHydrationWarning>
       <body className={`${publicSans.variable} ${plexMono.variable} font-sans`}>
         <ThemeSync />
+        <JsonLd
+          data={{
+            "@context": "https://schema.org",
+            "@graph": [
+              {
+                "@type": "WebSite",
+                name: SITE_NAME,
+                url: SITE_URL,
+                inLanguage: "en-IN",
+              },
+              {
+                "@type": "WebApplication",
+                name: SITE_NAME,
+                url: SITE_URL,
+                description: SITE_DESCRIPTION,
+                applicationCategory: "BrowserApplication",
+                operatingSystem: "Any",
+                offers: { price: "0", priceCurrency: "INR" },
+                featureList: [
+                  "District, tehsil and ILR boundary selection",
+                  "Daily-mosaic scene search with cloud cover comparison",
+                  "True colour, false colour and NDVI composites",
+                  "Clipped PNG and GeoTIFF downloads per scene",
+                  "Copernicus Browser deep links",
+                  "XYZ tile proxy over OpenFreeMap and Esri basemaps",
+                  "Light and dark themes",
+                ],
+                author: {
+                  "@type": "Person",
+                  name: AUTHOR.name,
+                  url: AUTHOR.url,
+                  sameAs: [AUTHOR.url, REPO_URL],
+                },
+              },
+            ],
+          }}
+        />
+        <SeoIntro />
         {children}
       </body>
     </html>
