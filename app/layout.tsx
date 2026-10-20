@@ -3,9 +3,11 @@ import { IBM_Plex_Mono, Public_Sans } from "next/font/google";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
 import ThemeSync from "@/components/shell/ThemeSync";
+import { JsonLd } from "@/components/seo/JsonLd";
 import {
   AUTHOR,
   IS_PRODUCTION_DEPLOY,
+  REPO_URL,
   SITE_DESCRIPTION,
   SITE_KEYWORDS,
   SITE_NAME,
@@ -78,6 +80,43 @@ export default function RootLayout({
     <html lang="en" data-theme="light" suppressHydrationWarning>
       <body className={`${publicSans.variable} ${plexMono.variable} font-sans`}>
         <ThemeSync />
+        <JsonLd
+          data={{
+            "@context": "https://schema.org",
+            "@graph": [
+              {
+                "@type": "WebSite",
+                name: SITE_NAME,
+                url: SITE_URL,
+                inLanguage: "en-IN",
+              },
+              {
+                "@type": "WebApplication",
+                name: SITE_NAME,
+                url: SITE_URL,
+                description: SITE_DESCRIPTION,
+                applicationCategory: "BrowserApplication",
+                operatingSystem: "Any",
+                offers: { price: "0", priceCurrency: "INR" },
+                featureList: [
+                  "District, tehsil and ILR boundary selection",
+                  "Daily-mosaic scene search with cloud cover comparison",
+                  "True colour, false colour and NDVI composites",
+                  "Clipped PNG and GeoTIFF downloads per scene",
+                  "Copernicus Browser deep links",
+                  "XYZ tile proxy over OpenFreeMap and Esri basemaps",
+                  "Light and dark themes",
+                ],
+                author: {
+                  "@type": "Person",
+                  name: AUTHOR.name,
+                  url: AUTHOR.url,
+                  sameAs: [AUTHOR.url, REPO_URL],
+                },
+              },
+            ],
+          }}
+        />
         {children}
       </body>
     </html>
