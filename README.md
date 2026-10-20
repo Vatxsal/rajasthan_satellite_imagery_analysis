@@ -127,6 +127,8 @@ bundle scan in the release checklist.
 | `RATE_LIMIT_TILES_PER_MIN` | server | no | `240` | Per-IP cap for XYZ tiles |
 | `DAILY_RENDER_BUDGET` | server | no | `3000` | Daily Process API render cap (UTC day, per instance; `0` = off) |
 | `TILE_CACHE_DIR` | server | no | unset | On-disk tile cache (auto-disabled on Vercel) |
+| `NEXT_PUBLIC_SITE_URL` | public (build-time) | no | `https://rajasthan-satellite-imagery-analysi.vercel.app` | Canonical origin for metadata, sitemap and robots |
+| `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` | public (build-time) | no | unset | Google Search Console verification token |
 
 ## Deploying to Vercel
 
@@ -188,6 +190,23 @@ basemap → search an address. No console errors, no CSP violations.
   `next/image` (not used), the MapLibre advisory concerns HTML sanitisation
   sinks (the app renders no map HTML popups), and the rest are build-time
   tooling. Re-evaluate on the next major upgrade.
+
+## SEO
+
+- **Metadata** (`app/layout.tsx`): title template, description, keywords,
+  canonical, OpenGraph/Twitter cards, `themeColor`, and a `robots` rule that
+  indexes only real production deploys (Vercel previews and local dev stay
+  `noindex`).
+- **robots.txt** (`app/robots.ts`): allows `/`, disallows `/api/` so crawlers
+  never spend Copernicus render quota; non-production deploys disallow all.
+- **Sitemap** (`app/sitemap.ts`): `/` and `/about`.
+- **Social preview** (`app/opengraph-image.tsx`, `app/twitter-image.tsx`):
+  generated 1200×630 PNG card.
+- **Structured data** (`components/seo/JsonLd.tsx`): JSON-LD `@graph` with
+  `WebSite` + `WebApplication` (no fake ratings/reviews).
+- **Crawlable copy**: `components/seo/SeoIntro.tsx` (screen-reader-visible
+  intro on the dashboard) and an `/about` page (`app/about/page.tsx`).
+- **API routes** send `X-Robots-Tag: noindex, nofollow` (`next.config.mjs`).
 
 ## Testing & CI
 
