@@ -1,0 +1,1625 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jaipur-amber-ilr1",
+        "name": "Amber North ILR",
+        "tehsilId": "t-jaipur-amber",
+        "tehsilName": "Amber",
+        "districtId": "d-jaipur",
+        "districtName": "Jaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.29253,
+              26.48502
+            ],
+            [
+              75.45,
+              26.48547
+            ],
+            [
+              75.6118,
+              26.49684
+            ],
+            [
+              75.61089,
+              26.6875
+            ],
+            [
+              75.61106,
+              26.88623
+            ],
+            [
+              75.45,
+              26.87934
+            ],
+            [
+              75.2941,
+              26.87766
+            ],
+            [
+              75.28855,
+              26.6875
+            ],
+            [
+              75.29253,
+              26.48502
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jaipur-amber-ilr2",
+        "name": "Amber South ILR",
+        "tehsilId": "t-jaipur-amber",
+        "tehsilName": "Amber",
+        "districtId": "d-jaipur",
+        "districtName": "Jaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.29867,
+              26.8737
+            ],
+            [
+              75.45,
+              26.87112
+            ],
+            [
+              75.60323,
+              26.87312
+            ],
+            [
+              75.60659,
+              27.0625
+            ],
+            [
+              75.61108,
+              27.25173
+            ],
+            [
+              75.45,
+              27.2508
+            ],
+            [
+              75.29316,
+              27.25259
+            ],
+            [
+              75.29727,
+              27.0625
+            ],
+            [
+              75.29867,
+              26.8737
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jaipur-sanganer-ilr1",
+        "name": "Sanganer East ILR",
+        "tehsilId": "t-jaipur-sanganer",
+        "tehsilName": "Sanganer",
+        "districtId": "d-jaipur",
+        "districtName": "Jaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.5943,
+              26.49894
+            ],
+            [
+              75.75,
+              26.49101
+            ],
+            [
+              75.90379,
+              26.49968
+            ],
+            [
+              75.90058,
+              26.6875
+            ],
+            [
+              75.90252,
+              26.88383
+            ],
+            [
+              75.75,
+              26.88888
+            ],
+            [
+              75.59479,
+              26.88365
+            ],
+            [
+              75.59708,
+              26.6875
+            ],
+            [
+              75.5943,
+              26.49894
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jaipur-sanganer-ilr2",
+        "name": "Sanganer West ILR",
+        "tehsilId": "t-jaipur-sanganer",
+        "tehsilName": "Sanganer",
+        "districtId": "d-jaipur",
+        "districtName": "Jaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.59043,
+              26.86193
+            ],
+            [
+              75.75,
+              26.86489
+            ],
+            [
+              75.90774,
+              26.87318
+            ],
+            [
+              75.90963,
+              27.0625
+            ],
+            [
+              75.90684,
+              27.26151
+            ],
+            [
+              75.75,
+              27.25335
+            ],
+            [
+              75.59374,
+              27.25792
+            ],
+            [
+              75.59802,
+              27.0625
+            ],
+            [
+              75.59043,
+              26.86193
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jaipur-chaumu-ilr1",
+        "name": "Chomu North ILR",
+        "tehsilId": "t-jaipur-chaumu",
+        "tehsilName": "Chomu",
+        "districtId": "d-jaipur",
+        "districtName": "Jaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.89098,
+              26.48549
+            ],
+            [
+              76.05,
+              26.48817
+            ],
+            [
+              76.20863,
+              26.49435
+            ],
+            [
+              76.20691,
+              26.6875
+            ],
+            [
+              76.20319,
+              26.88462
+            ],
+            [
+              76.05,
+              26.8882
+            ],
+            [
+              75.89016,
+              26.88624
+            ],
+            [
+              75.89829,
+              26.6875
+            ],
+            [
+              75.89098,
+              26.48549
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jaipur-chaumu-ilr2",
+        "name": "Chomu South ILR",
+        "tehsilId": "t-jaipur-chaumu",
+        "tehsilName": "Chomu",
+        "districtId": "d-jaipur",
+        "districtName": "Jaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.89572,
+              26.87257
+            ],
+            [
+              76.05,
+              26.8697
+            ],
+            [
+              76.20521,
+              26.87465
+            ],
+            [
+              76.20848,
+              27.0625
+            ],
+            [
+              76.21119,
+              27.26162
+            ],
+            [
+              76.05,
+              27.25361
+            ],
+            [
+              75.89206,
+              27.25884
+            ],
+            [
+              75.89902,
+              27.0625
+            ],
+            [
+              75.89572,
+              26.87257
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jodhpur-bhopalgarh-ilr1",
+        "name": "Bhopalgarh North ILR",
+        "tehsilId": "t-jodhpur-bhopalgarh",
+        "tehsilName": "Bhopalgarh",
+        "districtId": "d-jodhpur",
+        "districtName": "Jodhpur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              72.54786,
+              25.88486
+            ],
+            [
+              72.70833,
+              25.88897
+            ],
+            [
+              72.87752,
+              25.88893
+            ],
+            [
+              72.87116,
+              26.1
+            ],
+            [
+              72.86889,
+              26.30777
+            ],
+            [
+              72.70833,
+              26.3137
+            ],
+            [
+              72.5433,
+              26.30755
+            ],
+            [
+              72.53993,
+              26.1
+            ],
+            [
+              72.54786,
+              25.88486
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jodhpur-bhopalgarh-ilr2",
+        "name": "Bhopalgarh South ILR",
+        "tehsilId": "t-jodhpur-bhopalgarh",
+        "tehsilName": "Bhopalgarh",
+        "districtId": "d-jodhpur",
+        "districtName": "Jodhpur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              72.5453,
+              26.29274
+            ],
+            [
+              72.70833,
+              26.29245
+            ],
+            [
+              72.87478,
+              26.29529
+            ],
+            [
+              72.87228,
+              26.5
+            ],
+            [
+              72.87621,
+              26.70552
+            ],
+            [
+              72.70833,
+              26.70508
+            ],
+            [
+              72.54338,
+              26.70743
+            ],
+            [
+              72.53817,
+              26.5
+            ],
+            [
+              72.5453,
+              26.29274
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jodhpur-luni-ilr1",
+        "name": "Luni East ILR",
+        "tehsilId": "t-jodhpur-luni",
+        "tehsilName": "Luni",
+        "districtId": "d-jodhpur",
+        "districtName": "Jodhpur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              72.85588,
+              25.88626
+            ],
+            [
+              73.025,
+              25.88696
+            ],
+            [
+              73.18453,
+              25.89764
+            ],
+            [
+              73.19422,
+              26.1
+            ],
+            [
+              73.18387,
+              26.3149
+            ],
+            [
+              73.025,
+              26.31414
+            ],
+            [
+              72.85996,
+              26.3041
+            ],
+            [
+              72.86068,
+              26.1
+            ],
+            [
+              72.85588,
+              25.88626
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jodhpur-luni-ilr2",
+        "name": "Luni West ILR",
+        "tehsilId": "t-jodhpur-luni",
+        "tehsilName": "Luni",
+        "districtId": "d-jodhpur",
+        "districtName": "Jodhpur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              72.85583,
+              26.29555
+            ],
+            [
+              73.025,
+              26.29383
+            ],
+            [
+              73.19372,
+              26.29855
+            ],
+            [
+              73.19563,
+              26.5
+            ],
+            [
+              73.18881,
+              26.70157
+            ],
+            [
+              73.025,
+              26.70758
+            ],
+            [
+              72.86481,
+              26.71312
+            ],
+            [
+              72.85613,
+              26.5
+            ],
+            [
+              72.85583,
+              26.29555
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jodhpur-phalodi-ilr1",
+        "name": "Phalodi North ILR",
+        "tehsilId": "t-jodhpur-phalodi",
+        "tehsilName": "Phalodi",
+        "districtId": "d-jodhpur",
+        "districtName": "Jodhpur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.17749,
+              25.89812
+            ],
+            [
+              73.34167,
+              25.88531
+            ],
+            [
+              73.50085,
+              25.887
+            ],
+            [
+              73.50857,
+              26.1
+            ],
+            [
+              73.51208,
+              26.31462
+            ],
+            [
+              73.34167,
+              26.30046
+            ],
+            [
+              73.18299,
+              26.30773
+            ],
+            [
+              73.17723,
+              26.1
+            ],
+            [
+              73.17749,
+              25.89812
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-jodhpur-phalodi-ilr2",
+        "name": "Phalodi South ILR",
+        "tehsilId": "t-jodhpur-phalodi",
+        "tehsilName": "Phalodi",
+        "districtId": "d-jodhpur",
+        "districtName": "Jodhpur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.17527,
+              26.28953
+            ],
+            [
+              73.34167,
+              26.29583
+            ],
+            [
+              73.51109,
+              26.2855
+            ],
+            [
+              73.50925,
+              26.5
+            ],
+            [
+              73.50386,
+              26.70067
+            ],
+            [
+              73.34167,
+              26.71187
+            ],
+            [
+              73.17775,
+              26.70774
+            ],
+            [
+              73.1827,
+              26.5
+            ],
+            [
+              73.17527,
+              26.28953
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-udaipur-girwa-ilr1",
+        "name": "Girwa North ILR",
+        "tehsilId": "t-udaipur-girwa",
+        "tehsilName": "Girwa",
+        "districtId": "d-udaipur",
+        "districtName": "Udaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.49273,
+              24.298
+            ],
+            [
+              73.65,
+              24.28762
+            ],
+            [
+              73.81186,
+              24.29127
+            ],
+            [
+              73.81125,
+              24.475
+            ],
+            [
+              73.80367,
+              24.65514
+            ],
+            [
+              73.65,
+              24.65927
+            ],
+            [
+              73.48874,
+              24.65165
+            ],
+            [
+              73.49314,
+              24.475
+            ],
+            [
+              73.49273,
+              24.298
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-udaipur-girwa-ilr2",
+        "name": "Girwa South ILR",
+        "tehsilId": "t-udaipur-girwa",
+        "tehsilName": "Girwa",
+        "districtId": "d-udaipur",
+        "districtName": "Udaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.49871,
+              24.64311
+            ],
+            [
+              73.65,
+              24.64858
+            ],
+            [
+              73.81018,
+              24.64439
+            ],
+            [
+              73.80315,
+              24.825
+            ],
+            [
+              73.80191,
+              25.01064
+            ],
+            [
+              73.65,
+              25.00978
+            ],
+            [
+              73.4897,
+              25.00499
+            ],
+            [
+              73.49507,
+              24.825
+            ],
+            [
+              73.49871,
+              24.64311
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-udaipur-kherwara-ilr1",
+        "name": "Kherwara East ILR",
+        "tehsilId": "t-udaipur-kherwara",
+        "tehsilName": "Kherwara",
+        "districtId": "d-udaipur",
+        "districtName": "Udaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.79435,
+              24.29972
+            ],
+            [
+              73.95,
+              24.2933
+            ],
+            [
+              74.10955,
+              24.28771
+            ],
+            [
+              74.10506,
+              24.475
+            ],
+            [
+              74.1062,
+              24.6563
+            ],
+            [
+              73.95,
+              24.65355
+            ],
+            [
+              73.79685,
+              24.6547
+            ],
+            [
+              73.79835,
+              24.475
+            ],
+            [
+              73.79435,
+              24.29972
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-udaipur-kherwara-ilr2",
+        "name": "Kherwara West ILR",
+        "tehsilId": "t-udaipur-kherwara",
+        "tehsilName": "Kherwara",
+        "districtId": "d-udaipur",
+        "districtName": "Udaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.79816,
+              24.64152
+            ],
+            [
+              73.95,
+              24.64798
+            ],
+            [
+              74.10127,
+              24.64285
+            ],
+            [
+              74.10249,
+              24.825
+            ],
+            [
+              74.10193,
+              25.00174
+            ],
+            [
+              73.95,
+              25.00048
+            ],
+            [
+              73.79945,
+              25.01149
+            ],
+            [
+              73.79193,
+              24.825
+            ],
+            [
+              73.79816,
+              24.64152
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-udaipur-salumbar-ilr1",
+        "name": "Salumbar North ILR",
+        "tehsilId": "t-udaipur-salumbar",
+        "tehsilName": "Salumbar",
+        "districtId": "d-udaipur",
+        "districtName": "Udaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              74.09324,
+              24.29273
+            ],
+            [
+              74.25,
+              24.29224
+            ],
+            [
+              74.41031,
+              24.2928
+            ],
+            [
+              74.40718,
+              24.475
+            ],
+            [
+              74.4053,
+              24.65843
+            ],
+            [
+              74.25,
+              24.66281
+            ],
+            [
+              74.09777,
+              24.65071
+            ],
+            [
+              74.09679,
+              24.475
+            ],
+            [
+              74.09324,
+              24.29273
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-udaipur-salumbar-ilr2",
+        "name": "Salumbar South ILR",
+        "tehsilId": "t-udaipur-salumbar",
+        "tehsilName": "Salumbar",
+        "districtId": "d-udaipur",
+        "districtName": "Udaipur"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              74.09854,
+              24.64583
+            ],
+            [
+              74.25,
+              24.64313
+            ],
+            [
+              74.40134,
+              24.64502
+            ],
+            [
+              74.41166,
+              24.825
+            ],
+            [
+              74.40042,
+              25.01007
+            ],
+            [
+              74.25,
+              25.01295
+            ],
+            [
+              74.09243,
+              25.00781
+            ],
+            [
+              74.09805,
+              24.825
+            ],
+            [
+              74.09854,
+              24.64583
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-kota-sangod-ilr1",
+        "name": "Sangod North ILR",
+        "tehsilId": "t-kota-sangod",
+        "tehsilName": "Sangod",
+        "districtId": "d-kota",
+        "districtName": "Kota"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.49936,
+              24.88652
+            ],
+            [
+              75.64167,
+              24.88653
+            ],
+            [
+              75.78429,
+              24.897
+            ],
+            [
+              75.7935,
+              25.075
+            ],
+            [
+              75.78606,
+              25.25931
+            ],
+            [
+              75.64167,
+              25.26217
+            ],
+            [
+              75.49065,
+              25.25158
+            ],
+            [
+              75.49788,
+              25.075
+            ],
+            [
+              75.49936,
+              24.88652
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-kota-sangod-ilr2",
+        "name": "Sangod South ILR",
+        "tehsilId": "t-kota-sangod",
+        "tehsilName": "Sangod",
+        "districtId": "d-kota",
+        "districtName": "Kota"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.48997,
+              25.24662
+            ],
+            [
+              75.64167,
+              25.23658
+            ],
+            [
+              75.79173,
+              25.23974
+            ],
+            [
+              75.79278,
+              25.425
+            ],
+            [
+              75.79152,
+              25.60023
+            ],
+            [
+              75.64167,
+              25.6066
+            ],
+            [
+              75.49281,
+              25.61011
+            ],
+            [
+              75.49952,
+              25.425
+            ],
+            [
+              75.48997,
+              25.24662
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-kota-ladpura-ilr1",
+        "name": "Ladpura East ILR",
+        "tehsilId": "t-kota-ladpura",
+        "tehsilName": "Ladpura",
+        "districtId": "d-kota",
+        "districtName": "Kota"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.77551,
+              24.89912
+            ],
+            [
+              75.925,
+              24.89708
+            ],
+            [
+              76.07583,
+              24.89804
+            ],
+            [
+              76.06724,
+              25.075
+            ],
+            [
+              76.07121,
+              25.25566
+            ],
+            [
+              75.925,
+              25.25714
+            ],
+            [
+              75.77443,
+              25.26149
+            ],
+            [
+              75.77666,
+              25.075
+            ],
+            [
+              75.77551,
+              24.89912
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-kota-ladpura-ilr2",
+        "name": "Ladpura West ILR",
+        "tehsilId": "t-kota-ladpura",
+        "tehsilName": "Ladpura",
+        "districtId": "d-kota",
+        "districtName": "Kota"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              75.78218,
+              25.24682
+            ],
+            [
+              75.925,
+              25.24476
+            ],
+            [
+              76.07515,
+              25.24516
+            ],
+            [
+              76.06913,
+              25.425
+            ],
+            [
+              76.07436,
+              25.61174
+            ],
+            [
+              75.925,
+              25.61106
+            ],
+            [
+              75.7739,
+              25.6005
+            ],
+            [
+              75.78318,
+              25.425
+            ],
+            [
+              75.78218,
+              25.24682
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-kota-ramganj-ilr1",
+        "name": "Ramganj North ILR",
+        "tehsilId": "t-kota-ramganj",
+        "tehsilName": "Ramganj Mandi",
+        "districtId": "d-kota",
+        "districtName": "Kota"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              76.05747,
+              24.89618
+            ],
+            [
+              76.20833,
+              24.88835
+            ],
+            [
+              76.35643,
+              24.88844
+            ],
+            [
+              76.35707,
+              25.075
+            ],
+            [
+              76.36112,
+              25.25316
+            ],
+            [
+              76.20833,
+              25.2564
+            ],
+            [
+              76.0649,
+              25.25329
+            ],
+            [
+              76.05954,
+              25.075
+            ],
+            [
+              76.05747,
+              24.89618
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-kota-ramganj-ilr2",
+        "name": "Ramganj South ILR",
+        "tehsilId": "t-kota-ramganj",
+        "tehsilName": "Ramganj Mandi",
+        "districtId": "d-kota",
+        "districtName": "Kota"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              76.05601,
+              25.24261
+            ],
+            [
+              76.20833,
+              25.24981
+            ],
+            [
+              76.35384,
+              25.24976
+            ],
+            [
+              76.35499,
+              25.425
+            ],
+            [
+              76.35309,
+              25.61296
+            ],
+            [
+              76.20833,
+              25.60412
+            ],
+            [
+              76.05679,
+              25.60812
+            ],
+            [
+              76.05973,
+              25.425
+            ],
+            [
+              76.05601,
+              25.24261
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-bikaner-kolayat-ilr1",
+        "name": "Kolayat North ILR",
+        "tehsilId": "t-bikaner-kolayat",
+        "tehsilName": "Kolayat",
+        "districtId": "d-bikaner",
+        "districtName": "Bikaner"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              72.69995,
+              27.63314
+            ],
+            [
+              72.9,
+              27.64571
+            ],
+            [
+              73.10359,
+              27.63977
+            ],
+            [
+              73.1095,
+              27.8625
+            ],
+            [
+              73.10978,
+              28.08277
+            ],
+            [
+              72.9,
+              28.09197
+            ],
+            [
+              72.69917,
+              28.07701
+            ],
+            [
+              72.68746,
+              27.8625
+            ],
+            [
+              72.69995,
+              27.63314
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-bikaner-kolayat-ilr2",
+        "name": "Kolayat South ILR",
+        "tehsilId": "t-bikaner-kolayat",
+        "tehsilName": "Kolayat",
+        "districtId": "d-bikaner",
+        "districtName": "Bikaner"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              72.68509,
+              28.06594
+            ],
+            [
+              72.9,
+              28.07145
+            ],
+            [
+              73.10526,
+              28.07479
+            ],
+            [
+              73.10938,
+              28.2875
+            ],
+            [
+              73.10925,
+              28.50582
+            ],
+            [
+              72.9,
+              28.50756
+            ],
+            [
+              72.6845,
+              28.50815
+            ],
+            [
+              72.69503,
+              28.2875
+            ],
+            [
+              72.68509,
+              28.06594
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-bikaner-lunkaransar-ilr1",
+        "name": "Lunkaransar East ILR",
+        "tehsilId": "t-bikaner-lunkaransar",
+        "tehsilName": "Lunkaransar",
+        "districtId": "d-bikaner",
+        "districtName": "Bikaner"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.09255,
+              27.64142
+            ],
+            [
+              73.3,
+              27.63364
+            ],
+            [
+              73.51412,
+              27.63774
+            ],
+            [
+              73.50979,
+              27.8625
+            ],
+            [
+              73.50676,
+              28.0786
+            ],
+            [
+              73.3,
+              28.08979
+            ],
+            [
+              73.08954,
+              28.0783
+            ],
+            [
+              73.08763,
+              27.8625
+            ],
+            [
+              73.09255,
+              27.64142
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-bikaner-lunkaransar-ilr2",
+        "name": "Lunkaransar West ILR",
+        "tehsilId": "t-bikaner-lunkaransar",
+        "tehsilName": "Lunkaransar",
+        "districtId": "d-bikaner",
+        "districtName": "Bikaner"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.09926,
+              28.0703
+            ],
+            [
+              73.3,
+              28.06676
+            ],
+            [
+              73.50237,
+              28.07143
+            ],
+            [
+              73.50117,
+              28.2875
+            ],
+            [
+              73.51329,
+              28.50405
+            ],
+            [
+              73.3,
+              28.50095
+            ],
+            [
+              73.08759,
+              28.51481
+            ],
+            [
+              73.09001,
+              28.2875
+            ],
+            [
+              73.09926,
+              28.0703
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-bikaner-nagaur-road-ilr1",
+        "name": "Nagaur Road North ILR",
+        "tehsilId": "t-bikaner-nagaur-road",
+        "tehsilName": "Nagaur Road",
+        "districtId": "d-bikaner",
+        "districtName": "Bikaner"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.48561,
+              27.6423
+            ],
+            [
+              73.7,
+              27.64256
+            ],
+            [
+              73.90109,
+              27.64838
+            ],
+            [
+              73.91112,
+              27.8625
+            ],
+            [
+              73.90411,
+              28.08301
+            ],
+            [
+              73.7,
+              28.08609
+            ],
+            [
+              73.49201,
+              28.07575
+            ],
+            [
+              73.49366,
+              27.8625
+            ],
+            [
+              73.48561,
+              27.6423
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "t-bikaner-nagaur-road-ilr2",
+        "name": "Nagaur Road South ILR",
+        "tehsilId": "t-bikaner-nagaur-road",
+        "tehsilName": "Nagaur Road",
+        "districtId": "d-bikaner",
+        "districtName": "Bikaner"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.48786,
+              28.06103
+            ],
+            [
+              73.7,
+              28.06396
+            ],
+            [
+              73.91023,
+              28.07155
+            ],
+            [
+              73.91359,
+              28.2875
+            ],
+            [
+              73.90491,
+              28.51574
+            ],
+            [
+              73.7,
+              28.50667
+            ],
+            [
+              73.49365,
+              28.51098
+            ],
+            [
+              73.49592,
+              28.2875
+            ],
+            [
+              73.48786,
+              28.06103
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

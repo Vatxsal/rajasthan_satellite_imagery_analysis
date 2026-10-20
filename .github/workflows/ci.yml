@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    env:
+      # Offline demo mode: no CDSE credentials needed in CI.
+      NEXT_PUBLIC_DATA_SOURCE: mock
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke test (production server)
+        run: |
+          npm start &
+          for i in $(seq 1 30); do
+            curl -fsS -o /dev/null http://localhost:3000/ && break
+            sleep 2
+          done
+          curl -fsS -o /dev/null -w "home=%{http_code}\n" http://localhost:3000/
+          curl -fsS http://localhost:3000/api/health/cdse
+          echo

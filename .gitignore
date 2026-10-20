@@ -1,0 +1,59 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+/.yarn/install-state.gz
+
+# testing
+/coverage
+/.test-build/
+/test-results/
+/playwright-report/
+/artifacts/
+/rie-verify/
+
+# next.js
+/.next/
+/.next-verify/
+/out/
+
+# production
+/build
+
+# caches
+/.tile-cache/
+*.tsbuildinfo
+
+# misc
+.DS_Store
+*.pem
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files — never commit real credentials
+.env
+.env.*
+!.env.example
+
+# downloaded imagery / test image outputs
+*.tif
+*.tiff
+*.png
+!docs/screenshots/*.png
+
+# vercel
+.vercel
+
+# typescript
+next-env.d.ts
+
+# IDEs
+.vscode/
+.idea/
+*.code-workspace
