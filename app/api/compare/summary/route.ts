@@ -1,8 +1,19 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buildSummaryPrompt, SUMMARY_MODEL_FALLBACK, SUMMARY_SYSTEM_PROMPT } from "@/lib/analysis/prompt";
-import { aiSummaryCache, summaryCacheKey } from "@/lib/cache";
+import {
+  buildSummaryPrompt,
+  SUMMARY_IMAGES_NOTE,
+  SUMMARY_MODEL_FALLBACK,
+  SUMMARY_RESPONSE_SCHEMA,
+  SUMMARY_SYSTEM_PROMPT,
+  summaryLanguageLine,
+  summaryOutputSchema,
+  type SummaryOutput,
+} from "@/lib/analysis/prompt";
+import { aiSummaryCache, compareResultCache, summaryCacheKey } from "@/lib/cache";
 import { getServerEnv } from "@/lib/env";
+import { codedError, generateStructuredJson, type GeminiImagePart } from "@/lib/server/gemini";
+import { buildSummaryImages } from "@/lib/server/summaryImages";
 import {
   apiError,
   errorResponse,
@@ -12,93 +23,42 @@ import {
 } from "@/lib/server/api";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
-/** Stats payload only — hard cap well under the generic 512 KB JSON limit. */
-const SUMMARY_BODY_LIMIT = 32_000;
+const SUMMARY_BODY_LIMIT = 8_000;
+const SUMMARY_TTL_SECONDS = 1_800;
 
-const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-
-const sceneMetaSchema = z
-  .object({
-    date: dateStr,
-    cloudCover: z.number().min(0).max(100),
-    satellite: z.string().max(64),
-    tileCount: z.number().int().min(1).max(999),
-  })
-  .nullable();
-
-const classStatSchema = z.object({
-  code: z.number().int().min(0).max(6),
-  label: z.string().max(80),
-  color: z.tuple([z.number().min(0).max(255), z.number().min(0).max(255), z.number().min(0).max(255)]),
-  pixels: z.number().int().min(0),
-  areaHa: z.number().min(0),
-  areaKm2: z.number().min(0),
-  pctOfValid: z.number().min(0).max(100),
+const summaryBodySchema = z.object({
+  /** Key returned by /api/compare/analyze — the cached artifact is looked up by it. */
+  analysisKey: z.string().trim().min(8).max(128),
+  language: z.enum(["en", "hi"]).default("en"),
+  includeImages: z.boolean().default(true),
 });
 
-const hotspotSchema = z.object({
-  centroid: z.tuple([z.number(), z.number()]),
-  bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]),
-  areaHa: z.number().min(0),
-  classCode: z.number().int().min(0).max(6),
-  classLabel: z.string().max(80),
-  tehsilName: z.string().max(120).nullable(),
-});
+type SummaryBody = z.infer<typeof summaryBodySchema>;
 
-const tehsilRowSchema = z.object({
-  tehsilId: z.string().max(80),
-  name: z.string().max(120),
-  pixelsByClass: z.record(z.number().int().min(0)),
-  changedHa: z.number().min(0),
-  validPixels: z.number().int().min(0),
-  insidePixels: z.number().int().min(0),
-});
+const IMAGE_LABELS = [
+  "Image 1 — date A (true colour):",
+  "Image 2 — date B (true colour):",
+  "Image 3 — classified change overlay on date B:",
+];
 
-const metadataSchema = z.object({
-  areaName: z.string().max(200),
-  areaLevel: z.enum(["district", "tehsil", "ilr"]),
-  dateA: dateStr,
-  dateB: dateStr,
-  gapDays: z.number().int().min(0).max(3660),
-  sceneA: sceneMetaSchema,
-  sceneB: sceneMetaSchema,
-  width: z.number().int().min(1).max(8192),
-  height: z.number().int().min(1).max(8192),
-  metersPerPixel: z.number().min(0),
-  coarse: z.boolean(),
-  sensitivity: z.enum(["low", "medium", "high"]),
-  minPatchHa: z.number().min(0.01).max(100),
-  thresholds: z.record(z.number()),
-  generatedAt: z.string().max(64),
-});
-
-const statsSchema = z.object({
-  metadata: metadataSchema,
-  classes: z.array(classStatSchema).max(20),
-  validPct: z.number().min(0).max(100),
-  areaHa: z.number().min(0),
-  validHa: z.number().min(0),
-  changedHa: z.number().min(0),
-  tehsils: z.array(tehsilRowSchema).max(500).nullable(),
-  hotspots: z.array(hotspotSchema).max(10),
-  negligible: z.boolean(),
-});
-
-const summaryBodySchema = z.object({ stats: statsSchema });
-
-interface GeminiResponse {
-  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+function userPrompt(body: SummaryBody, stats: Parameters<typeof buildSummaryPrompt>[0]): string {
+  const lines = [summaryLanguageLine(body.language), "", buildSummaryPrompt(stats)];
+  if (body.includeImages) lines.push("", SUMMARY_IMAGES_NOTE);
+  return lines.join("\n");
 }
 
 /**
  * POST /api/compare/summary
  *
- * Body: { stats } — the deterministic analysis output (validated field by
- * field, 32 KB cap). Gemini only words the numbers; imagery and any user data
- * never leave the server. Missing GEMINI_API_KEY → 503 AI_DISABLED (the UI
- * hides the card from analyze's aiEnabled flag).
+ * Body: { analysisKey, language?, includeImages? }. The deterministic stats
+ * are looked up server-side by analysisKey — the client never sends numbers.
+ * Missing/evicted artifact → 404 ANALYSIS_EXPIRED (re-run the comparison).
+ * With includeImages the server attaches three ≤768 px JPEG previews (date A,
+ * date B, overlay-on-B); without, only the whitelisted statistics are sent.
+ * Gemini returns structured JSON (schema-enforced), validated with zod and
+ * cached by hash(analysisKey + language + includeImages).
  */
 export async function POST(request: Request): Promise<Response> {
   const originGuard = sameOriginGuard(request);
@@ -112,56 +72,67 @@ export async function POST(request: Request): Promise<Response> {
       throw apiError(503, "AI_DISABLED", "AI summary is not enabled on this deployment.");
     }
 
-    const { stats } = await readJsonBody(
-      request,
-      (raw) => summaryBodySchema.parse(raw),
-      SUMMARY_BODY_LIMIT,
-    );
+    const body = await readJsonBody(request, (raw) => summaryBodySchema.parse(raw), SUMMARY_BODY_LIMIT);
+
+    const artifact = compareResultCache.get(body.analysisKey);
+    if (!artifact) {
+      throw apiError(
+        404,
+        "ANALYSIS_EXPIRED",
+        "This comparison is no longer cached on the server. Run the analysis again to get a summary.",
+      );
+    }
 
     const model = env.GEMINI_MODEL || SUMMARY_MODEL_FALLBACK;
-    const prompt = buildSummaryPrompt(stats);
-    const cacheKey = summaryCacheKey(prompt, model);
+    const cacheKey = summaryCacheKey(body);
     const cached = aiSummaryCache.get(cacheKey);
     if (cached) {
-      return NextResponse.json({ text: cached.toString("utf8"), cached: true });
+      const summary = JSON.parse(cached.toString("utf8")) as SummaryOutput;
+      return NextResponse.json({ summary, cached: true, model, imageCount: 0 });
     }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": env.GEMINI_API_KEY,
-        },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SUMMARY_SYSTEM_PROMPT }] },
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 900, temperature: 0.3 },
-        }),
-        cache: "no-store",
-        signal: AbortSignal.timeout(20_000),
-      },
-    );
-
-    if (!response.ok) {
-      const detail = (await response.text().catch(() => "")).slice(0, 300);
-      console.warn(`[compare:summary] upstream ${response.status}: ${detail}`);
-      throw apiError(502, "AI_UPSTREAM_ERROR", "AI summary service returned an error. Try again shortly.");
+    let images: GeminiImagePart[] = [];
+    if (body.includeImages) {
+      const built = await buildSummaryImages({
+        geometry: artifact.geometry,
+        dateA: artifact.stats.metadata.dateA,
+        dateB: artifact.stats.metadata.dateB,
+        overlayPng: artifact.overlayPng,
+      });
+      images = built.map((image) => ({ mimeType: image.mimeType, data: image.data }));
     }
 
-    const json = (await response.json()) as GeminiResponse;
-    const text = (json.candidates ?? [])
-      .flatMap((candidate) => candidate.content?.parts ?? [])
-      .map((part) => part.text ?? "")
-      .join("")
-      .trim();
-    if (!text) {
-      throw apiError(502, "AI_UPSTREAM_ERROR", "AI summary service returned an empty response. Try again shortly.");
+    const options = {
+      apiKey: env.GEMINI_API_KEY,
+      model,
+      systemInstruction: SUMMARY_SYSTEM_PROMPT,
+      prompt: userPrompt(body, artifact.stats),
+      responseSchema: SUMMARY_RESPONSE_SCHEMA,
+      images,
+      imageLabels: IMAGE_LABELS,
+      timeoutMs: 45_000,
+    };
+
+    // Structured output is schema-guided, but validate + one fresh attempt
+    // guards against occasional malformed payloads.
+    let summary: SummaryOutput | null = null;
+    let lastValidationError: z.ZodError | null = null;
+    for (let attempt = 0; attempt < 2 && !summary; attempt++) {
+      const parsedJson = await generateStructuredJson(options);
+      const result = summaryOutputSchema.safeParse(parsedJson);
+      if (result.success) {
+        summary = result.data;
+      } else {
+        lastValidationError = result.error;
+      }
+    }
+    if (!summary) {
+      console.warn(`[compare:summary] invalid model output: ${lastValidationError?.issues.slice(0, 3).map((i) => i.message).join("; ")}`);
+      throw codedError(502, "AI_BAD_OUTPUT", "AI summary had an unexpected shape. Try again shortly.");
     }
 
-    aiSummaryCache.set(cacheKey, Buffer.from(text, "utf8"), 1_800);
-    return NextResponse.json({ text, cached: false });
+    aiSummaryCache.set(cacheKey, Buffer.from(JSON.stringify(summary), "utf8"), SUMMARY_TTL_SECONDS);
+    return NextResponse.json({ summary, cached: false, model, imageCount: images.length });
   } catch (error) {
     return errorResponse(error);
   }

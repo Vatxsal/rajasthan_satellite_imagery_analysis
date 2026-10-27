@@ -162,13 +162,15 @@ Compare two Sentinel-2 dates over the selected district / tehsil / ILR and see *
 
 ### 1. Using it
 
-1. Search an area as usual, then arm **Compare** in the scene-strip header.
+1. Search an area as usual, then arm **Compare** in the scene-strip header (the strip slims down to the A/B bar — expand it with the chevron to re-pick scenes).
 2. Assign **A** and **B** on two different scene cards (a duplicate date is rejected; the server normalises the pair so A is always the earlier date).
-3. **Analyze** streams progress (`Fetching date A → Fetching date B → Analyzing`, ~2 Process renders, `maxDuration` 60s) and opens the results drawer:
+3. **Analyze** streams progress (`Fetching date A → Fetching date B → Analyzing`, ~2 Process renders, `maxDuration` 60s). The left sidebar collapses so the map keeps ≥60% of the viewport, and the results panel opens:
+   - **Desktop (≥1024px):** a resizable right-hand panel (drag its left edge, or focus it and use ← / →). **Mobile:** a bottom sheet capped at 45vh.
    - **Swipe** — drag the divider (or arrow-key it): date A on the left, date B on the right, two synchronized MapLibre maps.
-   - **Change map** — classified overlay with legend, per-class visibility, opacity slider, **PNG** and **GeoTIFF** export (uint8, nodata 255 — opens in QGIS).
-   - **Statistics** — totals, class breakdown, per-tehsil table (district-level runs), applied thresholds, sensitivity / minimum-patch re-run, **CSV** export, optional AI summary.
-   - **Hotspots** — top-10 surviving patches; click one to zoom, export the list as **GeoJSON**.
+   - **Change map** — classified overlay with legend, per-class visibility, opacity slider, **Boost visibility** (display-only dilation + contrast outline so small patches stay visible), **Zoom to changes**, and **PNG** / **GeoTIFF** export (uint8, nodata 255 — opens in QGIS). After a run the map auto-frames the analysed bbox.
+   - **Statistics** — totals, class breakdown, per-tehsil table (district-level runs; click a row to highlight that tehsil on the map, optional alpha **choropleth** shading), applied thresholds, sensitivity / minimum-patch re-run, **CSV** export.
+   - **Hotspots** — top-10 surviving patches as numbered map polygons + markers; hovering the list highlights the patch on the map and vice versa, clicking zooms to the patch and opens a popup (copy-coords). Export the list as **GeoJSON** (patch polygons where traceable).
+   - **Summary** — an optional server-side Gemini briefing (English or हिन्दी) of the deterministic statistics, with three ≤768 px preview images (date A, date B, overlay-on-B) the server renders itself. You choose the language and whether to attach previews (privacy note in the tab); only the analysis cache key + whitelisted numbers ever leave the server for the text itself.
 
 Changing the area or running a new search clears the pair (the old polygons no longer apply). Results are LRU-cached (`IMAGERY_CACHE_TTL_SECONDS`) — re-opening a finished pair replays instantly without new renders.
 
@@ -180,9 +182,10 @@ Changing the area or running a new search clears the pair (the old polygons no l
 | **Mask** | `lib/analysis/mask.ts` | Polygon scanline mask + 1-px invalid-data dilation (snapshot-seeded, no cascade). |
 | **Classify** | `lib/analysis/classify.ts` | Index differencing with fixed precedence: water gain → water loss → vegetation loss → vegetation gain → bare/built increase. |
 | **Clean** | `lib/analysis/filter.ts` | 3×3 majority filter, then 8-connected minimum mapping unit (default 0.2 ha). |
-| **Stats** | `lib/analysis/stats.ts` | Per-class areas, valid %, per-tehsil zonal breakdown (district-level), top-10 patch hotspots. |
-| **Routes** | `app/api/compare/` | `POST analyze` streams NDJSON progress + result · `GET overlay` serves the classified PNG / GeoTIFF · `POST summary` renders the optional Gemini text (stats only — imagery never leaves the server). |
-| **UI** | `components/compare/` | `store/useCompareStore.ts` + `lib/compare/bridge.ts` drive the overlay and date-A tiles on the main map; the swipe view is a second non-interactive maplibre instance with one-way camera sync. |
+| **Stats** | `lib/analysis/stats.ts` | Per-class areas, valid %, per-tehsil zonal breakdown (district-level), top-10 patch hotspots with GeoJSON polygons + change bbox. |
+| **Summary** | `lib/server/gemini.ts` + `lib/server/summaryImages.ts` | Structured-output Gemini call (zod-validated, one retry on 429/5xx) with optional ≤768 px JPEG previews rendered from the tile cache — never raw pixels. |
+| **Routes** | `app/api/compare/` | `POST analyze` streams NDJSON progress + result · `GET overlay` serves the classified PNG / GeoTIFF · `POST summary` returns the structured Gemini summary. |
+| **UI** | `components/compare/` | `store/useCompareStore.ts` + `lib/compare/bridge.ts` drive the overlay, hotspot/tehsil/choropleth layers and date-A tiles on the main map; the swipe view is a second non-interactive maplibre instance with one-way camera sync. |
 
 Rate limits: `compare` bucket (default 6/min) for analyze, `ai` bucket (default 5/min) for the summary. CSP is unchanged — Gemini is called server-side.
 
@@ -207,7 +210,7 @@ Tunables live in **one file** — `lib/analysis/config.ts` — and every run ech
 | `COMPARE_MAX_PX` | server | no | `1500` | Long-side cap of the analysis grid (smaller = faster, coarser) |
 | `COMPARE_RATE_LIMIT_PER_MIN` | server | no | `6` | Per-IP cap for `POST /api/compare/analyze` |
 | `AI_SUMMARY_RATE_LIMIT_PER_MIN` | server | no | `5` | Per-IP cap for `POST /api/compare/summary` |
-| `GEMINI_API_KEY` | 🔒 **secret** | no | unset | Enables the plain-language summary (server-side only; without it the UI hides the card) |
+| `GEMINI_API_KEY` | 🔒 **secret** | no | unset | Enables the Summary tab (server-side only; without it the tab shows a setup hint) |
 | `GEMINI_MODEL` | server | no | `gemini-3.8-flash` | Gemini model used for the summary |
 
 ---

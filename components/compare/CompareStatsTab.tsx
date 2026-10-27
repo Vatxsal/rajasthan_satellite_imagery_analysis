@@ -1,11 +1,11 @@
 "use client";
 
-import { AlertTriangle, FileJson, Info, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, FileJson, Info, Loader2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
 import Slider from "@/components/ui/Slider";
 import { cn } from "@/components/ui/cn";
-import { focusHotspot } from "@/lib/compare/bridge";
+import { focusHotspot, focusTehsil } from "@/lib/compare/bridge";
 import { downloadHotspotsGeoJson, downloadStatsCsv } from "@/lib/compare/export";
 import type { CompareStats } from "@/lib/analysis/types";
 import type { Sensitivity } from "@/lib/analysis/config";
@@ -53,10 +53,13 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const running = useCompareStore((s) => s.running);
   const stage = useCompareStore((s) => s.stage);
   const run = useCompareStore((s) => s.run);
-  const aiStatus = useCompareStore((s) => s.aiStatus);
-  const aiText = useCompareStore((s) => s.aiText);
-  const aiError = useCompareStore((s) => s.aiError);
-  const requestSummary = useCompareStore((s) => s.requestSummary);
+  const choropleth = useCompareStore((s) => s.choropleth);
+  const toggleChoropleth = useCompareStore((s) => s.toggleChoropleth);
+  const tehsilHighlight = useCompareStore((s) => s.tehsilHighlight);
+  const setTehsilHighlight = useCompareStore((s) => s.setTehsilHighlight);
+  const hoveredHotspot = useCompareStore((s) => s.hoveredHotspot);
+  const setHoveredHotspot = useCompareStore((s) => s.setHoveredHotspot);
+  const selectedHotspot = useCompareStore((s) => s.selectedHotspot);
 
   if (!result) return null;
   const stats: CompareStats = result.stats;
@@ -91,15 +94,25 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
         <ol className="flex flex-col gap-1">
           {stats.hotspots.map((hotspot, index) => {
             const color = classColor(hotspot.classCode);
+            const rank = index + 1;
+            const selected = selectedHotspot === rank;
             return (
               <li key={`${hotspot.centroid[0]}-${hotspot.centroid[1]}-${index}`}>
                 <button
                   type="button"
-                  onClick={() => focusHotspot(hotspot.bbox)}
-                  title="Zoom to this patch"
-                  className="flex w-full items-center gap-2 rounded border border-border bg-surface px-2 py-1.5 text-left transition-colors duration-150 hover:bg-surface-2"
+                  aria-pressed={selected}
+                  onMouseEnter={() => setHoveredHotspot(rank)}
+                  onMouseLeave={() => setHoveredHotspot(null)}
+                  onFocus={() => setHoveredHotspot(rank)}
+                  onBlur={() => setHoveredHotspot(null)}
+                  onClick={() => focusHotspot(rank, hotspot.bbox)}
+                  title="Zoom to this patch and open its map popup"
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded border bg-surface px-2 py-1.5 text-left transition-colors duration-150 hover:bg-surface-2",
+                    selected ? "border-accent" : "border-border",
+                  )}
                 >
-                  <span className="mono-nums w-4 shrink-0 text-[11px] text-muted">{index + 1}</span>
+                  <span className="mono-nums w-4 shrink-0 text-[11px] text-muted">{rank}</span>
                   <span
                     className="h-3 w-3 shrink-0 rounded-sm border border-border"
                     style={{ background: rgb(color) }}
@@ -180,41 +193,83 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
 
       {/* ---------------------------------------------------- per-tehsil */}
       {stats.tehsils && stats.tehsils.length > 0 && (
-        <div className="overflow-x-auto rounded border border-border">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border bg-surface-2 text-left text-[11px] text-muted">
-                <th className="px-2 py-1.5 font-medium">Tehsil</th>
-                <th className="px-2 py-1.5 text-right font-medium">Changed</th>
-                <th className="px-2 py-1.5 font-medium">Dominant change</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stats.tehsils.map((row) => {
-                let bestCode = -1;
-                let bestPixels = 0;
-                for (const key of Object.keys(row.pixelsByClass)) {
-                  const code = Number(key);
-                  const pixels = row.pixelsByClass[code] ?? 0;
-                  if (code > 0 && code < 6 && pixels > bestPixels) {
-                    bestPixels = pixels;
-                    bestCode = code;
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-muted">
+              Click a tehsil to highlight it on the map.
+            </p>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={choropleth}
+              onClick={toggleChoropleth}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] transition-colors duration-150",
+                choropleth ? "bg-surface-2 text-text" : "bg-surface text-muted hover:text-text",
+              )}
+              title="Shade every tehsil by changed area (alpha ∝ √changed)."
+            >
+              <span
+                aria-hidden
+                className="h-2.5 w-2.5 rounded-sm border border-border"
+                style={{ background: "rgba(37, 99, 235, 0.45)" }}
+              />
+              Tehsil shading
+            </button>
+          </div>
+          <div className="overflow-x-auto rounded border border-border">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-surface-2 text-left text-[11px] text-muted">
+                  <th className="px-2 py-1.5 font-medium">Tehsil</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Changed</th>
+                  <th className="px-2 py-1.5 font-medium">Dominant change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.tehsils.map((row) => {
+                  let bestCode = -1;
+                  let bestPixels = 0;
+                  for (const key of Object.keys(row.pixelsByClass)) {
+                    const code = Number(key);
+                    const pixels = row.pixelsByClass[code] ?? 0;
+                    if (code > 0 && code < 6 && pixels > bestPixels) {
+                      bestPixels = pixels;
+                      bestCode = code;
+                    }
                   }
-                }
-                const dominant =
-                  bestCode >= 0 && bestPixels > 0
-                    ? stats.classes.find((cls) => cls.code === bestCode)?.label ?? "—"
-                    : "—";
-                return (
-                  <tr key={row.tehsilId} className="border-b border-border last:border-0">
-                    <td className="px-2 py-1.5 text-text">{row.name}</td>
-                    <td className="mono-nums px-2 py-1.5 text-right">{ha(row.changedHa)}</td>
-                    <td className="px-2 py-1.5 text-muted">{dominant}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                  const dominant =
+                    bestCode >= 0 && bestPixels > 0
+                      ? stats.classes.find((cls) => cls.code === bestCode)?.label ?? "—"
+                      : "—";
+                  const highlighted = tehsilHighlight?.id === row.tehsilId;
+                  return (
+                    <tr
+                      key={row.tehsilId}
+                      onClick={() => {
+                        if (highlighted) {
+                          setTehsilHighlight(null);
+                          return;
+                        }
+                        setTehsilHighlight({ id: row.tehsilId, name: row.name });
+                        focusTehsil(row.tehsilId);
+                      }}
+                      className={cn(
+                        "cursor-pointer border-b border-border transition-colors duration-150 last:border-0 hover:bg-surface-2",
+                        highlighted && "bg-accent-soft",
+                      )}
+                      aria-selected={highlighted}
+                      title={highlighted ? "Clear highlight" : "Highlight this tehsil on the map"}
+                    >
+                      <td className="px-2 py-1.5 text-text">{row.name}</td>
+                      <td className="mono-nums px-2 py-1.5 text-right">{ha(row.changedHa)}</td>
+                      <td className="px-2 py-1.5 text-muted">{dominant}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -314,35 +369,9 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
         </Button>
       </div>
 
-      {/* ---------------------------------------------------- AI summary */}
-      {result.aiEnabled && (
-        <section className="rounded border border-border bg-surface-2 p-2.5">
-          <p className="mb-2 text-xs font-medium text-text">Plain-language summary</p>
-          {aiStatus === "idle" && (
-            <Button variant="primary" size="sm" onClick={() => void requestSummary()}>
-              <Sparkles size={13} />
-              Explain these numbers
-            </Button>
-          )}
-          {aiStatus === "loading" && (
-            <p className="flex items-center gap-1.5 text-xs text-muted">
-              <Loader2 size={13} className="animate-spin" aria-hidden />
-              Writing the summary…
-            </p>
-          )}
-          {aiStatus === "error" && (
-            <div className="flex items-start justify-between gap-2">
-              <p className="text-xs text-danger">{aiError}</p>
-              <Button size="sm" onClick={() => void requestSummary()}>
-                Retry
-              </Button>
-            </div>
-          )}
-          {aiStatus === "done" && aiText && (
-            <p className={cn("whitespace-pre-wrap text-xs leading-relaxed text-text")}>{aiText}</p>
-          )}
-        </section>
-      )}
+      <p className="text-[10px] leading-relaxed text-muted">
+        Plain-language explanations moved to the <span className="text-text">Summary</span> tab.
+      </p>
     </div>
   );
 }

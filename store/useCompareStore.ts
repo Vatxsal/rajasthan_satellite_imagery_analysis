@@ -1,14 +1,14 @@
 import { create } from "zustand";
 import type { Sensitivity } from "@/lib/analysis/config";
-import type { CompareStats } from "@/lib/analysis/types";
+import type { CompareStats, SummaryData, SummaryLanguage } from "@/lib/analysis/types";
 import { bboxFromGeometry } from "@/lib/cdse/geometry";
 import { streamAnalyze } from "@/lib/compare/run";
 import { selectActiveSelection, useAppStore } from "@/store/useAppStore";
 
-export type CompareTab = "swipe" | "change-map" | "statistics" | "hotspots";
+export type CompareTab = "swipe" | "change-map" | "statistics" | "hotspots" | "summary";
 export type CompareStage = "fetch-a" | "fetch-b" | "analyze";
 export type CompareSlot = "dateA" | "dateB";
-export type CompareAiStatus = "idle" | "loading" | "done" | "error";
+export type CompareSummaryStatus = "idle" | "loading" | "done" | "error";
 
 /** Progress frames → human labels for the compare bar. */
 export const COMPARE_STAGE_LABELS: Record<CompareStage, string> = {
@@ -26,6 +26,10 @@ export interface CompareResult {
   /** Analysis-grid bbox (geometry bbox, same as the server) for the image source. */
   bbox: [number, number, number, number];
 }
+
+/** Side panel width bounds (desktop compare results panel). */
+export const PANEL_WIDTH_MIN = 340;
+export const PANEL_WIDTH_MAX = 560;
 
 interface CompareState {
   /** Scene strip "Compare" toggle — A/B assignment only works while armed. */
@@ -46,9 +50,26 @@ interface CompareState {
   minPatchHa: number;
   /** Swipe divider position, percent from the left edge (0-100). */
   divider: number;
-  aiStatus: CompareAiStatus;
-  aiText: string | null;
-  aiError: string | null;
+  /** Display-only dilation + outline so small changes stay visible (default on). */
+  boostVisibility: boolean;
+  /** Slim compare strip: scene cards hidden until expanded. */
+  stripExpanded: boolean;
+  /** Desktop results panel width in px. */
+  panelWidth: number;
+  /** Per-tehsil shading layer (district-level results only). */
+  choropleth: boolean;
+  /** Hotspot rank hovered in the list or on the map (1-based). */
+  hoveredHotspot: number | null;
+  /** Hotspot rank selected (popup open, fly-to done). */
+  selectedHotspot: number | null;
+  /** Tehsil highlighted because its stats row was clicked. */
+  tehsilHighlight: { id: string; name: string } | null;
+  /** Structured AI summary (server-side Gemini). */
+  summaryLanguage: SummaryLanguage;
+  summaryIncludeImages: boolean;
+  summaryStatus: CompareSummaryStatus;
+  summaryData: SummaryData | null;
+  summaryError: string | null;
 
   toggleCompareMode: () => void;
   toggleSlot: (date: string, slot: CompareSlot) => void;
@@ -61,7 +82,16 @@ interface CompareState {
   setSensitivity: (value: Sensitivity) => void;
   setMinPatchHa: (value: number) => void;
   setDivider: (value: number) => void;
-  requestSummary: () => Promise<void>;
+  setBoostVisibility: (value: boolean) => void;
+  setStripExpanded: (value: boolean) => void;
+  setPanelWidth: (value: number) => void;
+  toggleChoropleth: () => void;
+  setHoveredHotspot: (rank: number | null) => void;
+  setSelectedHotspot: (rank: number | null) => void;
+  setTehsilHighlight: (value: { id: string; name: string } | null) => void;
+  setSummaryLanguage: (value: SummaryLanguage) => void;
+  setSummaryIncludeImages: (value: boolean) => void;
+  fetchSummary: () => Promise<void>;
 }
 
 /** Active run — kept out of the store state (AbortController is not reactive). */
@@ -80,6 +110,27 @@ function resetRunState() {
   return runSeq;
 }
 
+/** Result-bound display + summary state (kept consistent on every clear path). */
+const RESULT_BOUND_RESET = {
+  result: null as CompareResult | null,
+  drawerOpen: false,
+  summaryStatus: "idle" as CompareSummaryStatus,
+  summaryData: null as SummaryData | null,
+  summaryError: null as string | null,
+  choropleth: false,
+  hoveredHotspot: null as number | null,
+  selectedHotspot: null as number | null,
+  tehsilHighlight: null as { id: string; name: string } | null,
+};
+
+function summaryIdle() {
+  return {
+    summaryStatus: "idle" as CompareSummaryStatus,
+    summaryData: null as SummaryData | null,
+    summaryError: null as string | null,
+  };
+}
+
 export const useCompareStore = create<CompareState>((set, get) => ({
   compareMode: false,
   dateA: null,
@@ -95,9 +146,18 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   sensitivity: "medium",
   minPatchHa: 0.2,
   divider: 50,
-  aiStatus: "idle",
-  aiText: null,
-  aiError: null,
+  boostVisibility: true,
+  stripExpanded: false,
+  panelWidth: 400,
+  choropleth: false,
+  hoveredHotspot: null,
+  selectedHotspot: null,
+  tehsilHighlight: null,
+  summaryLanguage: "en",
+  summaryIncludeImages: true,
+  summaryStatus: "idle",
+  summaryData: null,
+  summaryError: null,
 
   toggleCompareMode: () => {
     const next = !get().compareMode;
@@ -111,15 +171,13 @@ export const useCompareStore = create<CompareState>((set, get) => ({
         running: false,
         stage: null,
         error: null,
-        result: null,
-        drawerOpen: false,
-        aiStatus: "idle",
-        aiText: null,
-        aiError: null,
+        ...RESULT_BOUND_RESET,
+        stripExpanded: false,
+        ...summaryIdle(),
       });
       return;
     }
-    set({ compareMode: true });
+    set({ compareMode: true, stripExpanded: false });
   },
 
   toggleSlot: (date, slot) => {
@@ -142,7 +200,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   clearPair: () => {
     if (get().running) return;
     resetRunState();
-    set({ dateA: null, dateB: null, result: null, error: null, drawerOpen: false, aiStatus: "idle", aiText: null, aiError: null });
+    set({ dateA: null, dateB: null, error: null, ...RESULT_BOUND_RESET, ...summaryIdle() });
   },
 
   run: async () => {
@@ -165,7 +223,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       return;
     }
 
-    set({ running: true, stage: "fetch-a", error: null, aiStatus: "idle", aiText: null, aiError: null });
+    set({ running: true, stage: "fetch-a", error: null, ...summaryIdle() });
 
     try {
       const result = await streamAnalyze(
@@ -193,10 +251,14 @@ export const useCompareStore = create<CompareState>((set, get) => ({
         result: { ...result, bbox },
         drawerOpen: true,
         tab: "change-map",
-        aiStatus: "idle",
-        aiText: null,
-        aiError: null,
+        choropleth: false,
+        hoveredHotspot: null,
+        selectedHotspot: null,
+        tehsilHighlight: null,
+        ...summaryIdle(),
       });
+      // Free map space on desktop: results now live in the right-hand panel.
+      useAppStore.getState().setSidebarCollapsed(true);
     } catch (error) {
       if (controller.signal.aborted || seq !== runSeq) {
         // Cancelled (area/scenes changed or mode toggled) — stay quiet.
@@ -223,26 +285,43 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   setSensitivity: (value) => set({ sensitivity: value }),
   setMinPatchHa: (value) => set({ minPatchHa: Math.max(0.01, Math.min(100, value)) }),
   setDivider: (value) => set({ divider: Math.max(0, Math.min(100, value)) }),
+  setBoostVisibility: (value) => set({ boostVisibility: value }),
+  setStripExpanded: (value) => set({ stripExpanded: value }),
+  setPanelWidth: (value) =>
+    set({ panelWidth: Math.max(PANEL_WIDTH_MIN, Math.min(PANEL_WIDTH_MAX, Math.round(value))) }),
+  toggleChoropleth: () => set((s) => ({ choropleth: !s.choropleth })),
+  setHoveredHotspot: (rank) => set({ hoveredHotspot: rank }),
+  setSelectedHotspot: (rank) => set({ selectedHotspot: rank }),
+  setTehsilHighlight: (value) => set({ tehsilHighlight: value }),
+  setSummaryLanguage: (value) => set({ summaryLanguage: value }),
+  setSummaryIncludeImages: (value) => set({ summaryIncludeImages: value }),
 
-  requestSummary: async () => {
-    const { result, aiStatus } = get();
-    if (!result || aiStatus === "loading") return;
-    set({ aiStatus: "loading", aiError: null });
+  fetchSummary: async () => {
+    const { result, summaryStatus, summaryLanguage, summaryIncludeImages } = get();
+    if (!result || summaryStatus === "loading") return;
+    set({ summaryStatus: "loading", summaryError: null });
     try {
       const response = await fetch("/api/compare/summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stats: result.stats }),
+        body: JSON.stringify({
+          analysisKey: result.key,
+          language: summaryLanguage,
+          includeImages: summaryIncludeImages,
+        }),
       });
-      const body = (await response.json().catch(() => null)) as { text?: string; message?: string } | null;
-      if (!response.ok || !body?.text) {
+      const body = (await response.json().catch(() => null)) as {
+        summary?: SummaryData;
+        message?: string;
+      } | null;
+      if (!response.ok || !body?.summary) {
         throw new Error(body?.message ?? "AI summary is unavailable right now.");
       }
-      set({ aiStatus: "done", aiText: body.text });
+      set({ summaryStatus: "done", summaryData: body.summary });
     } catch (error) {
       set({
-        aiStatus: "error",
-        aiError: error instanceof Error && error.message ? error.message : "AI summary failed.",
+        summaryStatus: "error",
+        summaryError: error instanceof Error && error.message ? error.message : "AI summary failed.",
       });
     }
   },
@@ -270,12 +349,9 @@ useAppStore.subscribe((prev, next) => {
     useCompareStore.setState({
       dateA: null,
       dateB: null,
-      result: null,
       error: null,
-      drawerOpen: false,
-      aiStatus: "idle",
-      aiText: null,
-      aiError: null,
+      ...RESULT_BOUND_RESET,
+      ...summaryIdle(),
     });
   }
 });

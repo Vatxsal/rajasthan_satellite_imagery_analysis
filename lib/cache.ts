@@ -64,6 +64,8 @@ export interface CompareArtifactEntry {
   width: number;
   height: number;
   bbox: [number, number, number, number];
+  /** Clip geometry of the analysed area — lets the summary route re-render previews. */
+  geometry: import("@/lib/cdse/geometry").ClipGeometry;
 }
 
 /** Generic TTL + LRU eviction for non-binary entries. */
@@ -168,9 +170,13 @@ export function compareCacheKey(input: {
   return createHash("sha256").update(payload).digest("hex");
 }
 
-/** Cache key for an AI summary of a given prompt (stats payload + model). */
-export function summaryCacheKey(prompt: string, model: string): string {
-  const payload = `${COMPARE_VERSION}|${model}|${prompt}`;
+/** Cache key for one AI summary request (analysis × language × imagery choice). */
+export function summaryCacheKey(input: {
+  analysisKey: string;
+  language: "en" | "hi";
+  includeImages: boolean;
+}): string {
+  const payload = `${input.analysisKey}|${input.language}|${input.includeImages ? 1 : 0}`;
   return createHash("sha256").update(payload).digest("hex");
 }
 

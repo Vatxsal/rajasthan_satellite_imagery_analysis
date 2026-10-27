@@ -24,9 +24,12 @@ export default function Page() {
           <MapCanvas />
           <CompareMapController />
           {isDesktop && <SceneStrip />}
-          <CompareDrawer />
         </main>
+        {/* Desktop: resizable right-hand results panel (map keeps the majority of the viewport). */}
+        {isDesktop && <CompareDrawer />}
       </div>
+      {/* Mobile: fixed bottom sheet above the map. */}
+      {!isDesktop && <CompareDrawer />}
       <ToastStack />
       <DownloadDialog />
     </div>
