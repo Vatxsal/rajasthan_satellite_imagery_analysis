@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { useAppStore } from "@/store/useAppStore";
+import { useCompareStore } from "@/store/useCompareStore";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/Menu";
 import { cn } from "@/components/ui/cn";
+import CompareBar, { CompareToggle } from "@/components/compare/CompareBar";
+import CompareSceneWrapper from "@/components/compare/CompareSceneWrapper";
 import SceneCard from "./SceneCard";
 import SceneSkeleton from "./SceneSkeleton";
 
@@ -27,6 +30,7 @@ export default function SceneStrip({ variant = "docked" }: SceneStripProps) {
   const stripOpen = useAppStore((s) => s.resultsOpen);
   const setResultsOpen = useAppStore((s) => s.setResultsOpen);
   const setStripHeightPx = useAppStore((s) => s.setStripHeightPx);
+  const compareMode = useCompareStore((s) => s.compareMode);
   const [sort, setSort] = useState<SortMode>("cloud");
   const sectionRef = useRef<HTMLElement | null>(null);
 
@@ -91,6 +95,7 @@ export default function SceneStrip({ variant = "docked" }: SceneStripProps) {
         {SORT_LABELS[sort]}
       </p>
       <div className="flex shrink-0 items-center gap-1">
+        <CompareToggle />
         <Menu>
           <MenuTrigger asChild>
             <button
@@ -152,12 +157,24 @@ export default function SceneStrip({ variant = "docked" }: SceneStripProps) {
         <p className="py-4 text-sm text-danger">{searchError}</p>
       )}
 
-      {!searching && sorted.map((scene) => <SceneCard key={scene.id} scene={scene} />)}
+      {!searching && sorted.map((scene) =>
+        compareMode ? (
+          <CompareSceneWrapper key={scene.id} scene={scene} />
+        ) : (
+          <SceneCard key={scene.id} scene={scene} />
+        ),
+      )}
     </div>
   );
 
   if (variant === "inline") {
-    return <div className="bg-surface">{header}{body}</div>;
+    return (
+      <div className="bg-surface">
+        {header}
+        <CompareBar />
+        {body}
+      </div>
+    );
   }
 
   return (
@@ -167,6 +184,7 @@ export default function SceneStrip({ variant = "docked" }: SceneStripProps) {
       className="absolute inset-x-0 bottom-0 z-30 flex max-h-[50vh] flex-col border-t border-border bg-surface"
     >
       {header}
+      <CompareBar />
       {body}
     </section>
   );

@@ -20,6 +20,7 @@ import {
   bboxToPolygon,
 } from "@/lib/map/constants";
 import { buildTileUrlTemplate } from "@/lib/map/tiles";
+import { addCompareLayers, registerMainMap, unregisterMainMap } from "@/lib/compare/bridge";
 import {
   EMPTY_FEATURE_COLLECTION,
   bboxToBounds,
@@ -431,6 +432,9 @@ function addAppLayers(map: MapLibreMap): void {
   footprintSource?.setData(
     footprintScene ? featureCollection([sceneToFeature(footprintScene)]) : EMPTY_FEATURE_COLLECTION,
   );
+
+  // Compare mode: classified overlay + date-A tiles (restores after style reloads).
+  addCompareLayers(map);
 }
 
 /** Re-applies theme-dependent paint (accent + boundary line colours/casings). */
@@ -687,6 +691,7 @@ export default function MapCanvas() {
       map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-left");
       map.addControl(new maplibregl.ScaleControl({ maxWidth: 100, unit: "metric" }), "bottom-left");
       mapRef.current = map;
+      registerMainMap(map);
 
       const container = containerRef.current;
       resizeObserver = new ResizeObserver(() => map?.resize());
@@ -721,6 +726,7 @@ export default function MapCanvas() {
         window.clearTimeout(mapRuntime.shimmerTimer);
         mapRuntime.shimmerTimer = null;
       }
+      if (map) unregisterMainMap(map);
       map?.remove();
       mapRef.current = null;
       setReady(false);
