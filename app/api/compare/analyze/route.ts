@@ -198,6 +198,7 @@ export async function POST(request: Request): Promise<Response> {
             width: artifact.width,
             height: artifact.height,
             bbox: artifact.bbox,
+            geometry: area.geometry,
           };
           compareResultCache.set(key, entry, env.IMAGERY_CACHE_TTL_SECONDS);
 

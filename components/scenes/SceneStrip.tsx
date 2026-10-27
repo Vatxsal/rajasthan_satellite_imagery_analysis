@@ -31,6 +31,7 @@ export default function SceneStrip({ variant = "docked" }: SceneStripProps) {
   const setResultsOpen = useAppStore((s) => s.setResultsOpen);
   const setStripHeightPx = useAppStore((s) => s.setStripHeightPx);
   const compareMode = useCompareStore((s) => s.compareMode);
+  const stripExpanded = useCompareStore((s) => s.stripExpanded);
   const [sort, setSort] = useState<SortMode>("cloud");
   const sectionRef = useRef<HTMLElement | null>(null);
 
@@ -132,7 +133,10 @@ export default function SceneStrip({ variant = "docked" }: SceneStripProps) {
     </div>
   );
 
-  const body = (
+  // Slim strip in compare mode: cards hidden until the user expands them.
+  const showBody = !compareMode || stripExpanded;
+
+  const body = showBody ? (
     <div
       className={cn(
         "flex gap-2 overflow-x-auto px-3 pb-2",
@@ -165,7 +169,7 @@ export default function SceneStrip({ variant = "docked" }: SceneStripProps) {
         ),
       )}
     </div>
-  );
+  ) : null;
 
   if (variant === "inline") {
     return (

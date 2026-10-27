@@ -1,27 +1,79 @@
 /**
  * Gemini prompt plumbing for the optional AI summary.
  * STRICT boundary: only whitelisted, already-computed numbers leave the app
- * (never imagery, never raw pixels, never user data). The model EXPLAINS the
- * deterministic statistics — it never computes or invents them.
+ * (never raw pixels — the optional preview images are fixed ≤768 px JPEGs the
+ * server renders itself; never user data). The model EXPLAINS the deterministic
+ * statistics — it never computes or invents them.
  */
+import { z } from "zod";
 import { classLabel } from "./config";
-import type { CompareStats } from "./types";
+import type { CompareStats, SummaryLanguage } from "./types";
 
 export const SUMMARY_MODEL_FALLBACK = "gemini-3.8-flash";
 
+export type { SummaryLanguage };
+
+/** Structured output contract (UI + tests use the zod shape, Gemini the JSON schema). */
 export const SUMMARY_SYSTEM_PROMPT = `You are a geospatial analyst writing a short plain-language briefing about detected land-surface changes between two Sentinel-2 scenes over Rajasthan, India.
 
-You receive ONLY pre-computed statistics from a deterministic raster analysis. Your job is to explain those numbers clearly - never compute, estimate, or invent additional figures, places, or causes not present in the input.
+You receive ONLY pre-computed statistics from a deterministic raster analysis, and optionally three small preview images (date A true colour, date B true colour, and the classified change overlay). Explain the numbers clearly - never compute, estimate, or invent additional figures, places, or causes not present in the input.
 
-Rules:
-- 180 words maximum, plain language a general reader understands.
-- Lead with what changed most, then where (name tehsils and hotspots from the input).
-- Quote the dates exactly as given; mention the valid-data percentage when it is below 70 and note that clouds or partial coverage reduce confidence.
-- Use only the exact class labels and areas provided (hectares). Do not convert units or round beyond the given values.
-- If the input says change is negligible, say plainly that no significant change was detected at the current sensitivity settings, and mention the thresholds that were applied.
-- Neutral factual tone: no alarm, no praise, no policy advice, no causes you were not given.
-- Plain short lines are fine; no markdown tables, no code, no emoji.
-- End with exactly this sentence on its own line: AI-generated summary - verify against the maps.`;
+Output rules:
+- Respond with a single JSON object matching the requested schema and nothing else.
+- overview: 60-90 words, plain language a general reader understands. Lead with what changed most, then where (name tehsils and hotspots from the input). Quote the dates exactly as given. If the input says change is negligible, say plainly that no significant change was detected at the current sensitivity settings and mention the thresholds that were applied. End overview with exactly this sentence: "AI-generated summary - verify against the maps."
+- keyChanges: 2-5 short bullet strings using only the exact class labels and areas (hectares) provided. Do not convert units or round beyond the given values.
+- whereChangesOccurred: 2-5 short bullet strings naming tehsils/hotspots from the input; if none were given, state where change was detected in general terms from the provided bbox context only.
+- visualObservations: 2-5 short bullet strings based ONLY on the supplied images (texture, colour contrasts, patch shapes, clouds). If no images were supplied, return exactly one item: "No imagery was supplied for this request."
+- reliabilityAndCaveats: 1-4 short bullet strings; mention valid-data percentage when it is below 70 and that clouds or partial coverage reduce confidence; always note that thresholds and minimum patch size filter what is shown.
+- suggestedNextChecks: 1-4 short bullet strings of practical follow-ups (re-check with another date pair, raise/lower sensitivity, open the hotspot in a GIS, compare with field reports).
+- Every list must contain at least one item. Neutral factual tone: no alarm, no praise, no policy advice, no causes you were not given. No markdown, no code, no emoji in the string values.
+
+Language:
+- When the request says language=en, write all string values in English.
+- When the request says language=hi, write all string values in Hindi using the Devanagari script (keep class labels, dates and numbers exactly as provided).`;
+
+/** Gemini REST responseSchema (OpenAPI-style subset) mirroring summaryOutputSchema. */
+export const SUMMARY_RESPONSE_SCHEMA: Record<string, unknown> = {
+  type: "OBJECT",
+  properties: {
+    overview: { type: "STRING" },
+    keyChanges: { type: "ARRAY", items: { type: "STRING" } },
+    whereChangesOccurred: { type: "ARRAY", items: { type: "STRING" } },
+    visualObservations: { type: "ARRAY", items: { type: "STRING" } },
+    reliabilityAndCaveats: { type: "ARRAY", items: { type: "STRING" } },
+    suggestedNextChecks: { type: "ARRAY", items: { type: "STRING" } },
+  },
+  required: [
+    "overview",
+    "keyChanges",
+    "whereChangesOccurred",
+    "visualObservations",
+    "reliabilityAndCaveats",
+    "suggestedNextChecks",
+  ],
+  propertyOrdering: [
+    "overview",
+    "keyChanges",
+    "whereChangesOccurred",
+    "visualObservations",
+    "reliabilityAndCaveats",
+    "suggestedNextChecks",
+  ],
+};
+
+const stringList = z.array(z.string().min(1).max(500)).min(1).max(8);
+
+/** Validated shape of the summary the UI receives. */
+export const summaryOutputSchema = z.object({
+  overview: z.string().min(1).max(4000),
+  keyChanges: stringList,
+  whereChangesOccurred: stringList,
+  visualObservations: stringList,
+  reliabilityAndCaveats: stringList,
+  suggestedNextChecks: stringList,
+});
+
+export type SummaryOutput = z.infer<typeof summaryOutputSchema>;
 
 /** Whitelisted, size-bounded prompt for one summary request. */
 export function buildSummaryPrompt(stats: CompareStats): string {
@@ -78,3 +130,12 @@ export function buildSummaryPrompt(stats: CompareStats): string {
 
   return lines.join("\n");
 }
+
+/** Language directive prepended to the user turn (keeps the stats text verbatim). */
+export function summaryLanguageLine(language: SummaryLanguage): string {
+  return `language=${language}`;
+}
+
+/** Note appended to the prompt when the three preview images are attached. */
+export const SUMMARY_IMAGES_NOTE =
+  "Attached images, in order: (1) date A true colour, (2) date B true colour, (3) classified change overlay on date B. Base your visualObservations only on them.";

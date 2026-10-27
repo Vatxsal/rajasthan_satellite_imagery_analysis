@@ -111,7 +111,7 @@ export function downloadStatsCsv(stats: CompareStats): void {
   saveText(buildStatsCsv(stats), `change_${dateA}_${dateB}_stats.csv`, "text/csv;charset=utf-8");
 }
 
-/** Top-10 hotspots as a GeoJSON FeatureCollection (point + bbox props). */
+/** Top-10 hotspots as a GeoJSON FeatureCollection (patch polygon, or centroid point when untraceable). */
 export function buildHotspotsGeoJson(stats: CompareStats): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = stats.hotspots.map((hotspot: Hotspot, index) => ({
     type: "Feature",
@@ -123,7 +123,8 @@ export function buildHotspotsGeoJson(stats: CompareStats): GeoJSON.FeatureCollec
       tehsilName: hotspot.tehsilName,
       bbox: hotspot.bbox.join(" "),
     },
-    geometry: { type: "Point", coordinates: hotspot.centroid },
+    geometry:
+      hotspot.polygon ?? ({ type: "Point", coordinates: hotspot.centroid } as GeoJSON.Geometry),
   }));
   return { type: "FeatureCollection", features };
 }

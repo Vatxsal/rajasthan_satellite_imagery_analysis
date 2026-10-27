@@ -4,11 +4,12 @@ import { useEffect, useRef } from "react";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import { MoveHorizontal } from "lucide-react";
 import { getMainMap, setOverlayImage } from "@/lib/compare/bridge";
-import { allClassesVisible, buildOverlayBlobUrl, loadOverlayImageData } from "@/lib/compare/recolor";
+import { buildOverlayBlobUrl, loadOverlayImageData, needsRecolor } from "@/lib/compare/recolor";
 import { POSITRON_STYLE_URL } from "@/lib/map/constants";
 import { buildTileUrlTemplate } from "@/lib/map/tiles";
 import { selectActiveSelection, useAppStore } from "@/store/useAppStore";
 import { useCompareStore } from "@/store/useCompareStore";
+import { useTheme } from "@/store/useTheme";
 import { formatShortDate } from "./CompareBar";
 
 /**
@@ -23,6 +24,8 @@ export default function CompareMapController() {
   const divider = useCompareStore((s) => s.divider);
   const setDivider = useCompareStore((s) => s.setDivider);
   const classVisible = useCompareStore((s) => s.classVisible);
+  const boost = useCompareStore((s) => s.boostVisibility);
+  const theme = useTheme((s) => s.theme);
   const dateA = useCompareStore((s) => s.dateA);
   const dateB = useCompareStore((s) => s.dateB);
 
@@ -45,7 +48,7 @@ export default function CompareMapController() {
       }
     };
 
-    if (allClassesVisible(classVisible)) {
+    if (!needsRecolor(classVisible, { boost })) {
       apply(null);
       return;
     }
@@ -54,7 +57,7 @@ export default function CompareMapController() {
     void (async () => {
       try {
         const base = await loadOverlayImageData(result.key, result.overlayUrl);
-        const url = await buildOverlayBlobUrl(base, classVisible);
+        const url = await buildOverlayBlobUrl(base, classVisible, { boost, theme });
         if (cancelled) {
           if (url) URL.revokeObjectURL(url);
           return;
@@ -67,7 +70,7 @@ export default function CompareMapController() {
     return () => {
       cancelled = true;
     };
-  }, [result, classVisible]);
+  }, [result, classVisible, boost, theme]);
 
   useEffect(
     () => () => {

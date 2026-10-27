@@ -1,6 +1,6 @@
 "use client";
 
-import { GitCompare, Loader2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, GitCompare, Loader2, X } from "lucide-react";
 import { cn } from "@/components/ui/cn";
 import Button from "@/components/ui/Button";
 import { COMPARE_STAGE_LABELS, useCompareStore } from "@/store/useCompareStore";
@@ -72,6 +72,8 @@ export default function CompareBar() {
   const error = useCompareStore((s) => s.error);
   const result = useCompareStore((s) => s.result);
   const drawerOpen = useCompareStore((s) => s.drawerOpen);
+  const stripExpanded = useCompareStore((s) => s.stripExpanded);
+  const setStripExpanded = useCompareStore((s) => s.setStripExpanded);
   const run = useCompareStore((s) => s.run);
   const setDrawerOpen = useCompareStore((s) => s.setDrawerOpen);
 
@@ -125,6 +127,21 @@ export default function CompareBar() {
             Show results
           </Button>
         )}
+        <button
+          type="button"
+          aria-expanded={stripExpanded}
+          aria-label={stripExpanded ? "Hide scene cards" : "Show scene cards"}
+          title={stripExpanded ? "Hide scene cards (slim strip)" : "Show scene cards"}
+          onClick={() => setStripExpanded(!stripExpanded)}
+          className={cn(
+            "grid h-6 w-6 shrink-0 place-items-center rounded border transition-colors duration-150",
+            stripExpanded
+              ? "border-border bg-surface text-muted hover:text-text"
+              : "border-accent bg-accent-soft text-accent",
+          )}
+        >
+          {stripExpanded ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+        </button>
         <Button
           variant="primary"
           size="sm"

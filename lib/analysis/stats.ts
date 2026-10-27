@@ -6,6 +6,7 @@
  */
 import { CLASS, CLASS_DEFS, M2_PER_HA, classLabel } from "./config";
 import { pixelToLngLat } from "./mask";
+import { patchToMultiPolygon } from "./polygon";
 import type {
   AnalysisGrid,
   ClassStat,
@@ -37,12 +38,25 @@ export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
   const pxAreaHa = (grid.metersX * grid.metersY) / M2_PER_HA;
   const counts = new Uint32Array(256);
   let insidePixels = 0;
+  // Change-pixel extent → stats.changeBbox (drives "Zoom to changes").
+  let changedMinCol = -1;
+  let changedMaxCol = -1;
+  let changedMinRow = -1;
+  let changedMaxRow = -1;
 
   for (let i = 0; i < classGrid.length; i++) {
     const code = classGrid[i];
     if (code === CLASS.outside) continue;
     insidePixels += 1;
     counts[code] += 1;
+    if (code >= CLASS.vegGain && code <= CLASS.waterLoss) {
+      const col = i % grid.width;
+      const row = (i - col) / grid.width;
+      if (changedMinCol < 0 || col < changedMinCol) changedMinCol = col;
+      if (col > changedMaxCol) changedMaxCol = col;
+      if (changedMinRow < 0 || row < changedMinRow) changedMinRow = row;
+      if (row > changedMaxRow) changedMaxRow = row;
+    }
   }
 
   const validPixels = insidePixels - counts[CLASS.masked];
@@ -76,6 +90,15 @@ export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
     changedHa: changedPixels * pxAreaHa,
     tehsils: null,
     hotspots: [],
+    changeBbox:
+      changedMinCol >= 0
+        ? [
+            grid.bbox[0] + changedMinCol * grid.pxLon,
+            grid.bbox[3] - (changedMaxRow + 1) * grid.pxLat,
+            grid.bbox[0] + (changedMaxCol + 1) * grid.pxLon,
+            grid.bbox[3] - changedMinRow * grid.pxLat,
+          ]
+        : null,
     negligible: changedPixels === 0,
   };
 
@@ -115,6 +138,7 @@ export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
 }
 
 interface PatchAcc {
+  label: number;
   count: number;
   classCode: number;
   minCol: number;
@@ -143,6 +167,7 @@ function computeHotspots(
     let acc = patches.get(label);
     if (!acc) {
       acc = {
+        label,
         count: 0,
         classCode: classGrid[i],
         minCol: col,
@@ -164,8 +189,28 @@ function computeHotspots(
     }
   }
 
-  const hotspots: Hotspot[] = [];
-  patches.forEach((acc) => {
+  const top = Array.from(patches.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+  if (top.length === 0) return [];
+
+  // One pass over the label raster collects the pixels of the top patches
+  // (the polygons are only needed for those 10).
+  const wanted = new Set<number>();
+  for (const acc of top) wanted.add(acc.label);
+  const pixelsByLabel = new Map<number, number[]>();
+  for (let i = 0; i < labels.length; i++) {
+    const label = labels[i];
+    if (label === 0 || !wanted.has(label)) continue;
+    let list = pixelsByLabel.get(label);
+    if (!list) {
+      list = [];
+      pixelsByLabel.set(label, list);
+    }
+    list.push(i);
+  }
+
+  const hotspots: Hotspot[] = top.map((acc) => {
     const west = bbox[0] + acc.minCol * pxLon;
     const east = bbox[0] + (acc.maxCol + 1) * pxLon;
     const north = bbox[3] - acc.minRow * pxLat;
@@ -182,16 +227,17 @@ function computeHotspots(
     });
     if (bestZ > 0 && zoneMeta?.[bestZ - 1]) tehsilName = zoneMeta[bestZ - 1].name;
 
-    hotspots.push({
+    const pixels = pixelsByLabel.get(acc.label) ?? [];
+    return {
       centroid: pixelToLngLat((acc.minCol + acc.maxCol) / 2, (acc.minRow + acc.maxRow) / 2, grid),
       bbox: [west, south, east, north],
       areaHa: acc.count * pxAreaHa,
       classCode: acc.classCode,
       classLabel: classLabel(acc.classCode),
       tehsilName,
-    });
+      polygon: patchToMultiPolygon(pixels, width, grid),
+    };
   });
 
-  hotspots.sort((a, b) => b.areaHa - a.areaHa);
-  return hotspots.slice(0, 10);
+  return hotspots;
 }

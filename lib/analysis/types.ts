@@ -64,6 +64,8 @@ export interface Hotspot {
   classCode: number;
   classLabel: string;
   tehsilName: string | null;
+  /** Patch outline in EPSG:4326 (map layer + GeoJSON export); null if untraceable. */
+  polygon: GeoJSON.MultiPolygon | null;
 }
 
 export interface CompareMetadata {
@@ -99,6 +101,8 @@ export interface CompareStats {
   changedHa: number;
   tehsils: TehsilZonalStat[] | null;
   hotspots: Hotspot[];
+  /** Union bbox of all detected change pixels [west, south, east, north]; null when no change. */
+  changeBbox: [number, number, number, number] | null;
   /** True when no change survived the thresholds + minimum mapping unit. */
   negligible: boolean;
 }
@@ -110,3 +114,15 @@ export interface AnalyzeResponse {
   aiEnabled: boolean;
   stats: CompareStats;
 }
+
+/** Structured AI summary the /api/compare/summary route returns. */
+export interface SummaryData {
+  overview: string;
+  keyChanges: string[];
+  whereChangesOccurred: string[];
+  visualObservations: string[];
+  reliabilityAndCaveats: string[];
+  suggestedNextChecks: string[];
+}
+
+export type SummaryLanguage = "en" | "hi";
