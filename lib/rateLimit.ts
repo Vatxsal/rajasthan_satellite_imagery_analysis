@@ -8,11 +8,13 @@ interface Bucket {
 const WINDOW_MS = 60_000;
 
 /** Which rate-limit bucket a request consumes. */
-export type RateLimitKind = "api" | "tiles";
+export type RateLimitKind = "api" | "tiles" | "compare" | "ai";
 
 const buckets: Record<RateLimitKind, Map<string, Bucket>> = {
   api: new Map(),
   tiles: new Map(),
+  compare: new Map(),
+  ai: new Map(),
 };
 
 export function getClientIp(request: Request): string {
@@ -26,10 +28,17 @@ export interface RateLimitResult {
   retryAfterSeconds: number;
 }
 
-/** Simple fixed-window per-IP rate limiter; separate windows for API vs tiles. */
+/** Simple fixed-window per-IP rate limiter with a separate window per bucket. */
 export function checkRateLimit(request: Request, kind: RateLimitKind = "api"): RateLimitResult {
   const env = getServerEnv();
-  const limit = kind === "tiles" ? env.RATE_LIMIT_TILES_PER_MIN : env.RATE_LIMIT_PER_MIN;
+  const limit =
+    kind === "tiles"
+      ? env.RATE_LIMIT_TILES_PER_MIN
+      : kind === "compare"
+        ? env.COMPARE_RATE_LIMIT_PER_MIN
+        : kind === "ai"
+          ? env.AI_SUMMARY_RATE_LIMIT_PER_MIN
+          : env.RATE_LIMIT_PER_MIN;
   const map = buckets[kind];
   const key = getClientIp(request);
   const now = Date.now();

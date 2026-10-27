@@ -26,6 +26,16 @@ const baseSchema = z.object({
   TILE_CACHE_DIR: z.string().trim().optional(),
   /** Daily cap on Copernicus Process API renders (UTC day, per instance); 0 disables. */
   DAILY_RENDER_BUDGET: z.coerce.number().int().min(0).default(3000),
+  /** Long-side cap (px) of the change-detection analysis grid. */
+  COMPARE_MAX_PX: z.coerce.number().int().min(256).max(4096).default(1500),
+  /** Per-IP budget for /api/compare/analyze (each run costs 2 Process renders). */
+  COMPARE_RATE_LIMIT_PER_MIN: z.coerce.number().positive().default(6),
+  /** Per-IP budget for /api/compare/summary (Gemini). */
+  AI_SUMMARY_RATE_LIMIT_PER_MIN: z.coerce.number().positive().default(5),
+  /** Optional Gemini key for the AI summary card; empty disables it (AI_DISABLED). */
+  GEMINI_API_KEY: optionalString,
+  /** Gemini model id for the summary (free-tier Flash by default). */
+  GEMINI_MODEL: z.string().trim().min(1).default("gemini-3.8-flash"),
 });
 
 /** Strict shape used when NEXT_PUBLIC_DATA_SOURCE=cdse — credentials are mandatory. */
@@ -52,6 +62,11 @@ export interface ServerEnv {
   RATE_LIMIT_TILES_PER_MIN: number;
   TILE_CACHE_DIR?: string;
   DAILY_RENDER_BUDGET: number;
+  COMPARE_MAX_PX: number;
+  COMPARE_RATE_LIMIT_PER_MIN: number;
+  AI_SUMMARY_RATE_LIMIT_PER_MIN: number;
+  GEMINI_API_KEY?: string;
+  GEMINI_MODEL: string;
 }
 
 let cachedEnv: ServerEnv | null = null;
