@@ -35,6 +35,7 @@
 - [Quick Start](#-quick-start)
 - [Architecture](#-architecture)
 - [Connecting Copernicus (CDSE)](#-connecting-copernicus-cdse)
+- [Change Detection](#-change-detection)
 - [Deploying to Vercel](#-deploying-to-vercel)
 - [Security & Guard Rails](#-security--guard-rails)
 - [Testing & CI](#-testing--ci)
@@ -58,6 +59,7 @@
 | ⬇️ | **Downloads** | Per-scene menu with 5 deep links into Copernicus Browser / Data Space (per-tile `.SAFE` product ids, date, zoom and view pre-filled), plus true-colour **PNG**, visual **GeoTIFF** and 8-band **analysis GeoTIFF** (FLOAT32 reflectance indices, band descriptions, nodata), all clipped to the selection (≤ 2500 px per side). Copy single or all product ids. |
 | 🗺️ | **Map** | OpenFreeMap *positron* vector basemap with an Esri World Imagery switcher, zoom / home / locate / fullscreen controls with screenshot menu, debounced Nominatim address search, selection highlight with `fitBounds`, live cursor coordinates, legend and composite legend. |
 | 🛰️ | **Imagery overlay** | Selecting a scene swaps a clipped PNG (transparent outside the AOI) into a MapLibre image source. XYZ tile mode renders native-resolution 512px tiles per pan/zoom, with empty-tile short-circuits (outside area, out-of-band zoom, too many tiles) so quota is only spent on visible, in-area tiles. |
+| 🔍 | **Change detection** | Compare two dates (A/B) for the current area: swipe side-by-side of the two acquisitions, classified change map (water / vegetation / bare-built gain & loss) with legend and per-class toggles, class + per-tehsil statistics, top-10 hotspots with one-click zoom, PNG / GeoTIFF / CSV / GeoJSON exports and an optional Gemini plain-language summary. See [Change Detection](#-change-detection). |
 | 🧱 | **Layers** | Eye toggles for district / tehsil / ILR boundaries and the imagery overlay (inline opacity slider). Rajasthan state outline with casing lines keeps borders visible on any basemap. |
 | 🌗 | **Themes** | Light / dark, persisted. Boundary and selection colours mirror the theme on the map. |
 | 📏 | **Measure / Saved queries** | UI shells wired to the store state. |
@@ -81,7 +83,7 @@ npm run build      # production build (type-checks + lints)
 npm run start      # serve the production build
 npm run lint       # eslint (next/core-web-vitals)
 npm run typecheck  # tsc --noEmit
-npm test           # unit tests (node --test): downloads, Copernicus links
+npm test           # unit tests (node --test): downloads, Copernicus links, change detection
 npm run generate:mock-data   # regenerate data/mock/*.geojson
 node scripts/smoke.browser.cjs   # headless-browser end-to-end smoke (needs Chrome)
 ```
@@ -152,10 +154,68 @@ NEXT_PUBLIC_DATA_SOURCE=cdse
 
 ---
 
+## 🔍 Change Detection
+
+Compare two Sentinel-2 dates over the selected district / tehsil / ILR and see **what changed**: a swipe side-by-side, a classified change map, per-class and per-tehsil statistics, and the ten largest change patches. Every number comes from the deterministic raster pipeline in `lib/analysis/` — Gemini only puts them into words.
+
+> Requires live data (`NEXT_PUBLIC_DATA_SOURCE=cdse`). In `mock` mode the Analyze call fails fast with `CDSE_CONFIG` instead of spending quota.
+
+### 1. Using it
+
+1. Search an area as usual, then arm **Compare** in the scene-strip header.
+2. Assign **A** and **B** on two different scene cards (a duplicate date is rejected; the server normalises the pair so A is always the earlier date).
+3. **Analyze** streams progress (`Fetching date A → Fetching date B → Analyzing`, ~2 Process renders, `maxDuration` 60s) and opens the results drawer:
+   - **Swipe** — drag the divider (or arrow-key it): date A on the left, date B on the right, two synchronized MapLibre maps.
+   - **Change map** — classified overlay with legend, per-class visibility, opacity slider, **PNG** and **GeoTIFF** export (uint8, nodata 255 — opens in QGIS).
+   - **Statistics** — totals, class breakdown, per-tehsil table (district-level runs), applied thresholds, sensitivity / minimum-patch re-run, **CSV** export, optional AI summary.
+   - **Hotspots** — top-10 surviving patches; click one to zoom, export the list as **GeoJSON**.
+
+Changing the area or running a new search clears the pair (the old polygons no longer apply). Results are LRU-cached (`IMAGERY_CACHE_TTL_SECONDS`) — re-opening a finished pair replays instantly without new renders.
+
+### 2. How it works
+
+| Step | Where | What happens |
+| --- | --- | --- |
+| **Fetch** | `lib/analysis/fetch.ts` | One 5-band FLOAT32 Process render per date (NDVI, MNDWI, NDBI, valid, dataMask) clipped to the polygon, grid capped at `COMPARE_MAX_PX` px on the long side. |
+| **Mask** | `lib/analysis/mask.ts` | Polygon scanline mask + 1-px invalid-data dilation (snapshot-seeded, no cascade). |
+| **Classify** | `lib/analysis/classify.ts` | Index differencing with fixed precedence: water gain → water loss → vegetation loss → vegetation gain → bare/built increase. |
+| **Clean** | `lib/analysis/filter.ts` | 3×3 majority filter, then 8-connected minimum mapping unit (default 0.2 ha). |
+| **Stats** | `lib/analysis/stats.ts` | Per-class areas, valid %, per-tehsil zonal breakdown (district-level), top-10 patch hotspots. |
+| **Routes** | `app/api/compare/` | `POST analyze` streams NDJSON progress + result · `GET overlay` serves the classified PNG / GeoTIFF · `POST summary` renders the optional Gemini text (stats only — imagery never leaves the server). |
+| **UI** | `components/compare/` | `store/useCompareStore.ts` + `lib/compare/bridge.ts` drive the overlay and date-A tiles on the main map; the swipe view is a second non-interactive maplibre instance with one-way camera sync. |
+
+Rate limits: `compare` bucket (default 6/min) for analyze, `ai` bucket (default 5/min) for the summary. CSP is unchanged — Gemini is called server-side.
+
+### 3. Thresholds
+
+Tunables live in **one file** — `lib/analysis/config.ts` — and every run echoes the applied values in its metadata:
+
+| Signal | Rule | Meaning |
+| --- | --- | --- |
+| ΔMNDWI ≥ +0.20 and MNDWI(after) > 0 | Water gain |
+| ΔMNDWI ≤ −0.20 and MNDWI(before) > 0 | Water loss |
+| ΔNDVI ≤ −0.15 | Vegetation loss |
+| ΔNDVI ≥ +0.15 | Vegetation gain |
+| ΔNDBI ≥ +0.10 and ΔNDVI ≤ −0.05 | Bare / built-up increase |
+
+**Sensitivity** scales every threshold: `low` ×1.5 (conservative) · `medium` ×1 · `high` ×0.7. **Minimum patch** defaults to 0.2 ha (0.01–100). These are documented heuristics, not physics — Rajasthan's irrigated cropland and kharif cycles move the indices — and the scenario is the ground truth (no published truth set exists for this product). Valid data below 70% triggers a warning in the UI.
+
+### 4. Environment variables (set these alongside the CDSE ones)
+
+| Variable | Visibility | Required | Default | Purpose |
+| --- | --- | :-: | --- | --- |
+| `COMPARE_MAX_PX` | server | no | `1500` | Long-side cap of the analysis grid (smaller = faster, coarser) |
+| `COMPARE_RATE_LIMIT_PER_MIN` | server | no | `6` | Per-IP cap for `POST /api/compare/analyze` |
+| `AI_SUMMARY_RATE_LIMIT_PER_MIN` | server | no | `5` | Per-IP cap for `POST /api/compare/summary` |
+| `GEMINI_API_KEY` | 🔒 **secret** | no | unset | Enables the plain-language summary (server-side only; without it the UI hides the card) |
+| `GEMINI_MODEL` | server | no | `gemini-3.8-flash` | Gemini model used for the summary |
+
+---
+
 ## ▲ Deploying to Vercel
 
 1. **Import** the repo from GitHub into Vercel (framework auto-detected as Next.js; no extra build settings needed).
-2. **Add env vars** from the table above: `NEXT_PUBLIC_DATA_SOURCE=cdse` (public) plus `CDSE_CLIENT_ID` / `CDSE_CLIENT_SECRET` (sensitive). Leave `TILE_CACHE_DIR` unset: serverless disks are ephemeral, and the app disables the disk cache automatically when `process.env.VERCEL` is set.
+2. **Add env vars** from the table above: `NEXT_PUBLIC_DATA_SOURCE=cdse` (public) plus `CDSE_CLIENT_ID` / `CDSE_CLIENT_SECRET` (sensitive). Optionally add `GEMINI_API_KEY` (sensitive, see [Change Detection](#-change-detection)) to enable AI summaries. Leave `TILE_CACHE_DIR` unset: serverless disks are ephemeral, and the app disables the disk cache automatically when `process.env.VERCEL` is set.
 3. **Region**: `vercel.json` pins the function region to **`fra1`** (Frankfurt) to keep the server ↔ Copernicus round-trip short. Build output stays default.
 4. **Deploy.** Function `maxDuration` is exported per route (60s for renders, 30s for health); the default streaming runtime is used.
 
@@ -211,7 +271,7 @@ Re-evaluate on the next major upgrade.
 ```bash
 npm run typecheck   # tsc --noEmit
 npm run lint        # next lint
-npm test            # compiles tsconfig.test.json → node --test (11 tests)
+npm test            # compiles tsconfig.test.json → node --test (19 tests)
 npm run build       # production build incl. type + lint pass
 node scripts/smoke.browser.cjs   # full browser flow: map, basemap switch,
                                  # address search, scene search, streamed
@@ -234,6 +294,7 @@ app/
     scenes/             # POST: STAC search → daily mosaic scenes (zod, origin guard)
     imagery/            # GET|POST: clipped PNG/GeoTIFF render (streamed)
     tiles/[z]/[x]/[y]   # XYZ tile render + WMTS proxy + empty-tile short-circuits
+    compare/            # analyze (NDJSON stream), overlay (PNG/GeoTIFF), summary (Gemini)
     health/cdse/        # credential/token health (no secrets)
   layout.tsx, page.tsx, globals.css
 components/
@@ -242,6 +303,7 @@ components/
   layers/               # LayersPanel, Legend
   map/                  # MapCanvas + controls, address search, basemap switcher, legends
   scenes/               # SceneStrip, SceneCard, ProductDialog (ids/links), DownloadDialog
+  compare/              # CompareBar, CompareDrawer, CompareStatsTab, CompareMapController
   ui/                   # Button, Select, Slider, Segmented, Chip, Tooltip, Menu, ToastStack
 data/
   boundaries/           # real Rajasthan district/tehsil GeoJSON (Datameet, Census 2011)
@@ -249,17 +311,20 @@ data/
 lib/
   cdse/                 # auth (OAuth token), STAC catalog, Process API, evalscripts,
                         # GeoTIFF metadata patcher, geometry/tiling maths, WMTS
+  analysis/             # change-detection engine (evalscript, classify, filters, stats,
+                        # PNG/GeoTIFF encoders, prompt) — pure modules, unit-tested
+  compare/              # client helpers: NDJSON stream, map bridge, recolour, exports
   data/                 # DataAdapter interface + mock/cdse adapters, boundaries, types
   server/               # API helpers (errors, origin guard, body caps, streams),
                         # area resolution, daily render budget
   map/                  # basemap definitions, palettes, geojson helpers
   hooks/                # useAreas, useMediaQuery
   cache.ts              # in-memory LRU + optional disk tile cache
-  rateLimit.ts          # fixed-window per-IP limiter (api | tiles buckets)
+  rateLimit.ts          # fixed-window per-IP limiter (api | tiles | compare | ai buckets)
   env.ts                # zod-validated server env loader
   downloads.ts          # download formats + filename builders
   copernicusBrowser.ts  # Copernicus Browser/Data Space deep-link builder
-store/                  # Zustand stores (app state + persisted theme)
+store/                  # Zustand stores (app state, compare state + persisted theme)
 scripts/                # mock-data generator, Datameet fetcher, unit + smoke tests
 .github/workflows/      # CI
 ```
@@ -344,6 +409,10 @@ To add another (PostGIS, Supabase, a different STAC…), implement the interface
 | Auth failures | `CDSE_AUTH` / 401 | Recreate the OAuth client; check for trailing whitespace |
 | Upstream failures | `UPSTREAM_ERROR` (502) | Copernicus outage/timeout. Retry shortly |
 | Tiles 404 | `WMTS_DISABLED` | Expected: legacy WMTS mode needs `CDSE_WMTS_INSTANCE_ID`; native mode needs `?date=&areaId=&level=` |
+| Analyze refused in mock mode | `CDSE_CONFIG` (400) | Change detection needs `NEXT_PUBLIC_DATA_SOURCE=cdse` with CDSE credentials |
+| "No Sentinel-2 scene on \<date\>" | `COMPARE_NO_SCENE` (404) | Nothing over that area on the chosen day — pick another date |
+| Export fails after a while | `OVERLAY_NOT_FOUND` (404) | The result aged out of the LRU cache — run the analysis again |
+| AI summary unavailable | `AI_DISABLED` (503) | Set `GEMINI_API_KEY` (server-only) and redeploy; the card is hidden without it |
 | `npm run dev` exits with `EADDRINUSE` | n/a | Another process holds :3000 (e.g. a stale server). Stop it or use `npm run dev -- -p 3001` |
 
 ---
