@@ -50,6 +50,56 @@ export const imageryCache: BlobCache = new MemoryLruCache(64);
 /** Larger LRU for 512px tiles (a single pan/zoom can touch hundreds). */
 export const tileCache: BlobCache = new MemoryLruCache(512);
 
+// ------------------------------------------------- change detection (compare)
+
+/** Bump when the analysis pipeline/class codes change (invalidates stored artifacts). */
+export const COMPARE_VERSION = "v1";
+
+/** One cached comparison run: stats JSON + PNG overlay + deflated class raster. */
+export interface CompareArtifactEntry {
+  stats: import("@/lib/analysis/types").CompareStats;
+  overlayPng: Buffer;
+  /** Deflated raw class grid (inflate → encodeClassGeoTiff on export). */
+  classGz: Buffer;
+  width: number;
+  height: number;
+  bbox: [number, number, number, number];
+}
+
+/** Generic TTL + LRU eviction for non-binary entries. */
+export class MemoryObjectLru<T> {
+  private store = new Map<string, { value: T; expiresAt: number }>();
+
+  constructor(private readonly maxEntries = 8) {}
+
+  get(key: string): T | undefined {
+    const entry = this.store.get(key);
+    if (!entry) return undefined;
+    if (entry.expiresAt <= Date.now()) {
+      this.store.delete(key);
+      return undefined;
+    }
+    this.store.delete(key);
+    this.store.set(key, entry);
+    return entry.value;
+  }
+
+  set(key: string, value: T, ttlSeconds: number): void {
+    if (this.store.has(key)) this.store.delete(key);
+    this.store.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+    while (this.store.size > this.maxEntries) {
+      const oldest = this.store.keys().next().value;
+      if (oldest === undefined) break;
+      this.store.delete(oldest);
+    }
+  }
+}
+
+/** Small LRU: each entry is a full analysis (PNG ~ hundreds of KB). */
+export const compareResultCache = new MemoryObjectLru<CompareArtifactEntry>(6);
+/** Gemini summary text, keyed by prompt hash (stats numbers → text, 30 min TTL). */
+export const aiSummaryCache: BlobCache = new MemoryLruCache(64);
+
 /**
  * Bump whenever evalscripts or render settings change so previously cached
  * PNGs (produced by different code) are not served.
@@ -94,6 +144,33 @@ export function tileCacheKey(input: {
     input.x,
     input.y,
   ]);
+  return createHash("sha256").update(payload).digest("hex");
+}
+
+/** Cache key for one comparison run (area × dates × sensitivity × MMU). */
+export function compareCacheKey(input: {
+  areaId: string;
+  level: string;
+  dateA: string;
+  dateB: string;
+  sensitivity: string;
+  minPatchHa: number;
+}): string {
+  const payload = JSON.stringify([
+    COMPARE_VERSION,
+    input.areaId,
+    input.level,
+    input.dateA,
+    input.dateB,
+    input.sensitivity,
+    input.minPatchHa,
+  ]);
+  return createHash("sha256").update(payload).digest("hex");
+}
+
+/** Cache key for an AI summary of a given prompt (stats payload + model). */
+export function summaryCacheKey(prompt: string, model: string): string {
+  const payload = `${COMPARE_VERSION}|${model}|${prompt}`;
   return createHash("sha256").update(payload).digest("hex");
 }
 
