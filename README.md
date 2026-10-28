@@ -272,14 +272,17 @@ Re-evaluate on the next major upgrade.
 ## 🧪 Testing & CI
 
 ```bash
-npm run typecheck   # tsc --noEmit
-npm run lint        # next lint
-npm test            # compiles tsconfig.test.json → node --test (19 tests)
-npm run build       # production build incl. type + lint pass
+npm run verify       # typecheck + lint + test + build — what CI runs (minus smoke)
+npm run typecheck    # tsc --noEmit
+npm run lint         # next lint
+npm test             # compiles tsconfig.test.json → node --test (30 tests)
+npm run build        # production build incl. type + lint pass
 node scripts/smoke.browser.cjs   # full browser flow: map, basemap switch,
                                  # address search, scene search, streamed
                                  # imagery, CSP enforcement (requires Chrome)
 ```
+
+**Contributing:** run `npm run verify` before pushing — it mirrors the CI gate (typecheck → lint → unit tests → production build) and must pass with zero errors.
 
 `.github/workflows/ci.yml` runs on every push/PR to `main` with `NEXT_PUBLIC_DATA_SOURCE=mock` (no secrets needed):
 

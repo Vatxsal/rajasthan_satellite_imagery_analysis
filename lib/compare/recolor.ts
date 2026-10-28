@@ -98,9 +98,12 @@ function matchChangeColorIndex(
   b: number,
   classVisible: Record<number, boolean>,
 ): number {
+  // Index into the VISIBLE change classes only (same order as
+  // changeColorList) so the boost ring keeps a patch's own class colour
+  // even when other classes are toggled off.
   let index = 0;
   for (const def of CLASS_DEFS) {
-    if (!def.change) continue;
+    if (!def.change || classVisible[def.code] === false) continue;
     const [cr, cg, cb] = def.color;
     if (r === cr && g === cg && b === cb) return index;
     index += 1;

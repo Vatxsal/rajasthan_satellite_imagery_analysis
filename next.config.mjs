@@ -11,7 +11,9 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data: https://tiles.openfreemap.org",
   "img-src 'self' data: blob: https://server.arcgisonline.com https://tiles.openfreemap.org",
-  "connect-src 'self' https://tiles.openfreemap.org https://server.arcgisonline.com https://nominatim.openstreetmap.org ws://localhost:3000 ws://127.0.0.1:3000",
+  // blob: — MapLibre loads the recoloured overlay (blob URL from the client
+  // class/boost recolour) through fetch(), which is governed by connect-src.
+  "connect-src 'self' blob: https://tiles.openfreemap.org https://server.arcgisonline.com https://nominatim.openstreetmap.org ws://localhost:3000 ws://127.0.0.1:3000",
   "manifest-src 'self'",
 ].join("; ");
 

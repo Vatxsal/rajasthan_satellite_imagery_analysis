@@ -19,6 +19,11 @@ export function codedError(status: number, code: SummaryErrorCode | string, mess
   return Object.assign(new Error(message), { status, code });
 }
 
+/** Marks an error as deterministic (e.g. a 4xx rejection) — never retried. */
+function nonRetryable<T extends Error>(error: T): T {
+  return Object.assign(error, { retryable: false });
+}
+
 export interface GeminiImagePart {
   mimeType: string;
   /** Base64 payload. */
@@ -53,7 +58,12 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isRetryable(err: Error & { status?: number; code?: string }): boolean {
+function isRetryable(err: Error & { status?: number; code?: string; retryable?: boolean }): boolean {
+  // Deterministic failures (4xx rejections flagged at the throw site) and
+  // 4xx statuses are never retried — only 429 is. Everything else in the
+  // coded set (timeout, upstream 5xx, bad output) is worth one more try.
+  if (err.retryable === false) return false;
+  if (err.status && err.status >= 400 && err.status < 500 && err.status !== 429) return false;
   return (
     err.code === "AI_TIMEOUT" ||
     err.code === "AI_RATE_LIMITED" ||
@@ -122,7 +132,9 @@ async function callOnce(
     // 4xx (bad model id, revoked key, malformed request) — not retryable.
     const detail = (await response.text().catch(() => "")).slice(0, 200);
     console.warn(`[compare:summary] upstream ${response.status}: ${detail}`);
-    throw codedError(502, "AI_UPSTREAM_ERROR", "AI summary service rejected the request. Try again shortly.");
+    throw nonRetryable(
+      codedError(502, "AI_UPSTREAM_ERROR", "AI summary service rejected the request. Try again shortly."),
+    );
   }
 
   const raw = await response.text();
