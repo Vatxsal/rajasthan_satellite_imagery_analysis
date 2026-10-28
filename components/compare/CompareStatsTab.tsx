@@ -96,6 +96,8 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
             const color = classColor(hotspot.classCode);
             const rank = index + 1;
             const selected = selectedHotspot === rank;
+            // Map-driven hover (marker/polygon mouseenter) highlights the row too.
+            const hovered = hoveredHotspot === rank;
             return (
               <li key={`${hotspot.centroid[0]}-${hotspot.centroid[1]}-${index}`}>
                 <button
@@ -109,7 +111,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                   title="Zoom to this patch and open its map popup"
                   className={cn(
                     "flex w-full items-center gap-2 rounded border bg-surface px-2 py-1.5 text-left transition-colors duration-150 hover:bg-surface-2",
-                    selected ? "border-accent" : "border-border",
+                    selected ? "border-accent" : hovered ? "border-accent/50 bg-surface-2" : "border-border",
                   )}
                 >
                   <span className="mono-nums w-4 shrink-0 text-[11px] text-muted">{rank}</span>

@@ -9,6 +9,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "tsc -p tsconfig.test.json && node --test .test-build/scripts/",
+    "verify": "npm run typecheck && npm run lint && npm test && npm run build",
     "generate:mock-data": "node scripts/generate-mock-data.mjs"
   },
   "engines": {
