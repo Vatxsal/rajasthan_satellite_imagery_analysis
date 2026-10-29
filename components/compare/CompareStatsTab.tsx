@@ -1,6 +1,7 @@
 "use client";
 
-import { AlertTriangle, FileJson, Info, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { AlertTriangle, Check, Copy, FileJson, Info, Loader2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
 import Slider from "@/components/ui/Slider";
@@ -39,6 +40,33 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
   );
 }
 
+/** Small copy-to-clipboard icon button (shows a brief "Copied" state). */
+function CopyCoordsButton({ coords }: { coords: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={copied ? "Centroid copied" : "Copy centroid coordinates"}
+      title="Copy centroid"
+      onClick={(event) => {
+        event.stopPropagation();
+        void navigator.clipboard?.writeText(coords).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className={cn(
+        "grid h-7 w-7 shrink-0 place-items-center rounded border border-transparent text-muted opacity-0 transition-all duration-150",
+        "hover:border-border hover:bg-surface hover:text-text",
+        "group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100",
+        copied && "text-success opacity-100",
+      )}
+    >
+      {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
+    </button>
+  );
+}
+
 interface CompareStatsTabProps {
   tab: "statistics" | "hotspots";
 }
@@ -71,8 +99,8 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   if (tab === "hotspots") {
     return (
       <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-muted">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="min-w-0 text-xs text-muted">
             Largest surviving change patches — click one to zoom the map.
           </p>
           <Button
@@ -98,8 +126,17 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
             const selected = selectedHotspot === rank;
             // Map-driven hover (marker/polygon mouseenter) highlights the row too.
             const hovered = hoveredHotspot === rank;
+            const lat = hotspot.centroid[1];
+            const lon = hotspot.centroid[0];
+            const coords = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
             return (
-              <li key={`${hotspot.centroid[0]}-${hotspot.centroid[1]}-${index}`}>
+              <li
+                key={`${hotspot.centroid[0]}-${hotspot.centroid[1]}-${index}`}
+                className={cn(
+                  "group flex items-stretch gap-1 rounded border transition-colors duration-150",
+                  selected ? "border-accent" : hovered ? "border-accent/50" : "border-border",
+                )}
+              >
                 <button
                   type="button"
                   aria-pressed={selected}
@@ -110,24 +147,34 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                   onClick={() => focusHotspot(rank, hotspot.bbox)}
                   title="Zoom to this patch and open its map popup"
                   className={cn(
-                    "flex w-full items-center gap-2 rounded border bg-surface px-2 py-1.5 text-left transition-colors duration-150 hover:bg-surface-2",
-                    selected ? "border-accent" : hovered ? "border-accent/50 bg-surface-2" : "border-border",
+                    "flex min-w-0 flex-1 flex-col gap-1 rounded-l-[5px] px-2 py-1.5 text-left transition-colors duration-150",
+                    hovered || selected ? "bg-surface-2" : "bg-surface hover:bg-surface-2",
                   )}
                 >
-                  <span className="mono-nums w-4 shrink-0 text-[11px] text-muted">{rank}</span>
-                  <span
-                    className="h-3 w-3 shrink-0 rounded-sm border border-border"
-                    style={{ background: rgb(color) }}
-                    aria-hidden
-                  />
-                  <span className="min-w-0 flex-1 truncate text-xs text-text">
-                    {hotspot.classLabel}
-                    {hotspot.tehsilName ? ` · ${hotspot.tehsilName}` : ""}
+                  <span className="flex items-center gap-2">
+                    <span className="mono-nums grid h-5 w-5 shrink-0 place-items-center rounded-full border border-border bg-surface-2 text-[10px] font-semibold text-text">
+                      {rank}
+                    </span>
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-sm border border-border"
+                      style={{ background: rgb(color) }}
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1 truncate text-xs text-text">
+                      {hotspot.classLabel}
+                    </span>
+                    <span className="mono-nums ml-auto shrink-0 whitespace-nowrap text-[11px] text-text">
+                      {hotspot.areaHa.toLocaleString("en", { maximumFractionDigits: 1 })} ha
+                    </span>
                   </span>
-                  <span className="mono-nums shrink-0 text-[11px] text-muted">
-                    {hotspot.areaHa.toLocaleString("en", { maximumFractionDigits: 1 })} ha
+                  <span className="flex items-center gap-2 pl-7 text-[10px] text-muted">
+                    <span className="min-w-0 truncate">{hotspot.tehsilName}</span>
+                    <span className="mono-nums ml-auto shrink-0 whitespace-nowrap">{coords}</span>
                   </span>
                 </button>
+                <div className="flex items-center pr-1">
+                  <CopyCoordsButton coords={`${lat.toFixed(6)}, ${lon.toFixed(6)}`} />
+                </div>
               </li>
             );
           })}
@@ -153,11 +200,13 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
         </p>
       )}
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Metric label="Changed area" value={ha(stats.changedHa)} hint={`${(stats.changedHa / 100).toFixed(2)} km²`} />
-        <Metric label="Valid data" value={`${stats.validPct.toFixed(1)}%`} />
-        <Metric label="Analysed area" value={ha(stats.areaHa)} hint={`valid ${ha(stats.validHa)}`} />
-        <Metric label="Date gap" value={`${metadata.gapDays} d`} hint={`${metadata.dateA} → ${metadata.dateB}`} />
+      <div className="grid grid-cols-2 gap-2">
+        <Metric
+          label="Changed area"
+          value={ha(stats.changedHa)}
+          hint={`${(stats.changedHa / 100).toFixed(2)} km²`}
+        />
+        <Metric label="Valid data" value={`${stats.validPct.toFixed(1)}%`} hint={`of ${ha(stats.areaHa)}`} />
       </div>
 
       {/* ---------------------------------------------------- class breakdown */}
@@ -223,7 +272,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-surface-2 text-left text-[11px] text-muted">
-                  <th className="px-2 py-1.5 font-medium">Tehsil</th>
+                  <th className="sticky left-0 z-10 bg-surface-2 px-2 py-1.5 font-medium">Tehsil</th>
                   <th className="px-2 py-1.5 text-right font-medium">Changed</th>
                   <th className="px-2 py-1.5 font-medium">Dominant change</th>
                 </tr>
@@ -257,13 +306,21 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                         focusTehsil(row.tehsilId);
                       }}
                       className={cn(
-                        "cursor-pointer border-b border-border transition-colors duration-150 last:border-0 hover:bg-surface-2",
+                        "group cursor-pointer border-b border-border transition-colors duration-150 last:border-0 hover:bg-surface-2",
                         highlighted && "bg-accent-soft",
                       )}
                       aria-selected={highlighted}
                       title={highlighted ? "Clear highlight" : "Highlight this tehsil on the map"}
                     >
-                      <td className="px-2 py-1.5 text-text">{row.name}</td>
+                      <td
+                        className={cn(
+                          "sticky left-0 z-10 px-2 py-1.5 text-text transition-colors duration-150 group-hover:bg-surface-2",
+                          highlighted && "bg-accent-soft",
+                          !highlighted && "bg-surface",
+                        )}
+                      >
+                        {row.name}
+                      </td>
                       <td className="mono-nums px-2 py-1.5 text-right">{ha(row.changedHa)}</td>
                       <td className="px-2 py-1.5 text-muted">{dominant}</td>
                     </tr>
@@ -290,6 +347,16 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
             <dd className="mono-nums text-text">
               {metadata.width}×{metadata.height} px
             </dd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <dt className="text-muted">Analysed area</dt>
+            <dd className="mono-nums text-text">
+              {ha(stats.areaHa)} (valid {ha(stats.validHa)})
+            </dd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <dt className="text-muted">Date gap</dt>
+            <dd className="mono-nums text-text">{metadata.gapDays} d</dd>
           </div>
           <div className="flex justify-between gap-2">
             <dt className="text-muted">Scene A</dt>

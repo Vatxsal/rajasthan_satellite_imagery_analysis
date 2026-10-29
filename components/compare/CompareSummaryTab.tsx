@@ -32,8 +32,8 @@ export default function CompareSummaryTab() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-2 rounded border border-border bg-surface-2 p-2.5">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[9rem] flex-1">
+        <div className="flex flex-col gap-2">
+          <div>
             <p className="mb-1 flex items-center gap-1.5 text-[11px] text-muted">
               <Languages size={12} aria-hidden />
               Language
@@ -54,13 +54,34 @@ export default function CompareSummaryTab() {
             aria-checked={includeImages}
             onClick={() => setIncludeImages(!includeImages)}
             className={cn(
-              "flex items-center gap-2 rounded border border-border bg-surface px-2 py-1.5 text-left text-xs transition-colors duration-150",
+              "flex w-full items-center gap-2 rounded border border-border bg-surface px-2 py-1.5 text-left text-xs transition-colors duration-150",
               includeImages ? "text-text" : "text-muted",
             )}
             title="Sends small (≤768 px) preview crops of the analysed area to the AI model."
           >
-            <ImageIcon size={13} aria-hidden />
-            Include map previews
+            <span
+              aria-hidden
+              className={cn(
+                "grid h-3.5 w-3.5 shrink-0 place-items-center rounded-sm border",
+                includeImages ? "border-accent bg-accent" : "border-border bg-surface",
+              )}
+            >
+              {includeImages && (
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="rgb(var(--accent-fg))"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-2.5 w-2.5"
+                >
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              )}
+            </span>
+            <ImageIcon size={13} aria-hidden className="shrink-0" />
+            <span className="min-w-0 flex-1">Include map previews</span>
           </button>
         </div>
         {includeImages && (
@@ -69,10 +90,11 @@ export default function CompareSummaryTab() {
             statistics. Leave off to share numbers only.
           </p>
         )}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-2">
           <Button
             variant="primary"
             size="sm"
+            className="w-full"
             disabled={loading || disabled}
             title={
               disabled
@@ -91,7 +113,7 @@ export default function CompareSummaryTab() {
             </span>
           )}
           {status === "error" && !loading && (
-            <Button size="sm" onClick={() => void fetchSummary()}>
+            <Button size="sm" className="w-full" onClick={() => void fetchSummary()}>
               <RefreshCw size={13} />
               Retry
             </Button>
