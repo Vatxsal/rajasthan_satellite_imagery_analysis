@@ -28,8 +28,8 @@ export interface CompareResult {
 }
 
 /** Side panel width bounds (desktop compare results panel). */
-export const PANEL_WIDTH_MIN = 340;
-export const PANEL_WIDTH_MAX = 560;
+export const PANEL_WIDTH_MIN = 360;
+export const PANEL_WIDTH_MAX = 600;
 
 interface CompareState {
   /** Scene strip "Compare" toggle — A/B assignment only works while armed. */
@@ -148,7 +148,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   divider: 50,
   boostVisibility: true,
   stripExpanded: false,
-  panelWidth: 400,
+  panelWidth: 420,
   choropleth: false,
   hoveredHotspot: null,
   selectedHotspot: null,

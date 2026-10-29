@@ -167,6 +167,186 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   background: rgb(var(--surface-2));
 }
 
+/* ------------------------------------------------------- hotspot popup */
+/* Themed restyle of MapLibre's default popup (light box + our light text
+   was unreadable). Tip colors are hardcoded #fff upstream — override each
+   anchor direction to match the surface. */
+.maplibregl-popup-content {
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgb(20 21 26 / 0.1);
+  padding: 12px;
+  font-family: var(--font-public-sans), system-ui, sans-serif;
+  font-size: 12px;
+  max-width: 260px;
+}
+.maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: rgb(var(--surface));
+}
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: rgb(var(--surface));
+}
+.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: rgb(var(--surface));
+}
+.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: rgb(var(--surface));
+}
+.maplibregl-popup-close-button {
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: rgb(var(--text-muted));
+  font-size: 16px;
+  line-height: 1;
+}
+.maplibregl-popup-close-button:hover {
+  background: rgb(var(--surface-2));
+  color: rgb(var(--text));
+}
+
+/* Hotspot popup content (built in lib/compare/bridge.ts). */
+.hs-pop {
+  display: flex;
+  min-width: 190px;
+  flex-direction: column;
+  gap: 8px;
+}
+.hs-pop-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 20px; /* room for the close button */
+}
+.hs-pop-chip {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  border: 1px solid rgb(var(--border));
+}
+.hs-pop-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: rgb(var(--text));
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hs-pop-rank {
+  flex-shrink: 0;
+  color: rgb(var(--text-muted));
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 11px;
+}
+.hs-pop-area {
+  color: rgb(var(--text));
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+.hs-pop-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hs-pop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgb(var(--text-muted));
+  font-size: 11px;
+}
+.hs-pop-row .k {
+  flex-shrink: 0;
+}
+.hs-pop-row .v {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: rgb(var(--text));
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hs-pop-row .v.mono {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.hs-pop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  flex-shrink: 0;
+  border: 1px solid rgb(var(--border));
+  border-radius: 4px;
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+  padding: 0 8px;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+.hs-pop-btn:hover {
+  background: rgb(var(--surface-2));
+  border-color: rgb(var(--accent));
+}
+.hs-pop-btn svg {
+  width: 12px;
+  height: 12px;
+}
+.hs-pop-zoom {
+  align-self: flex-start;
+}
+
+/* ---------------------------------------------------- hotspot markers */
+/* 22px numbered DOM markers (maplibre Marker elements). The surface ring
+   and accent hover ring follow the theme tokens via CSS. */
+.hs-marker {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  border: 2px solid rgb(var(--surface));
+  border-radius: 999px;
+  background: var(--hs);
+  color: var(--hs-fg);
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgb(20 21 26 / 0.25);
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease;
+}
+.hs-marker:hover,
+.hs-marker[data-state="hover"],
+.hs-marker[data-state="selected"] {
+  transform: scale(1.18);
+  box-shadow:
+    0 0 0 2px rgb(var(--accent)),
+    0 1px 3px rgb(20 21 26 / 0.25);
+}
+
 /* ----------------------------------------------------------------- scroll */
 * {
   scrollbar-width: thin;
