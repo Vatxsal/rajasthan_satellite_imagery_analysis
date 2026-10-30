@@ -71,9 +71,9 @@ export function classifyPixel(
   const dNdbi = b.ndbi[i] - a.ndbi[i];
 
   // 1. Water gain: index swung positive AND the after-date is open water.
-  if (dMndwi >= t.waterGainD && b.mndwi[i] > 0) return CLASS.waterGain;
+  if (dMndwi >= t.waterGainD && b.mndwi[i] > t.waterGainMndwiMin) return CLASS.waterGain;
   // 2. Water loss: index swung negative AND the before-date was open water.
-  if (dMndwi <= t.waterLossD && a.mndwi[i] > 0) return CLASS.waterLoss;
+  if (dMndwi <= t.waterLossD && a.mndwi[i] > t.waterLossMndwiMin) return CLASS.waterLoss;
   // 3. Vegetation loss / 4. vegetation gain.
   if (dNdvi <= t.vegLossD) return CLASS.vegLoss;
   if (dNdvi >= t.vegGainD) return CLASS.vegGain;

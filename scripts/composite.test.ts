@@ -75,26 +75,32 @@ test("deriveIndices: exact v1 evalscript formulas", () => {
   assert.equal(ndbi[2], -1);
 });
 
-test("composite evalscript: ORBIT median, cloud-gated, 9 FLOAT32 bands", () => {
+test("composite evalscript: ORBIT median, cloud-gated, 12 FLOAT32 bands", () => {
   const es = COMPARE_EVALSCRIPT_COMPOSITE;
   assert.ok(es.startsWith("//VERSION=3"));
   assert.ok(es.includes('mosaicking: "ORBIT"'), "must use ORBIT (samples = orbits, not tiles)");
   assert.ok(!es.includes("MULTI_TEMPORAL"), "MULTI_TEMPORAL is not a valid v3 mosaicking mode");
-  assert.ok(es.includes("bands: 9"));
+  assert.ok(es.includes("bands: 12"));
   assert.ok(es.includes('sampleType: "FLOAT32"'));
+  assert.ok(es.includes('mosaickingOrder: "mostRecent"'), "recent-orbit bands need newest-first samples");
   assert.ok(es.includes("CLD"), "cloud-probability gate");
   assert.ok(es.includes('"B05"') && es.includes('"B12"'), "full band set for Phase 2");
   assert.ok(es.includes("function median"), "per-pixel median of valid orbits");
   assert.ok(es.includes(JSON.stringify([0, 1, 3, 8, 9, 10, 11])), "same SCL exclusions as v1");
+  assert.ok(
+    es.includes("ndviOf(recent)") && es.includes("mndwiOf(recent)") && es.includes("ndbiOf(recent)"),
+    "recent-orbit indices for the persistence check (Phase 2.7)",
+  );
 });
 
-test("v1 evalscript unchanged (single-day ORBIT, server-side indices)", () => {
+test("v1 evalscript: single-day ORBIT, server-side indices, rounded SCL gate", () => {
   const es = COMPARE_EVALSCRIPT;
   assert.ok(es.startsWith("//VERSION=3"));
   assert.ok(es.includes('mosaicking: "ORBIT"'));
   assert.ok(es.includes("bands: 5"));
   assert.ok(es.includes('"B03", "B04", "B08", "B11"'));
   assert.ok(!es.includes("CLD"));
+  assert.ok(es.includes("Math.round(scl)"), "fractional SCL from bilinear resample must be rounded (#18)");
 });
 
 test("dilateInvalid: 1 px halo by default, 2 px for the v2 composite", () => {

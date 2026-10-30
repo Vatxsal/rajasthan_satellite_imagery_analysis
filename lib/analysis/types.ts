@@ -55,6 +55,9 @@ export interface TehsilZonalStat {
   insidePixels: number;
 }
 
+/** v2 confidence tier of a change patch (v1 results carry no tier). */
+export type ConfidenceTier = "high" | "medium" | "low";
+
 export interface Hotspot {
   /** [lon, lat] centroid in EPSG:4326. */
   centroid: [number, number];
@@ -66,6 +69,28 @@ export interface Hotspot {
   tehsilName: string | null;
   /** Patch outline in EPSG:4326 (map layer + GeoJSON export); null if untraceable. */
   polygon: GeoJSON.MultiPolygon | null;
+  /** v2 only: majority confidence tier of the patch pixels. */
+  confidence?: ConfidenceTier;
+  /** v2 only: majority sub-label text (e.g. "Likely harvest / crop cycle"). */
+  subLabel?: string | null;
+  /** v2 only: patch tags — "transient" | "crop-cycle" | "short-gap". */
+  tags?: string[];
+}
+
+/** v2 engine diagnostics echoed into the result metadata. */
+export interface EngineStats {
+  /** Additive median matching of A onto B (Phase 2.1). */
+  normalization: { appliedBands: number; skippedBands: number; maxShift: number };
+  /** Integer co-registration search (Phase 2.2). */
+  coReg: { dx: number; dy: number; score: number; zeroScore: number; applied: boolean };
+  /** Adaptive threshold scale/σ per Δ-index (Phase 2.4). */
+  adaptive: { scales: Record<string, number>; sigma: Record<string, number> };
+  /** Recent-orbit agreement rate over change pixels (Phase 2.7). */
+  persistence: { checked: boolean; persistentPct: number | null };
+  /** Seasonal window of dateB, if any (Phase 2.6). */
+  cropCycle: { tag: string | null };
+  /** Mean CVA magnitude over change pixels (Phase 2.5). */
+  cvaMean: number;
 }
 
 /** Which engine produced the result (v1 = classic single-date, v2 = composite inputs). */
@@ -97,6 +122,8 @@ export interface CompareMetadata {
   compositeWindowDays: number;
   /** Threshold values actually applied (after sensitivity scaling). */
   thresholds: Record<string, number>;
+  /** v2 only: engine diagnostics (normalisation, co-reg, adaptive scales, …). */
+  engineStats?: EngineStats;
   generatedAt: string;
 }
 
@@ -116,6 +143,8 @@ export interface CompareStats {
   changeBbox: [number, number, number, number] | null;
   /** True when no change survived the thresholds + minimum mapping unit. */
   negligible: boolean;
+  /** v2 only: change pixels per confidence tier (UI filter counts). */
+  confidence?: { high: number; medium: number; low: number };
 }
 
 /** Result of an /api/compare/analyze call (final NDJSON frame). */

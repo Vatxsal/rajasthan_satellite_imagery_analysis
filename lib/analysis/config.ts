@@ -69,6 +69,10 @@ export interface ScaledThresholds {
   bareBuiltD: number;
   bareBuiltNdviMax: number;
   bareBuiltMaxMndwi: number;
+  /** After-state gate: MNDWI(B) must exceed this (became open water; config 0). */
+  waterGainMndwiMin: number;
+  /** Before-state gate: MNDWI(A) must exceed this (was open water; config 0). */
+  waterLossMndwiMin: number;
 }
 
 /** Applies the sensitivity multiplier to every threshold. */
@@ -82,6 +86,8 @@ export function scaledThresholds(sensitivity: Sensitivity): ScaledThresholds {
     bareBuiltD: THRESHOLDS.bareBuilt.dNdbi * m,
     bareBuiltNdviMax: THRESHOLDS.bareBuilt.dNdviMax * m,
     bareBuiltMaxMndwi: THRESHOLDS.bareBuilt.maxMndwi * m,
+    waterGainMndwiMin: THRESHOLDS.waterGain.mndwiAfter,
+    waterLossMndwiMin: THRESHOLDS.waterLoss.mndwiBefore,
   };
 }
 
@@ -154,3 +160,96 @@ export const COMPOSITE_WINDOW_DAYS_MAX = 15;
 export const COMPOSITE_MAX_CLOUD_PROB = 30;
 /** Composite valid-mask erosion radius (px) — twice v1's 1 px halo (cloud edges). */
 export const COMPOSITE_ERODE_RADIUS = 2;
+
+// ── Engine v2 ──────────────────────────────────────────────────────────────
+
+/** Sub-labels (v2): finer description attached to a change class. Codes are
+ *  offset from the class code (class × 10 + variant) and stay within uint8. */
+export const SUB = {
+  vegLossCleared: 20,
+  vegLossHarvest: 21,
+  vegLossStress: 22,
+  vegGainSeasonal: 11,
+  vegGainRecovery: 12,
+  waterGainNew: 40,
+  waterGainPonding: 41,
+  waterLossReceded: 50,
+  waterLossDrawdown: 51,
+  bareBuiltConstruction: 30,
+  bareBuiltBare: 31,
+} as const;
+
+export type SubCode = (typeof SUB)[keyof typeof SUB];
+
+const SUB_LABELS: Record<number, string> = {
+  [SUB.vegLossCleared]: "Vegetation cleared / land exposed",
+  [SUB.vegLossHarvest]: "Likely harvest / crop cycle",
+  [SUB.vegLossStress]: "Vegetation browning / stress",
+  [SUB.vegGainSeasonal]: "Seasonal greening / crop growth",
+  [SUB.vegGainRecovery]: "Vegetation recovery",
+  [SUB.waterGainNew]: "New open water",
+  [SUB.waterGainPonding]: "Temporary ponding",
+  [SUB.waterLossReceded]: "Water body receded",
+  [SUB.waterLossDrawdown]: "Water drawdown",
+  [SUB.bareBuiltConstruction]: "Built-up / construction signal",
+  [SUB.bareBuiltBare]: "Bare soil increase",
+};
+
+export function subLabel(subCode: number): string | null {
+  return SUB_LABELS[subCode] ?? null;
+}
+
+/** Seasonal (crop-cycle) windows as MM-DD ranges, Rajasthan kharif/rabi
+ *  calendar. A change inside a matching window is tagged and loses one
+ *  confidence step — vegetation change in harvest season is expected phenology,
+ *  not necessarily real land-cover change. Tunable heuristics, not physics. */
+export const SEASONAL_WINDOWS = [
+  { tag: "kharif-harvest", from: "10-01", to: "11-15", kind: "loss" },
+  { tag: "rabi-harvest", from: "03-15", to: "04-30", kind: "loss" },
+  { tag: "monsoon-greening", from: "06-15", to: "09-15", kind: "gain" },
+] as const;
+
+export type SeasonalTag = (typeof SEASONAL_WINDOWS)[number]["tag"];
+
+/** Seasonal tag for `date` when a class of `kind` ("loss" | "gain") changes. */
+export function seasonalTag(
+  date: string,
+  kind: "loss" | "gain",
+): SeasonalTag | null {
+  const mmdd = date.slice(5);
+  for (const w of SEASONAL_WINDOWS) {
+    if (w.kind !== kind) continue;
+    if (mmdd >= w.from && mmdd <= w.to) return w.tag;
+  }
+  return null;
+}
+
+/** Robust σ reference per Δ-index for the adaptive threshold scale
+ *  (scale = clamp(σ/ref, MIN..MAX); refs ≈ typical seasonal noise, audit §8.5). */
+export const V2_REFERENCE_SIGMA: Record<string, number> = {
+  ndvi: 0.08,
+  mndwi: 0.08,
+  ndbi: 0.05,
+  bsi: 0.06,
+};
+export const ADAPTIVE_SCALE_MIN = 0.7;
+export const ADAPTIVE_SCALE_MAX = 1.5;
+/** Gap below this (days) → vegetation classes lose one confidence step (§2.6). */
+export const V2_SHORT_GAP_DAYS = 14;
+
+/** Multi-index voting + confidence scoring constants (v2, §2.5/§2.8). */
+export const VOTE = {
+  /** Corroborating index must cross this × the primary adaptive Δ threshold. */
+  corrobFactor: 0.6,
+  /** |ΔAWEI| corroboration for water classes (× the MNDWI adaptive scale). */
+  aweiCorrob: 0.08,
+  /** Δbrightness corroboration for bare/built (× the NDBI adaptive scale). */
+  brightCorrob: 0.03,
+  /** CVA magnitude (in threshold units) that adds one confidence point. */
+  cvaBoost: 2.5,
+  /** Score ≥ highScore → high; ≥ mediumScore → medium; else low. */
+  highScore: 4,
+  mediumScore: 2,
+  /** Recent-orbit Δ must reach this fraction of the threshold to be persistent. */
+  persistFactor: 0.5,
+} as const;

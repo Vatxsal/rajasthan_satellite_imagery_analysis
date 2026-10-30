@@ -4,13 +4,15 @@
  * These numbers are the single source of truth for the UI *and* the AI
  * summary — the model never computes anything itself.
  */
-import { CLASS, CLASS_DEFS, M2_PER_HA, classLabel } from "./config";
+import { CLASS, CLASS_DEFS, M2_PER_HA, SUB, classLabel, subLabel } from "./config";
 import { pixelToLngLat } from "./mask";
 import { patchToMultiPolygon } from "./polygon";
+import { PERSIST, TIER } from "./v2/classify";
 import type {
   AnalysisGrid,
   ClassStat,
   CompareStats,
+  ConfidenceTier,
   Hotspot,
   TehsilZonalStat,
 } from "./types";
@@ -31,12 +33,30 @@ export interface ComputeStatsArgs {
   zones?: Int16Array | null;
   /** Zone metadata, index-aligned with rasterizeZones input. */
   zoneMeta?: ZoneMeta[] | null;
+  /** v2 TIER codes per pixel; null for v1 (no confidence data). */
+  tiers?: Uint8Array | null;
+  /** v2 SUB codes per pixel; null for v1. */
+  subs?: Uint8Array | null;
+  /** v2 PERSIST codes per pixel; null for v1. */
+  persist?: Uint8Array | null;
+  /** v2 short-gap flag for vegetation confidence tags (§2.6). */
+  shortGap?: boolean;
 }
 
+const TIER_TEXT: Record<number, ConfidenceTier> = {
+  [TIER.low]: "low",
+  [TIER.medium]: "medium",
+  [TIER.high]: "high",
+};
+
+/** SUB codes that mark a seasonal crop cycle (patch tag "crop-cycle"). */
+const CROP_SUBS = new Set<number>([SUB.vegLossHarvest, SUB.vegGainSeasonal]);
+
 export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
-  const { classGrid, labels, grid, zones, zoneMeta } = args;
+  const { classGrid, labels, grid, zones, zoneMeta, tiers, subs, persist, shortGap } = args;
   const pxAreaHa = (grid.metersX * grid.metersY) / M2_PER_HA;
   const counts = new Uint32Array(256);
+  const tierCounts = { high: 0, medium: 0, low: 0 };
   let insidePixels = 0;
   // Change-pixel extent → stats.changeBbox (drives "Zoom to changes").
   let changedMinCol = -1;
@@ -50,6 +70,11 @@ export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
     insidePixels += 1;
     counts[code] += 1;
     if (code >= CLASS.vegGain && code <= CLASS.waterLoss) {
+      if (tiers) {
+        // Change pixels always carry a tier; imputed pixels fall back to low.
+        const tierText = TIER_TEXT[tiers[i]] ?? "low";
+        tierCounts[tierText] += 1;
+      }
       const col = i % grid.width;
       const row = (i - col) / grid.width;
       if (changedMinCol < 0 || col < changedMinCol) changedMinCol = col;
@@ -100,6 +125,7 @@ export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
           ]
         : null,
     negligible: changedPixels === 0,
+    ...(tiers ? { confidence: tierCounts } : {}),
   };
 
   if (zones && zoneMeta && zoneMeta.length > 0) {
@@ -133,7 +159,12 @@ export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
     stats.tehsils = Array.from(rows.values()).filter((r) => r.insidePixels > 0);
   }
 
-  stats.hotspots = computeHotspots(classGrid, labels, grid, zones ?? null, zoneMeta ?? null, pxAreaHa);
+  stats.hotspots = computeHotspots(classGrid, labels, grid, zones ?? null, zoneMeta ?? null, pxAreaHa, {
+    tiers: tiers ?? null,
+    subs: subs ?? null,
+    persist: persist ?? null,
+    shortGap: shortGap ?? false,
+  });
   return stats;
 }
 
@@ -146,6 +177,19 @@ interface PatchAcc {
   minRow: number;
   maxRow: number;
   zoneCounts: Map<number, number>;
+  /** v2 tier counts [low, medium, high] over the patch pixels. */
+  tierCounts: [number, number, number];
+  /** v2 sub-code counts over the patch pixels. */
+  subCounts: Map<number, number>;
+  /** v2 persistence counts [yes, transient]. */
+  persistCounts: [number, number];
+}
+
+interface AuxGrids {
+  tiers: Uint8Array | null;
+  subs: Uint8Array | null;
+  persist: Uint8Array | null;
+  shortGap: boolean;
 }
 
 function computeHotspots(
@@ -155,6 +199,7 @@ function computeHotspots(
   zones: Int16Array | null,
   zoneMeta: ZoneMeta[] | null,
   pxAreaHa: number,
+  aux: AuxGrids,
 ): Hotspot[] {
   const { width, bbox, pxLon, pxLat } = grid;
   const patches = new Map<number, PatchAcc>();
@@ -175,10 +220,25 @@ function computeHotspots(
         minRow: row,
         maxRow: row,
         zoneCounts: new Map(),
+        tierCounts: [0, 0, 0],
+        subCounts: new Map(),
+        persistCounts: [0, 0],
       };
       patches.set(label, acc);
     }
     acc.count += 1;
+    if (aux.tiers) {
+      const tier = aux.tiers[i];
+      if (tier >= TIER.low && tier <= TIER.high) acc.tierCounts[tier - 1] += 1;
+    }
+    if (aux.subs && aux.subs[i] !== 0) {
+      const sub = aux.subs[i];
+      acc.subCounts.set(sub, (acc.subCounts.get(sub) ?? 0) + 1);
+    }
+    if (aux.persist) {
+      if (aux.persist[i] === PERSIST.yes) acc.persistCounts[0] += 1;
+      else if (aux.persist[i] === PERSIST.transient) acc.persistCounts[1] += 1;
+    }
     if (col < acc.minCol) acc.minCol = col;
     if (col > acc.maxCol) acc.maxCol = col;
     if (row < acc.minRow) acc.minRow = row;
@@ -228,6 +288,48 @@ function computeHotspots(
     if (bestZ > 0 && zoneMeta?.[bestZ - 1]) tehsilName = zoneMeta[bestZ - 1].name;
 
     const pixels = pixelsByLabel.get(acc.label) ?? [];
+
+    // v2 confidence/sub-label/tags: majorities over the patch pixels. Ties in
+    // tier resolve to the conservative (lower) tier; sub ties to the lower code.
+    let confidence: ConfidenceTier | undefined;
+    let subText: string | null | undefined;
+    let tags: string[] | undefined;
+    if (aux.tiers || aux.subs) {
+      const [nLow, nMed, nHigh] = acc.tierCounts;
+      let bestTier = 1;
+      let bestN = nLow;
+      if (nMed > bestN) {
+        bestTier = 2;
+        bestN = nMed;
+      }
+      if (nHigh > bestN) bestTier = 3;
+      confidence = TIER_TEXT[bestTier] ?? "low";
+
+      subText = null;
+      let subBest = 0;
+      let subN = 0;
+      acc.subCounts.forEach((count, sub) => {
+        if (Math.floor(sub / 10) !== acc.classCode) return; // stale after majority flip
+        if (count > subN || (count === subN && (subBest === 0 || sub < subBest))) {
+          subBest = sub;
+          subN = count;
+        }
+      });
+      subText = subBest === 0 ? null : subLabel(subBest);
+
+      tags = [];
+      if (acc.persistCounts[1] > acc.persistCounts[0] && acc.persistCounts[1] > 0) {
+        tags.push("transient");
+      }
+      if (subBest !== 0 && CROP_SUBS.has(subBest)) tags.push("crop-cycle");
+      if (
+        aux.shortGap &&
+        (acc.classCode === CLASS.vegLoss || acc.classCode === CLASS.vegGain)
+      ) {
+        tags.push("short-gap");
+      }
+    }
+
     return {
       centroid: pixelToLngLat((acc.minCol + acc.maxCol) / 2, (acc.minRow + acc.maxRow) / 2, grid),
       bbox: [west, south, east, north],
@@ -236,6 +338,9 @@ function computeHotspots(
       classLabel: classLabel(acc.classCode),
       tehsilName,
       polygon: patchToMultiPolygon(pixels, width, grid),
+      ...(confidence ? { confidence } : {}),
+      ...(subText !== undefined ? { subLabel: subText } : {}),
+      ...(tags ? { tags } : {}),
     };
   });
 

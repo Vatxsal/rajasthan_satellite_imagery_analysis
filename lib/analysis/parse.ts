@@ -68,9 +68,13 @@ export interface ParsedCompositeRaster {
   obsCount: Float32Array;
   /** SCL of the most recent valid orbit (diagnostics). */
   scl: Float32Array;
+  /** Recent-orbit indices (most recent valid sample in the window) — Phase 2.7 persistence. */
+  recentNdvi: Float32Array;
+  recentMndwi: Float32Array;
+  recentNdbi: Float32Array;
 }
 
-/** Parses the composite 9-band FLOAT32 GeoTIFF (median reflectances + QC). */
+/** Parses the composite 12-band FLOAT32 GeoTIFF (median reflectances + QC + recent indices). */
 export async function parseCompositeRaster(buffer: Buffer): Promise<ParsedCompositeRaster> {
   const ab = buffer.buffer.slice(
     buffer.byteOffset,
@@ -83,7 +87,7 @@ export async function parseCompositeRaster(buffer: Buffer): Promise<ParsedCompos
   const bands = (await image.readRasters({
     width,
     height,
-    samples: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    samples: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
   })) as Float32Array[];
 
   const valid = new Uint8Array(width * height);
@@ -105,5 +109,8 @@ export async function parseCompositeRaster(buffer: Buffer): Promise<ParsedCompos
     valid,
     obsCount,
     scl: bands[8],
+    recentNdvi: bands[9],
+    recentMndwi: bands[10],
+    recentNdbi: bands[11],
   };
 }
