@@ -1,0 +1,39 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "cls": "no_change", "note": "labels the whole extent" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [74.66, 26.47],
+            [74.68, 26.47],
+            [74.68, 26.485],
+            [74.66, 26.485],
+            [74.66, 26.47]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "cls": "veg_loss", "note": "L-shape reference" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [74.663, 26.472],
+            [74.667, 26.472],
+            [74.667, 26.48],
+            [74.675, 26.48],
+            [74.675, 26.483],
+            [74.663, 26.483],
+            [74.663, 26.472]
+          ]
+        ]
+      }
+    }
+  ]
+}

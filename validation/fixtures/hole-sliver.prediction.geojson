@@ -1,0 +1,60 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "cls": "no_change", "note": "same outer rect with the same hole" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [74.691, 26.491],
+            [74.709, 26.491],
+            [74.709, 26.504],
+            [74.691, 26.504],
+            [74.691, 26.491]
+          ],
+          [
+            [74.696, 26.495],
+            [74.696, 26.501],
+            [74.704, 26.501],
+            [74.704, 26.495],
+            [74.696, 26.495]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "cls": "veg_gain", "note": "shrunk by ~100 m: margin becomes FN(no_change over veg_gain)" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [74.697, 26.496],
+            [74.703, 26.496],
+            [74.703, 26.5],
+            [74.697, 26.5],
+            [74.697, 26.496]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "cls": "veg_gain", "note": "thin sliver FP (~0.25 ha) inside labeled no_change" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [74.7, 26.492],
+            [74.7005, 26.492],
+            [74.7005, 26.4925],
+            [74.7, 26.4925],
+            [74.7, 26.492]
+          ]
+        ]
+      }
+    }
+  ]
+}
