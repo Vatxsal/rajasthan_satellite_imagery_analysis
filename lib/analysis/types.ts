@@ -68,6 +68,11 @@ export interface Hotspot {
   polygon: GeoJSON.MultiPolygon | null;
 }
 
+/** Which engine produced the result (v1 = classic single-date, v2 = composite inputs). */
+export type CompareEngine = "v1" | "v2";
+/** Input mode actually used: v1 always "single"; v2 defaults to "composite". */
+export type CompareInputMode = "single" | "composite";
+
 export interface CompareMetadata {
   areaName: string;
   areaLevel: "district" | "tehsil" | "ilr";
@@ -84,6 +89,12 @@ export interface CompareMetadata {
   coarse: boolean;
   sensitivity: Sensitivity;
   minPatchHa: number;
+  /** Engine that produced this result (CHANGE_ENGINE). */
+  engine: CompareEngine;
+  /** Input mode used for both sides ("single" = v1-style one-day fetch). */
+  inputMode: CompareInputMode;
+  /** ±days composite window per side; 0 when inputMode is "single". */
+  compositeWindowDays: number;
   /** Threshold values actually applied (after sensitivity scaling). */
   thresholds: Record<string, number>;
   generatedAt: string;

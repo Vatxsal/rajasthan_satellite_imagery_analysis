@@ -22,22 +22,28 @@ export function combineValidity(
 }
 
 /**
- * Dilates invalidity by one pixel (morphological erosion of the valid mask):
- * a valid pixel bordering invalid data is dropped, so cloud edges and scene
- * borders do not bleed false positives into the change map.
+ * Dilates invalidity by `radius` pixels (morphological erosion of the valid
+ * mask): a valid pixel bordering invalid data is dropped, so cloud edges and
+ * scene borders do not bleed false positives into the change map. v1 uses
+ * radius 1; the v2 composite uses radius 2 (COMPOSITE_ERODE_RADIUS).
  */
-export function dilateInvalid(valid: Uint8Array, width: number, height: number): Uint8Array {
+export function dilateInvalid(
+  valid: Uint8Array,
+  width: number,
+  height: number,
+  radius = 1,
+): Uint8Array {
   const out = Uint8Array.from(valid);
   // Seed = ORIGINALLY invalid pixels only (read from `valid`), so the halo
-  // stays exactly 1 px — no cascading erosion from freshly-killed pixels.
+  // stays exactly `radius` px — no cascading erosion from freshly-killed pixels.
   for (let i = 0; i < valid.length; i++) {
     if (valid[i] === 1) continue;
     const row = Math.floor(i / width);
     const col = i - row * width;
-    const r0 = Math.max(0, row - 1);
-    const r1 = Math.min(height - 1, row + 1);
-    const c0 = Math.max(0, col - 1);
-    const c1 = Math.min(width - 1, col + 1);
+    const r0 = Math.max(0, row - radius);
+    const r1 = Math.min(height - 1, row + radius);
+    const c0 = Math.max(0, col - radius);
+    const c1 = Math.min(width - 1, col + radius);
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) out[r * width + c] = 0;
     }

@@ -145,3 +145,12 @@ export const M2_PER_HA = 10_000;
 /** Sentinel SCL classes excluded from VALID: no-data, saturated/defective,
  *  cloud shadow, medium cloud, high cloud, thin cirrus, snow. */
 export const EXCLUDED_SCL = [0, 1, 3, 8, 9, 10, 11] as const;
+
+/** Engine-v2 composite: ±days around each date (0 = single day, v1-equivalent).
+ *  S2A+S2B revisit ≈ 5 d, so ±7 d → typically ~3 orbits per side (see audit §5). */
+export const COMPOSITE_WINDOW_DAYS_DEFAULT = 7;
+export const COMPOSITE_WINDOW_DAYS_MAX = 15;
+/** Composite sample gate: max per-pixel cloud probability (%, Sen2Cor CLD band). */
+export const COMPOSITE_MAX_CLOUD_PROB = 30;
+/** Composite valid-mask erosion radius (px) — twice v1's 1 px halo (cloud edges). */
+export const COMPOSITE_ERODE_RADIUS = 2;

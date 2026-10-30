@@ -111,15 +111,45 @@ correction, water guard on vegetation classes, valid-% quality gate (UI banner o
   `lib/env.ts:31`. No `PER_ANALYSIS_PU_LIMIT` exists yet (Phase 5 introduces it).
 - Per-IP: `COMPARE_RATE_LIMIT_PER_MIN = 6` (`lib/env.ts:30`), body cap 512 kB, AOI ≤ 70 000 km²,
   grid ≤ `COMPARE_MAX_PX`, route `maxDuration = 60` (`route.ts:19`).
-- **Composite vs single-date cost (Phase 1 verification)**: both are one Process request per side
-  over the same output grid; Sentinel Hub PU billing for a request scales with
-  `output pixels × data units`, not with the number of input acquisitions inside the
-  dataFilter window. Therefore a ±7 d multi-temporal median request is expected to cost the
-  **same PUs as a single-date request** (more input tiles read, no additional PU). This is an
-  assumption pending confirmation against the Sentinel Hub billing dashboard — Phase 1 must
-  re-measure a real composite request and record actual PU/report numbers here.
-- Render-budget guard remains accurate for composites (still 1 render per side) — verified
-  logically; the guard itself needs no change in Phase 1.
+- **Official PU formula (verified Phase 1, source: CDSE "Processing Unit" docs +
+  Sentinel Hub FAQ "How many processing units do I need")**:
+
+  ```
+  PU = (W×H / 512², min 0.01)
+     × (input bands / 3, dataMask not counted)
+     × (2 if 32-bit float TIFF, else 1)
+     × (data samples per pixel)
+     × (orthorectification ×2, data-fusion, … surcharges)
+  min cost per Process request = 0.005 PU
+  ```
+
+  "Data samples per pixel" = the samples delivered to `evaluatePixel`: **one per
+  orbit/time-slice in the `timeRange`** (batch docs: "number of data samples = no. of
+  observations available in the requested time range"; FAQ Example 2 shows ×500 for a
+  500-scene script; the CDSE PU-calculator article shows 26 ORBIT images → 886 PU).
+  **Correction of the Phase 0 draft**: composite requests do NOT cost the same as
+  single-date — PU scales **linearly with the number of orbits inside the window**
+  (a `SIMPLE` mosaic would collapse to 1 sample, but it keeps only one scene per pixel,
+  i.e. no temporal median, so we do not use it).
+- **Worked numbers** (grid cap `COMPARE_MAX_PX = 1500` → max size factor
+  1500²/262144 ≈ **8.58**; both engines FLOAT32 TIFF ×2):
+  - v1 single date (1 day ORBIT): 5 input bands (B03,B04,B08,B11,SCL) →
+    8.58 × 5/3 × 2 × 1 ≈ **28.6 PU/side, ≈57 PU/analysis** at the cap.
+  - v2 composite (±7 d → N ≈ 3 orbits over Rajasthan: S2A+S2B ≈ 5 d revisit):
+    9 input bands (B02,B03,B04,B05,B08,B11,B12,SCL,CLD) → 8.58 × 9/3 × 2 × 3 ≈
+    **154 PU/side, ≈309 PU/analysis** → ≈ **5.4× v1** (ratio = 9/5 × N).
+    Window ±3 d (N ≈ 1.4) → ≈ 72 PU/side (≈2.5× v1).
+  - Cost levers for Phase 2 band-set decisions: fewer input bands (each band = ÷3 of a
+    factor, 9→7 saves ~22%), narrower window (N ∝ window), `dataFilter.maxCloudCoverage`
+    / `preProcessScenes` (both cut counted samples — officially PU-reducing), and
+    16-bit DN output with `units: "DN"` input (removes the ×2 float factor — halving
+    v2 PU — at a 1e-4 reflectance quantisation; indices are scale-invariant ratios).
+  - Evalscript execution >200 ms adds 0.5 PU/100 ms — our median over ≤ ~3 ORBIT
+    samples is far below that (another reason to prefer ORBIT over TILE: TILE counts
+    every tile×pass as a sample).
+- Render-budget guard remains accurate for composites (still 1 Process render per side →
+  2 per analysis); PU metering is separate from `DAILY_RENDER_BUDGET` and needs no
+  Phase 1 change (a `PER_ANALYSIS_PU_LIMIT` guard lands with Phase 5).
 
 ---
 

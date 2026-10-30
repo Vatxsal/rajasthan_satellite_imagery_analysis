@@ -6,6 +6,8 @@
  * Bands: 1 NDVI · 2 MNDWI · 3 NDBI · 4 VALID (SCL) · 5 dataMask.
  * Nodata → 0 in every band; VALID=0 distinguishes "no data" from real 0s.
  */
+import { COMPOSITE_MAX_CLOUD_PROB } from "./config";
+
 const HEADER = "//VERSION=3\n";
 
 /** SCL classes excluded from VALID (mirrors config.ts EXCLUDED_SCL). */
@@ -39,4 +41,64 @@ function evaluatePixel(samples) {
     }
   }
   return [0, 0, 0, 0, 0];
+}`;
+
+/**
+ * Engine-v2 composite input: per-pixel median of every valid orbit in the
+ * ±COMPOSITE_WINDOW_DAYS timeRange (ORBIT mosaicking — one sample per
+ * overpass, mosaicked across tiles), so a cloudy anchor date falls back to
+ * neighbouring days instead of voiding the pixel.
+ *
+ * Valid sample = dataMask ∧ SCL ∉ excluded ∧ CLD ≤ 30 (Sen2Cor cloud %).
+ * 9 FLOAT32 bands: B02 B03 B04 B05 B08 B11 B12 · valid_obs_count · recent SCL.
+ * Nodata → all zeros (count 0 = invalid). Indices are derived client-side
+ * (lib/analysis/composite.ts) with the exact v1 formulas for A/B parity.
+ */
+export const COMPARE_EVALSCRIPT_COMPOSITE = `${HEADER}function setup() {
+  return {
+    input: [
+      { bands: ["B02", "B03", "B04", "B05", "B08", "B11", "B12", "SCL", "CLD", "dataMask"] },
+    ],
+    mosaicking: "ORBIT",
+    output: { bands: 9, sampleType: "FLOAT32" },
+  };
+}
+var excluded = ${JSON.stringify(EXCLUDED_SCL)};
+var maxCloudProb = ${COMPOSITE_MAX_CLOUD_PROB};
+function isValidSample(s) {
+  if (s.dataMask !== 1) return 0;
+  var scl = Math.round(s.SCL);
+  for (var i = 0; i < excluded.length; i++) {
+    if (scl === excluded[i]) return 0;
+  }
+  if (s.CLD > maxCloudProb) return 0;
+  return 1;
+}
+function median(values) {
+  values.sort(function (a, b) { return a - b; });
+  var mid = values.length >> 1;
+  return values.length % 2 ? values[mid] : (values[mid - 1] + values[mid]) / 2;
+}
+function evaluatePixel(samples) {
+  var acc = [[], [], [], [], [], [], []];
+  var count = 0;
+  var recentScl = 0;
+  for (var i = 0; i < samples.length; i++) {
+    var s = samples[i];
+    if (!isValidSample(s)) continue;
+    if (count === 0) recentScl = Math.round(s.SCL);
+    acc[0].push(s.B02);
+    acc[1].push(s.B03);
+    acc[2].push(s.B04);
+    acc[3].push(s.B05);
+    acc[4].push(s.B08);
+    acc[5].push(s.B11);
+    acc[6].push(s.B12);
+    count++;
+  }
+  if (count === 0) return [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  return [
+    median(acc[0]), median(acc[1]), median(acc[2]), median(acc[3]),
+    median(acc[4]), median(acc[5]), median(acc[6]), count, recentScl,
+  ];
 }`;

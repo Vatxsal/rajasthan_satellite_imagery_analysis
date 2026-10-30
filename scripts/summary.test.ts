@@ -28,6 +28,9 @@ function sampleStats(): CompareStats {
       coarse: false,
       sensitivity: "medium",
       minPatchHa: 0.2,
+      engine: "v1",
+      inputMode: "single",
+      compositeWindowDays: 0,
       thresholds: {
         waterGainDMndwi: 0.15,
         waterLossDMndwi: -0.15,

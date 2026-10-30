@@ -149,7 +149,7 @@ export function tileCacheKey(input: {
   return createHash("sha256").update(payload).digest("hex");
 }
 
-/** Cache key for one comparison run (area × dates × sensitivity × MMU). */
+/** Cache key for one comparison run (area × dates × sensitivity × MMU × engine × input). */
 export function compareCacheKey(input: {
   areaId: string;
   level: string;
@@ -157,6 +157,9 @@ export function compareCacheKey(input: {
   dateB: string;
   sensitivity: string;
   minPatchHa: number;
+  engine: string;
+  inputMode: string;
+  compositeWindowDays: number;
 }): string {
   const payload = JSON.stringify([
     COMPARE_VERSION,
@@ -166,6 +169,9 @@ export function compareCacheKey(input: {
     input.dateB,
     input.sensitivity,
     input.minPatchHa,
+    input.engine,
+    input.inputMode,
+    input.compositeWindowDays,
   ]);
   return createHash("sha256").update(payload).digest("hex");
 }

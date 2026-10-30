@@ -3,24 +3,34 @@
  * MMU → stats → overlay PNG. Fetches are sequential (matches the documented
  * progress stages and halves peak memory); rasters are released as soon as
  * their index bands are extracted.
+ *
+ * Engine v1 fetches each date's single UTC day (server-side indices).
+ * Engine v2 fetches ±compositeWindowDays medians (client-side indices, exact
+ * v1 formulas) and doubles the invalidity halo to 2 px — the classifier and
+ * every stage after it are shared.
  */
 import { deflateSync } from "node:zlib";
 import { bboxFromGeometry, computeOutputSize, type ClipGeometry } from "@/lib/cdse/geometry";
+import type { BBox } from "@/lib/data";
 import {
+  COMPOSITE_ERODE_RADIUS,
+  COMPOSITE_WINDOW_DAYS_DEFAULT,
+  COMPOSITE_WINDOW_DAYS_MAX,
   DEFAULT_MAX_PX,
   DEFAULT_MIN_PATCH_HA,
   scaledThresholds,
 } from "./config";
 import { combineValidity, classifyChange, dilateInvalid } from "./classify";
-import { fetchCompareRaster } from "./fetch";
+import { deriveIndices } from "./composite";
+import { fetchCompareCompositeRaster, fetchCompareRaster } from "./fetch";
 import { labelPatches, majorityFilter, minPatchPixels } from "./filter";
 import { makeAnalysisGrid } from "./grid";
 import { rasterizeAreaMask, rasterizeZones } from "./mask";
 import { classToRgba, encodePng } from "./png";
-import { parseCompareRaster, toIndexRasters } from "./parse";
+import { parseCompareRaster, parseCompositeRaster, toIndexRasters } from "./parse";
 import { computeStats, type ZoneMeta } from "./stats";
 import type { Sensitivity } from "./config";
-import type { CompareStats, DateSceneMeta } from "./types";
+import type { CompareEngine, CompareInputMode, CompareStats, DateSceneMeta, IndexRasters } from "./types";
 
 export type CompareStage = "fetch-a" | "fetch-b" | "analyze";
 
@@ -44,6 +54,12 @@ export interface RunCompareInput {
   sceneB?: DateSceneMeta | null;
   /** Tehsil polygons for the zonal breakdown (district level only). */
   zones?: CompareZone[] | null;
+  /** Change engine (CHANGE_ENGINE env): v1 = single-date inputs, v2 = composite. */
+  engine?: CompareEngine;
+  /** v2 input mode; engine v1 always runs "single". */
+  inputMode?: CompareInputMode;
+  /** v2 ±composite window in days (0-15). */
+  compositeWindowDays?: number;
 }
 
 export interface CompareArtifact {
@@ -76,40 +92,76 @@ export async function runCompare(
   const minPatchHa = input.minPatchHa ?? DEFAULT_MIN_PATCH_HA;
   const thresholds = scaledThresholds(input.sensitivity);
 
-  // --- date A ---------------------------------------------------------------
-  onStage?.("fetch-a");
-  let bufferA: Buffer | null = await fetchCompareRaster(input.geometry, input.dateA, bbox, {
-    width,
-    height,
-  });
-  const parsedA = await parseCompareRaster(bufferA);
-  bufferA = null;
+  const engine: CompareEngine = input.engine ?? "v1";
+  const useComposite =
+    engine === "v2" && (input.inputMode ?? "composite") === "composite";
+  const windowDays = Math.min(
+    Math.max(input.compositeWindowDays ?? COMPOSITE_WINDOW_DAYS_DEFAULT, 0),
+    COMPOSITE_WINDOW_DAYS_MAX,
+  );
 
-  // --- date B ---------------------------------------------------------------
-  onStage?.("fetch-b");
-  let bufferB: Buffer | null = await fetchCompareRaster(input.geometry, input.dateB, bbox, {
-    width,
-    height,
-  });
-  const parsedB = await parseCompareRaster(bufferB);
-  bufferB = null;
+  async function fetchSide(
+    stage: CompareStage,
+    date: string,
+    otherDate: string,
+    gridBox: BBox,
+  ): Promise<{ indices: IndexRasters; valid: Uint8Array; width: number; height: number }> {
+    onStage?.(stage);
+    const size = { width, height };
+    if (useComposite) {
+      let buffer: Buffer | null = await fetchCompareCompositeRaster(
+        input.geometry,
+        date,
+        gridBox,
+        size,
+        windowDays,
+        otherDate,
+      );
+      const parsed = await parseCompositeRaster(buffer);
+      buffer = null;
+      return {
+        indices: deriveIndices(parsed),
+        valid: parsed.valid,
+        width: parsed.width,
+        height: parsed.height,
+      };
+    }
+    let buffer: Buffer | null = await fetchCompareRaster(input.geometry, date, gridBox, size);
+    const parsed = await parseCompareRaster(buffer);
+    buffer = null;
+    return {
+      indices: toIndexRasters(parsed),
+      valid: parsed.valid,
+      width: parsed.width,
+      height: parsed.height,
+    };
+  }
+
+  const sideA = await fetchSide("fetch-a", input.dateA, input.dateB, bbox);
+  const sideB = await fetchSide("fetch-b", input.dateB, input.dateA, bbox);
 
   // --- analysis -------------------------------------------------------------
   onStage?.("analyze");
-  if (parsedA.width !== width || parsedA.height !== height || parsedB.width !== width || parsedB.height !== height) {
+  if (
+    sideA.width !== width ||
+    sideA.height !== height ||
+    sideB.width !== width ||
+    sideB.height !== height
+  ) {
     throw Object.assign(new Error("Unexpected raster size from Copernicus."), {
       status: 502,
       code: "CDSE_BAD_GRID",
     });
   }
 
-  const a = toIndexRasters(parsedA);
-  const b = toIndexRasters(parsedB);
+  const a = sideA.indices;
+  const b = sideB.indices;
   const inside = rasterizeAreaMask(input.geometry, grid);
   const valid = dilateInvalid(
-    combineValidity(parsedA.valid, parsedB.valid, inside),
+    combineValidity(sideA.valid, sideB.valid, inside),
     width,
     height,
+    useComposite ? COMPOSITE_ERODE_RADIUS : 1,
   );
 
   let classGrid = classifyChange(a, b, valid, inside, thresholds);
@@ -145,6 +197,9 @@ export async function runCompare(
       coarse: grid.metersPerPixel > 10,
       sensitivity: input.sensitivity,
       minPatchHa,
+      engine,
+      inputMode: useComposite ? "composite" : "single",
+      compositeWindowDays: useComposite ? windowDays : 0,
       thresholds: {
         waterGainDMndwi: t.waterGainD,
         waterLossDMndwi: t.waterLossD,
