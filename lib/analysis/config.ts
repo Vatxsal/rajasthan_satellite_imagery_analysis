@@ -253,3 +253,17 @@ export const VOTE = {
   /** Recent-orbit Δ must reach this fraction of the threshold to be persistent. */
   persistFactor: 0.5,
 } as const;
+
+// ── Phase 3 — denoise & vector output ──────────────────────────────────────
+
+/** Confidence-aware MMU (v2): keep patches ≥ this × MMU when their pixels are
+ *  mostly high-confidence — fixes the hard MMU erasure of real small changes. */
+export const MMU_CONFIDENCE_SIZE_FACTOR = 0.5;
+export const MMU_CONFIDENCE_HIGH_SHARE = 0.4;
+
+/** Patch outlines: Douglas-Peucker tolerance (edge/pixel units) before
+ *  corner-cutting — 0.5 px collapses stair-steps into diagonals. */
+export const POLYGON_SIMPLIFY_PX = 0.5;
+/** Chaikin corner-cutting passes after simplification (visual smoothing only —
+ *  stats/areas always come from the raster, never from these vertices). */
+export const POLYGON_SMOOTH_PASSES = 2;

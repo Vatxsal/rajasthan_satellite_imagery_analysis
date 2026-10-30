@@ -29,7 +29,7 @@ import {
 } from "./config";
 import { combineValidity, classifyChange, dilateInvalid } from "./classify";
 import { fetchCompareCompositeRaster, fetchCompareRaster } from "./fetch";
-import { labelPatches, majorityFilter, minPatchPixels } from "./filter";
+import { fillSmallHoles, labelPatches, majorityFilter, minPatchPixels } from "./filter";
 import { makeAnalysisGrid } from "./grid";
 import { rasterizeAreaMask, rasterizeZones } from "./mask";
 import { classToRgba, encodePng } from "./png";
@@ -289,11 +289,12 @@ export async function runCompare(
     throw Object.assign(new Error("Missing analysis inputs."), { status: 500 });
   }
 
-  // Shared noise control + MMU (majority filter may impute a few change
-  // pixels — stats.ts assigns them the conservative low tier).
-  classGrid = majorityFilter(classGrid, valid, width, height);
+  // Shared noise control: 2 majority passes, speckle-hole fill, then MMU
+  // (confidence-aware for v2 — a high-confidence sub-MMU patch survives).
+  classGrid = majorityFilter(classGrid, valid, width, height, 2);
   const minPixels = minPatchPixels(minPatchHa, grid.metersX, grid.metersY);
-  const { labels } = labelPatches(classGrid, width, height, minPixels);
+  fillSmallHoles(classGrid, valid, width, height, minPixels);
+  const { labels } = labelPatches(classGrid, width, height, minPixels, tiers);
 
   let zones: Int16Array | null = null;
   let zoneMeta: ZoneMeta[] | null = null;

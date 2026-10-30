@@ -237,6 +237,7 @@ export async function POST(request: Request): Promise<Response> {
           });
           controller.close();
         } catch (error) {
+          console.error("[compare:analyze] failed:", error instanceof Error ? `${error.name}: ${error.message}` : error);
           try {
             send({ type: "error", ...streamErrorBody(error) });
             controller.close();
