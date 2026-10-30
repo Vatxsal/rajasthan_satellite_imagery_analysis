@@ -14,6 +14,13 @@ const STRIDE = 4;
 const SEARCH_RADIUS = 2;
 /** Minimum NCC improvement over (0,0) required before shifting anything. */
 const MIN_IMPROVEMENT = 0.01;
+/**
+ * Absolute NCC floor before any shift is trusted. A textured sub-scene
+ * correlates well above this when aligned; noise-dominated or near-uniform
+ * inputs never do — an offset that only "wins" there is a noise artefact
+ * (scenarios, cloud-free flats, water) and must not be applied.
+ */
+const MIN_NCC_LEVEL = 0.25;
 
 export interface CoRegResult {
   dx: number;
@@ -105,7 +112,9 @@ export function estimateShift(
     }
   }
   const applied =
-    (bestDx !== 0 || bestDy !== 0) && best > zeroScore + MIN_IMPROVEMENT;
+    (bestDx !== 0 || bestDy !== 0) &&
+    best > zeroScore + MIN_IMPROVEMENT &&
+    best >= MIN_NCC_LEVEL;
   return {
     dx: applied ? bestDx : 0,
     dy: applied ? bestDy : 0,
