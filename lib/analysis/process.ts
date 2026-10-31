@@ -22,6 +22,8 @@ import {
   COMPOSITE_WINDOW_DAYS_MAX,
   DEFAULT_MAX_PX,
   DEFAULT_MIN_PATCH_HA,
+  GRID_MIN_PX,
+  M2_PER_HA,
   V2_SHORT_GAP_DAYS,
   scaledThresholds,
   seasonalTag,
@@ -30,11 +32,17 @@ import {
 } from "./config";
 import { combineValidity, classifyChange, dilateInvalid } from "./classify";
 import { fillSmallHoles, labelPatches, majorityFilter, minPatchPixels } from "./filter";
-import { makeAnalysisGrid } from "./grid";
+import { makeAnalysisGrid, nativeLongSidePx } from "./grid";
 import { rasterizeAreaMask, rasterizeZones } from "./mask";
 import { classToRgba, encodePng } from "./png";
 import type { ParsedCompositeRaster } from "./parse";
-import { computeStats, type ZoneMeta } from "./stats";
+import {
+  V1_INPUT_BANDS,
+  V2_INPUT_BANDS,
+  compositeSamples,
+  estimateAnalysisPu,
+} from "./pu";
+import { buildPatchVectors, computeStats, type ZoneMeta } from "./stats";
 import {
   adaptiveThresholds,
   applyShift,
@@ -92,6 +100,8 @@ export interface CompareArtifact {
   classGrid: Uint8Array;
   /** Kept-patch labels from labelPatches (0 = no kept patch). */
   labels: Int32Array;
+  /** Full-coverage change patches, largest-first cap (Phase 5, #13). */
+  patchVectors: GeoJSON.FeatureCollection;
   width: number;
   height: number;
   bbox: [number, number, number, number];
@@ -126,6 +136,13 @@ export interface PreparedCompare {
   minPatchHa: number;
   engine: CompareEngine;
   inputMode: CompareInputMode;
+  /** Estimated PU for both renders (cost model, audit §5). */
+  estimatedPu: number;
+}
+
+export interface PrepareOptions {
+  /** PER_ANALYSIS_PU_LIMIT (PU); ≤0 or omitted disables the guard. */
+  puLimit?: number;
 }
 
 function dayGap(dateA: string, dateB: string): number {
@@ -137,7 +154,7 @@ function dayGap(dateA: string, dateB: string): number {
  * the composite window. Shared by the fetching path and processCompare (runs
  * twice there — trivial cost, single source of truth).
  */
-export function prepareCompare(input: RunCompareInput): PreparedCompare {
+export function prepareCompare(input: RunCompareInput, options: PrepareOptions = {}): PreparedCompare {
   const bbox = bboxFromGeometry(input.geometry);
   if (!bbox) {
     throw Object.assign(new Error("Geometry has no coordinates."), {
@@ -145,7 +162,11 @@ export function prepareCompare(input: RunCompareInput): PreparedCompare {
       code: "INVALID_GEOMETRY",
     });
   }
-  const { width, height } = computeOutputSize(bbox, input.maxPx ?? DEFAULT_MAX_PX);
+  // #14: COMPARE_MAX_PX is a ceiling, not a target — never upscale a small
+  // AOI past its native 10 m pixel grid (faster, cheaper, honest resolution).
+  const maxPx = input.maxPx ?? DEFAULT_MAX_PX;
+  const nativeCap = Math.max(GRID_MIN_PX, Math.min(maxPx, Math.floor(nativeLongSidePx(bbox))));
+  const { width, height } = computeOutputSize(bbox, nativeCap);
   const grid = makeAnalysisGrid(bbox, width, height);
   const minPatchHa = input.minPatchHa ?? DEFAULT_MIN_PATCH_HA;
   const baseThresholds = scaledThresholds(input.sensitivity);
@@ -161,6 +182,25 @@ export function prepareCompare(input: RunCompareInput): PreparedCompare {
         )
       : 0;
 
+  // #15: PU cost estimate + cap, before any network work.
+  const inputBands = engine === "v2" ? V2_INPUT_BANDS : V1_INPUT_BANDS;
+  const samples =
+    engine === "v2" && inputMode === "composite" ? compositeSamples(windowDays) : 1;
+  const estimatedPu =
+    Math.round(
+      estimateAnalysisPu({ width, height, inputBands, float: true, samples }) * 100,
+    ) / 100;
+  const puLimit = options.puLimit ?? 0;
+  if (puLimit > 0 && estimatedPu > puLimit) {
+    throw Object.assign(
+      new Error(
+        `This analysis would cost about ${estimatedPu} PU, over the server cap of ${puLimit} PU. ` +
+          `Pick a smaller area or a shorter composite window, or raise PER_ANALYSIS_PU_LIMIT.`,
+      ),
+      { status: 413, code: "PU_LIMIT_EXCEEDED" },
+    );
+  }
+
   return {
     bbox,
     grid,
@@ -172,6 +212,7 @@ export function prepareCompare(input: RunCompareInput): PreparedCompare {
     minPatchHa,
     engine,
     inputMode,
+    estimatedPu,
   };
 }
 
@@ -184,7 +225,7 @@ export function processCompare(
   inputs: RasterInputs,
 ): CompareArtifact {
   const prep = prepareCompare(input);
-  const { bbox, grid, width, height, baseThresholds, windowDays, gapDays, minPatchHa, engine, inputMode } = prep;
+  const { bbox, grid, width, height, baseThresholds, windowDays, gapDays, minPatchHa, engine, inputMode, estimatedPu } = prep;
   // Consume the inputs object up front (it is a throwaway for every caller):
   // raw bands are released as soon as their index stacks are derived, exactly
   // like the original fetch path, so peak memory stays one side at a time.
@@ -337,6 +378,15 @@ export function processCompare(
     persist,
     shortGap,
   });
+  // Phase 5 (#13): full-coverage vector layer for events/exports — kept off
+  // the client-facing result, so response size is unchanged.
+  const patchVectors = buildPatchVectors(
+    classGrid,
+    labels,
+    grid,
+    (grid.metersX * grid.metersY) / M2_PER_HA,
+    { tiers, subs, persist, shortGap },
+  );
   const result: CompareStats = {
     ...core,
     metadata: {
@@ -356,6 +406,7 @@ export function processCompare(
       engine,
       inputMode,
       compositeWindowDays: windowDays,
+      estimatedPu,
       // Everything actually applied — including the state gates (#17) and,
       // for v2, the adaptive-scaled values plus engine diagnostics.
       thresholds: {
@@ -377,5 +428,5 @@ export function processCompare(
   const overlayPng = encodePng(classToRgba(classGrid, width), width, height);
   const classGz = deflateSync(classGrid);
 
-  return { result, overlayPng, classGz, classGrid, labels, width, height, bbox };
+  return { result, overlayPng, classGz, classGrid, labels, patchVectors, width, height, bbox };
 }

@@ -31,6 +31,7 @@ function sampleStats(): CompareStats {
       engine: "v1",
       inputMode: "single",
       compositeWindowDays: 0,
+      estimatedPu: 0,
       thresholds: {
         waterGainDMndwi: 0.15,
         waterLossDMndwi: -0.15,

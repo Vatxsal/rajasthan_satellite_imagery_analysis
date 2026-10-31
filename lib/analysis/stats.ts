@@ -4,7 +4,7 @@
  * These numbers are the single source of truth for the UI *and* the AI
  * summary — the model never computes anything itself.
  */
-import { CLASS, CLASS_DEFS, M2_PER_HA, SUB, classLabel, subLabel } from "./config";
+import { CLASS, CLASS_DEFS, M2_PER_HA, PATCH_VECTOR_LIMIT, SUB, classLabel, subLabel } from "./config";
 import { pixelToLngLat } from "./mask";
 import { patchToMultiPolygon } from "./polygon";
 import { PERSIST, TIER } from "./v2/classify";
@@ -185,11 +185,24 @@ interface PatchAcc {
   persistCounts: [number, number];
 }
 
-interface AuxGrids {
+export interface AuxGrids {
   tiers: Uint8Array | null;
   subs: Uint8Array | null;
   persist: Uint8Array | null;
   shortGap: boolean;
+}
+
+/** Majority tier over a patch; ties resolve to the conservative (lower) tier. */
+function majorityTier(counts: [number, number, number]): ConfidenceTier {
+  const [nLow, nMed, nHigh] = counts;
+  let bestTier = 1;
+  let bestN = nLow;
+  if (nMed > bestN) {
+    bestTier = 2;
+    bestN = nMed;
+  }
+  if (nHigh > bestN) bestTier = 3;
+  return TIER_TEXT[bestTier] ?? "low";
 }
 
 function computeHotspots(
@@ -295,15 +308,7 @@ function computeHotspots(
     let subText: string | null | undefined;
     let tags: string[] | undefined;
     if (aux.tiers || aux.subs) {
-      const [nLow, nMed, nHigh] = acc.tierCounts;
-      let bestTier = 1;
-      let bestN = nLow;
-      if (nMed > bestN) {
-        bestTier = 2;
-        bestN = nMed;
-      }
-      if (nHigh > bestN) bestTier = 3;
-      confidence = TIER_TEXT[bestTier] ?? "low";
+      confidence = majorityTier(acc.tierCounts);
 
       subText = null;
       let subBest = 0;
@@ -345,4 +350,93 @@ function computeHotspots(
   });
 
   return hotspots;
+}
+
+/**
+ * Phase 5 (#13) — full-coverage vector layer: every kept change patch
+ * (largest first, capped at `limit`) as a GeoJSON Feature. The client-facing
+ * stats still carry only the top-10 hotspots; this collection lives on the
+ * CompareArtifact and feeds the events/export pipeline (Phase 6).
+ */
+export function buildPatchVectors(
+  classGrid: Uint8Array,
+  labels: Int32Array,
+  grid: AnalysisGrid,
+  pxAreaHa: number,
+  aux: AuxGrids,
+  limit: number = PATCH_VECTOR_LIMIT,
+): GeoJSON.FeatureCollection {
+  const { width } = grid;
+  const patches = new Map<
+    number,
+    { label: number; count: number; classCode: number; tierCounts: [number, number, number] }
+  >();
+  for (let i = 0; i < labels.length; i++) {
+    const label = labels[i];
+    if (label === 0) continue;
+    let acc = patches.get(label);
+    if (!acc) {
+      acc = { label, count: 0, classCode: classGrid[i], tierCounts: [0, 0, 0] };
+      patches.set(label, acc);
+    }
+    acc.count += 1;
+    if (aux.tiers) {
+      const tier = aux.tiers[i];
+      if (tier >= TIER.low && tier <= TIER.high) acc.tierCounts[tier - 1] += 1;
+    }
+  }
+
+  const kept = Array.from(patches.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+  if (kept.length === 0) return { type: "FeatureCollection", features: [] };
+
+  // One pass over the label raster collects the pixels of the kept patches.
+  const wanted = new Set(kept.map((k) => k.label));
+  const pixelsByLabel = new Map<number, number[]>();
+  for (let i = 0; i < labels.length; i++) {
+    const label = labels[i];
+    if (label === 0 || !wanted.has(label)) continue;
+    let list = pixelsByLabel.get(label);
+    if (!list) {
+      list = [];
+      pixelsByLabel.set(label, list);
+    }
+    list.push(i);
+  }
+
+  const features: GeoJSON.Feature[] = [];
+  for (const acc of kept) {
+    const pixels = pixelsByLabel.get(acc.label) ?? [];
+    if (pixels.length === 0) continue;
+    const geometry = patchToMultiPolygon(pixels, width, grid);
+    if (!geometry) continue;
+    // Patch bbox centre (same convention as hotspots; may fall outside an L).
+    let minCol = width;
+    let maxCol = 0;
+    let minRow = grid.height;
+    let maxRow = 0;
+    for (const i of pixels) {
+      const col = i % width;
+      const row = Math.floor(i / width);
+      if (col < minCol) minCol = col;
+      if (col > maxCol) maxCol = col;
+      if (row < minRow) minRow = row;
+      if (row > maxRow) maxRow = row;
+    }
+    const hasTiers = aux.tiers !== null;
+    features.push({
+      type: "Feature",
+      geometry,
+      properties: {
+        label: acc.label,
+        classCode: acc.classCode,
+        classLabel: classLabel(acc.classCode),
+        areaHa: Math.round(acc.count * pxAreaHa * 100) / 100,
+        centroid: pixelToLngLat((minCol + maxCol) / 2, (minRow + maxRow) / 2, grid),
+        ...(hasTiers ? { confidence: majorityTier(acc.tierCounts) } : {}),
+      },
+    });
+  }
+  return { type: "FeatureCollection", features };
 }

@@ -43,6 +43,11 @@ export const SENSITIVITY_MULTIPLIER: Record<Sensitivity, number> = {
 export const DEFAULT_SENSITIVITY: Sensitivity = "medium";
 /** Long-side cap of the analysis grid (px) — server override COMPARE_MAX_PX. */
 export const DEFAULT_MAX_PX = 1500;
+/** Native Sentinel-2 optical resolution (m) — grid cap below COMPARE_MAX_PX
+ *  so small AOIs run at native pixels instead of being upscaled (#14). */
+export const GRID_NATIVE_RES_M = 10;
+/** Absolute floor of the analysis grid long side (px) — guards degenerate bboxes. */
+export const GRID_MIN_PX = 32;
 /** Minimum mapping unit in hectares — patches smaller than this become "no change". */
 export const DEFAULT_MIN_PATCH_HA = 0.2;
 /** 3×3 majority (mode) filter kernel size. */
@@ -267,3 +272,9 @@ export const POLYGON_SIMPLIFY_PX = 0.5;
 /** Chaikin corner-cutting passes after simplification (visual smoothing only —
  *  stats/areas always come from the raster, never from these vertices). */
 export const POLYGON_SMOOTH_PASSES = 2;
+
+// ── Phase 5 — cost model & full-coverage vectors ───────────────────────────
+
+/** Max change patches vectorized into the artifact's full-coverage layer (#13):
+ *  largest first, so the events/export pipeline always sees the big patches. */
+export const PATCH_VECTOR_LIMIT = 10_000;

@@ -120,6 +120,8 @@ export interface CompareMetadata {
   inputMode: CompareInputMode;
   /** ±days composite window per side; 0 when inputMode is "single". */
   compositeWindowDays: number;
+  /** Estimated CDSE processing units for both renders (cost model, audit §5). */
+  estimatedPu: number;
   /** Threshold values actually applied (after sensitivity scaling). */
   thresholds: Record<string, number>;
   /** v2 only: engine diagnostics (normalisation, co-reg, adaptive scales, …). */
