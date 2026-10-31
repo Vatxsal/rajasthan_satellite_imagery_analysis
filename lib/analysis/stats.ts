@@ -5,6 +5,7 @@
  * summary — the model never computes anything itself.
  */
 import { CLASS, CLASS_DEFS, M2_PER_HA, PATCH_VECTOR_LIMIT, SUB, classLabel, subLabel } from "./config";
+import { eventId } from "./events";
 import { pixelToLngLat } from "./mask";
 import { patchToMultiPolygon } from "./polygon";
 import { PERSIST, TIER } from "./v2/classify";
@@ -425,15 +426,21 @@ export function buildPatchVectors(
       if (row > maxRow) maxRow = row;
     }
     const hasTiers = aux.tiers !== null;
+    const centroid = pixelToLngLat((minCol + maxCol) / 2, (minRow + maxRow) / 2, grid);
+    const areaHa = Math.round(acc.count * pxAreaHa * 100) / 100;
+    // #16: stable event id — GeoJSON Feature.id plus a copy in properties.
+    const id = eventId(acc.classCode, acc.label, centroid, areaHa);
     features.push({
       type: "Feature",
+      id,
       geometry,
       properties: {
+        id,
         label: acc.label,
         classCode: acc.classCode,
         classLabel: classLabel(acc.classCode),
-        areaHa: Math.round(acc.count * pxAreaHa * 100) / 100,
-        centroid: pixelToLngLat((minCol + maxCol) / 2, (minRow + maxRow) / 2, grid),
+        areaHa,
+        centroid,
         ...(hasTiers ? { confidence: majorityTier(acc.tierCounts) } : {}),
       },
     });

@@ -137,3 +137,43 @@ export function downloadHotspotsGeoJson(stats: CompareStats): void {
     "application/geo+json",
   );
 }
+
+/** Page size of the events GeoJSON export (must match the route's max). */
+const EVENTS_EXPORT_PAGE = 500;
+/** Hard page ceiling — 50k events is far beyond any analysis patch count. */
+const EVENTS_EXPORT_MAX_PAGES = 100;
+
+/**
+ * Full-coverage change events (Phase 6, #13): pages /api/compare/events until
+ * the filtered set is complete and saves one FeatureCollection. The loops are
+ * strictly bounded (max pages + empty-page break) so a bad server response
+ * can never spin forever.
+ */
+export async function downloadEventsGeoJson(
+  key: string,
+  dates: { dateA: string; dateB: string },
+): Promise<void> {
+  const features: GeoJSON.Feature[] = [];
+  let offset = 0;
+  let total = 0;
+  for (let page = 0; page < EVENTS_EXPORT_MAX_PAGES; page++) {
+    const response = await fetch(
+      `/api/compare/events?key=${encodeURIComponent(key)}&limit=${EVENTS_EXPORT_PAGE}&offset=${offset}`,
+    );
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+      throw new Error(payload?.message ?? "The events file is unavailable. Run the analysis again.");
+    }
+    const data = (await response.json()) as { total: number; events: GeoJSON.Feature[] };
+    total = data.total;
+    features.push(...data.events);
+    if (data.events.length === 0) break;
+    offset += data.events.length;
+    if (offset >= total) break;
+  }
+  saveText(
+    JSON.stringify({ type: "FeatureCollection", features }, null, 2),
+    `change_${dates.dateA}_${dates.dateB}_events.geojson`,
+    "application/geo+json",
+  );
+}

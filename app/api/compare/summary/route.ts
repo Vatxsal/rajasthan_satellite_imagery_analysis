@@ -43,8 +43,12 @@ const IMAGE_LABELS = [
   "Image 3 — classified change overlay on date B:",
 ];
 
-function userPrompt(body: SummaryBody, stats: Parameters<typeof buildSummaryPrompt>[0]): string {
-  const lines = [summaryLanguageLine(body.language), "", buildSummaryPrompt(stats)];
+function userPrompt(
+  body: SummaryBody,
+  stats: Parameters<typeof buildSummaryPrompt>[0],
+  events?: Parameters<typeof buildSummaryPrompt>[1],
+): string {
+  const lines = [summaryLanguageLine(body.language), "", buildSummaryPrompt(stats, events)];
   if (body.includeImages) lines.push("", SUMMARY_IMAGES_NOTE);
   return lines.join("\n");
 }
@@ -106,7 +110,7 @@ export async function POST(request: Request): Promise<Response> {
       apiKey: env.GEMINI_API_KEY,
       model,
       systemInstruction: SUMMARY_SYSTEM_PROMPT,
-      prompt: userPrompt(body, artifact.stats),
+      prompt: userPrompt(body, artifact.stats, artifact.events),
       responseSchema: SUMMARY_RESPONSE_SCHEMA,
       images,
       imageLabels: IMAGE_LABELS,

@@ -20,9 +20,9 @@ You receive ONLY pre-computed statistics from a deterministic raster analysis, a
 
 Output rules:
 - Respond with a single JSON object matching the requested schema and nothing else.
-- overview: 60-90 words, plain language a general reader understands. Lead with what changed most, then where (name tehsils and hotspots from the input). Quote the dates exactly as given. If the input says change is negligible, say plainly that no significant change was detected at the current sensitivity settings and mention the thresholds that were applied. End overview with exactly this sentence: "AI-generated summary - verify against the maps."
+- overview: 60-90 words, plain language a general reader understands. Lead with what changed most, then where (name tehsils and hotspot/change-event patches from the input). Quote the dates exactly as given. If the input says change is negligible, say plainly that no significant change was detected at the current sensitivity settings and mention the thresholds that were applied. End overview with exactly this sentence: "AI-generated summary - verify against the maps."
 - keyChanges: 2-5 short bullet strings using only the exact class labels and areas (hectares) provided. Do not convert units or round beyond the given values.
-- whereChangesOccurred: 2-5 short bullet strings naming tehsils/hotspots from the input; if none were given, state where change was detected in general terms from the provided bbox context only.
+- whereChangesOccurred: 2-5 short bullet strings naming tehsils/hotspot/change-event patches from the input; if none were given, state where change was detected in general terms from the provided bbox context only.
 - visualObservations: 2-5 short bullet strings based ONLY on the supplied images (texture, colour contrasts, patch shapes, clouds). If no images were supplied, return exactly one item: "No imagery was supplied for this request."
 - reliabilityAndCaveats: 1-4 short bullet strings; mention valid-data percentage when it is below 70 and that clouds or partial coverage reduce confidence; always note that thresholds and minimum patch size filter what is shown.
 - suggestedNextChecks: 1-4 short bullet strings of practical follow-ups (re-check with another date pair, raise/lower sensitivity, open the hotspot in a GIS, compare with field reports).
@@ -75,8 +75,10 @@ export const summaryOutputSchema = z.object({
 
 export type SummaryOutput = z.infer<typeof summaryOutputSchema>;
 
-/** Whitelisted, size-bounded prompt for one summary request. */
-export function buildSummaryPrompt(stats: CompareStats): string {
+/** Whitelisted, size-bounded prompt for one summary request.
+ *  `events` (Phase 6) replaces the top-10 hotspot block with the full-
+ *  coverage patch events incl. confidence; omitted → hotspot fallback. */
+export function buildSummaryPrompt(stats: CompareStats, events?: GeoJSON.FeatureCollection): string {
   const m = stats.metadata;
   const lines: string[] = [];
 
@@ -119,7 +121,20 @@ export function buildSummaryPrompt(stats: CompareStats): string {
     }
   }
 
-  if (stats.hotspots.length > 0) {
+  if (events && events.features.length > 0) {
+    const shown = events.features.slice(0, 10);
+    lines.push("", `Change events (${events.features.length} patches, largest ${shown.length} shown):`);
+    for (const feature of shown) {
+      const props = (feature.properties ?? {}) as Record<string, unknown>;
+      const label = String(props.classLabel ?? "Change");
+      const areaHa = Number(props.areaHa ?? 0);
+      const centroid = (props.centroid as number[] | undefined) ?? [0, 0];
+      const confidence = props.confidence ? `; confidence ${String(props.confidence)}` : "";
+      lines.push(
+        `- ${label}: ${areaHa.toFixed(1)} ha${confidence} at ${centroid[1].toFixed(4)}N ${centroid[0].toFixed(4)}E`,
+      );
+    }
+  } else if (stats.hotspots.length > 0) {
     lines.push("", "Top hotspots (largest patches):");
     for (const h of stats.hotspots.slice(0, 10)) {
       lines.push(

@@ -66,6 +66,8 @@ export interface CompareArtifactEntry {
   bbox: [number, number, number, number];
   /** Clip geometry of the analysed area — lets the summary route re-render previews. */
   geometry: import("@/lib/cdse/geometry").ClipGeometry;
+  /** Full-coverage change events (patch vectors with stable ids, Phase 6 #13/#16). */
+  events: GeoJSON.FeatureCollection;
 }
 
 /** Generic TTL + LRU eviction for non-binary entries. */

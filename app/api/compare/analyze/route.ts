@@ -225,6 +225,7 @@ export async function POST(request: Request): Promise<Response> {
             height: artifact.height,
             bbox: artifact.bbox,
             geometry: area.geometry,
+            events: artifact.patchVectors,
           };
           compareResultCache.set(key, entry, env.IMAGERY_CACHE_TTL_SECONDS);
 
