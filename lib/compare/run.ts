@@ -8,6 +8,10 @@ export interface AnalyzeRequestBody {
   dateB: string;
   sensitivity: "low" | "medium" | "high";
   minPatchHa: number;
+  /** Engine v2 input mode (server ignores it while CHANGE_ENGINE=v1). */
+  inputMode?: "single" | "composite";
+  /** ±days around each date for composite inputs (0-15). */
+  compositeWindowDays?: number;
 }
 
 /** Failures carry the same { code, message } contract as the API routes. */

@@ -55,6 +55,9 @@ test("buildPatchVectors: every kept patch becomes a feature with props", () => {
   assert.equal(props.classLabel, "Vegetation loss");
   assert.ok((props.areaHa as number) > 0);
   assert.ok(Array.isArray(props.centroid) && (props.centroid as number[]).length === 2);
+  const bbox = props.bbox as number[];
+  assert.equal(bbox.length, 4, "event bbox present for map focusing");
+  assert.ok(bbox[0] < bbox[2] && bbox[1] < bbox[3], "bbox ordered [west, south, east, north]");
   assert.equal("confidence" in props, false, "v1 (no tiers) carries no confidence");
 });
 

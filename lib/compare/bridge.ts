@@ -589,6 +589,12 @@ function hotspotPopupHtml(
     (tehsil
       ? `<div class="hs-pop-row"><span class="k">Tehsil</span><span class="v">${escapeHtml(tehsil)}</span></div>`
       : "") +
+    (hotspot?.confidence
+      ? `<div class="hs-pop-row"><span class="k">Confidence</span><span class="v">${escapeHtml(hotspot.confidence)}</span></div>`
+      : "") +
+    (hotspot?.subLabel
+      ? `<div class="hs-pop-row"><span class="k">Note</span><span class="v">${escapeHtml(hotspot.subLabel)}</span></div>`
+      : "") +
     `<div class="hs-pop-row">` +
     `<span class="k">Centroid</span><span class="v mono">${coords}</span>` +
     `<button type="button" class="hs-pop-btn" data-copy-coords="${lat.toFixed(6)}, ${lon.toFixed(6)}" ` +

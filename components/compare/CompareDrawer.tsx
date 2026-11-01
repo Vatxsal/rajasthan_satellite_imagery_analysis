@@ -25,7 +25,7 @@ const TAB_OPTIONS: Array<{ value: CompareTab; label: string; icon: LucideIcon }>
   { value: "swipe", label: "Swipe", icon: MoveHorizontal },
   { value: "change-map", label: "Changes", icon: Layers3 },
   { value: "statistics", label: "Stats", icon: BarChart3 },
-  { value: "hotspots", label: "Hotspots", icon: Flame },
+  { value: "hotspots", label: "Events", icon: Flame },
   { value: "summary", label: "Summary", icon: Sparkles },
 ];
 

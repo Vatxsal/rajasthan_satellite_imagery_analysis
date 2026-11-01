@@ -1,17 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, Check, Copy, FileJson, Info, Loader2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
 import Slider from "@/components/ui/Slider";
 import { cn } from "@/components/ui/cn";
 import { focusHotspot, focusTehsil } from "@/lib/compare/bridge";
-import { downloadHotspotsGeoJson, downloadStatsCsv } from "@/lib/compare/export";
-import type { CompareStats } from "@/lib/analysis/types";
+import { downloadEventsGeoJson, downloadStatsCsv } from "@/lib/compare/export";
+import type { CompareStats, ConfidenceTier } from "@/lib/analysis/types";
 import type { Sensitivity } from "@/lib/analysis/config";
 import { classColor } from "@/lib/analysis/config";
-import { useCompareStore } from "@/store/useCompareStore";
+import { useCompareStore, type CompareInputMode } from "@/store/useCompareStore";
+import { useAppStore } from "@/store/useAppStore";
 
 const THRESHOLD_LABELS: Record<string, string> = {
   waterGainDMndwi: "ΔMNDWI water gain ≥",
@@ -28,6 +29,14 @@ function ha(value: number): string {
 
 function rgb(color: [number, number, number]): string {
   return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+}
+
+/** "high 62% · med 30% · low 8%" from per-tier changed-pixel counts. */
+function confidenceShares(counts: { high: number; medium: number; low: number }): string {
+  const total = counts.high + counts.medium + counts.low;
+  if (total <= 0) return "—";
+  const pct = (n: number): number => Math.round((n / total) * 100);
+  return `high ${pct(counts.high)}% · med ${pct(counts.medium)}% · low ${pct(counts.low)}%`;
 }
 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -71,11 +80,13 @@ interface CompareStatsTabProps {
   tab: "statistics" | "hotspots";
 }
 
-/** Statistics + hotspots tabs (the drawer renders this for both). */
+/** Statistics + events tabs (the drawer renders this for both). */
 export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const result = useCompareStore((s) => s.result);
   const sensitivity = useCompareStore((s) => s.sensitivity);
   const minPatchHa = useCompareStore((s) => s.minPatchHa);
+  const inputMode = useCompareStore((s) => s.inputMode);
+  const setInputMode = useCompareStore((s) => s.setInputMode);
   const setSensitivity = useCompareStore((s) => s.setSensitivity);
   const setMinPatchHa = useCompareStore((s) => s.setMinPatchHa);
   const running = useCompareStore((s) => s.running);
@@ -88,50 +99,131 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const hoveredHotspot = useCompareStore((s) => s.hoveredHotspot);
   const setHoveredHotspot = useCompareStore((s) => s.setHoveredHotspot);
   const selectedHotspot = useCompareStore((s) => s.selectedHotspot);
+  const setSelectedHotspot = useCompareStore((s) => s.setSelectedHotspot);
+  const confidenceFilter = useCompareStore((s) => s.confidenceFilter);
+  const setConfidenceFilter = useCompareStore((s) => s.setConfidenceFilter);
+  const eventsItems = useCompareStore((s) => s.eventsItems);
+  const eventsTotal = useCompareStore((s) => s.eventsTotal);
+  const eventsStatus = useCompareStore((s) => s.eventsStatus);
+  const eventsError = useCompareStore((s) => s.eventsError);
+  const fetchEvents = useCompareStore((s) => s.fetchEvents);
+
+  // The events list is server-backed: fetch the first page when the tab
+  // opens (or after a confidence-filter change returns the status to idle).
+  useEffect(() => {
+    if (!result || tab !== "hotspots") return;
+    if (eventsStatus === "idle") void fetchEvents(false);
+  }, [result, tab, eventsStatus, fetchEvents]);
 
   if (!result) return null;
   const stats: CompareStats = result.stats;
   const { metadata } = stats;
   const lowValid = stats.validPct < 70;
+  const v2 = metadata.engine === "v2";
   const stale =
-    metadata.sensitivity !== sensitivity || Math.abs(metadata.minPatchHa - minPatchHa) > 1e-9;
+    metadata.sensitivity !== sensitivity ||
+    Math.abs(metadata.minPatchHa - minPatchHa) > 1e-9 ||
+    (v2 && metadata.inputMode !== inputMode);
 
   if (tab === "hotspots") {
+    const loading = eventsStatus === "loading";
     return (
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="min-w-0 text-xs text-muted">
-            Largest surviving change patches — click one to zoom the map.
+            Change events — {eventsTotal.toLocaleString("en")}{" "}
+            {eventsTotal === 1 ? "patch" : "patches"}, largest first. Click one to zoom the map.
           </p>
           <Button
             size="sm"
-            disabled={stats.hotspots.length === 0}
-            onClick={() => downloadHotspotsGeoJson(stats)}
+            disabled={eventsTotal === 0}
+            title="Download every change event as one GeoJSON file (paged from the server)."
+            onClick={() => {
+              void downloadEventsGeoJson(result.key, { dateA: metadata.dateA, dateB: metadata.dateB }).catch(
+                (error: unknown) => {
+                  const message =
+                    error instanceof Error && error.message
+                      ? error.message
+                      : "The events file is unavailable.";
+                  useAppStore.getState().pushToast({ tone: "error", message, duration: 5000 });
+                },
+              );
+            }}
           >
             <FileJson size={13} />
             GeoJSON
           </Button>
         </div>
 
-        {stats.hotspots.length === 0 && (
+        {v2 && (
+          <div>
+            <p className="mb-1 text-[11px] text-muted">
+              Minimum confidence — high = strongest multi-evidence patches only
+            </p>
+            <Segmented
+              ariaLabel="Minimum event confidence"
+              value={confidenceFilter ?? "all"}
+              onChange={(value) =>
+                setConfidenceFilter(value === "all" ? null : (value as ConfidenceTier))
+              }
+              options={[
+                { value: "all", label: "All" },
+                { value: "high", label: "High" },
+                { value: "medium", label: "Medium" },
+                { value: "low", label: "Low" },
+              ]}
+            />
+          </div>
+        )}
+
+        {eventsStatus === "error" && (
+          <div className="flex flex-col gap-2 rounded border border-warning/40 bg-warning/10 px-3 py-3">
+            <p className="text-xs text-text">{eventsError ?? "Change events failed to load."}</p>
+            <Button size="sm" className="self-start" disabled={loading} onClick={() => void fetchEvents(false)}>
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {eventsStatus !== "error" && !loading && eventsTotal === 0 && (
           <p className="rounded border border-dashed border-border px-3 py-4 text-center text-xs text-muted">
-            No hotspots — no change patch survived the thresholds and minimum patch size.
+            {confidenceFilter
+              ? "No events match this confidence filter."
+              : "No change events — no patch survived the thresholds and minimum patch size."}
+          </p>
+        )}
+
+        {loading && eventsItems.length === 0 && (
+          <p className="flex items-center gap-1.5 rounded border border-dashed border-border px-3 py-4 text-center text-xs text-muted">
+            <Loader2 size={13} className="animate-spin" aria-hidden />
+            Loading events…
           </p>
         )}
 
         <ol className="flex flex-col gap-1">
-          {stats.hotspots.map((hotspot, index) => {
-            const color = classColor(hotspot.classCode);
+          {eventsItems.map((event, index) => {
+            const props = (event.properties ?? {}) as Record<string, unknown>;
+            const classCode = Number(props.classCode ?? -1);
+            const color = classColor(classCode);
+            const classLabel = String(props.classLabel ?? "Change");
+            const areaHa = Number(props.areaHa ?? 0);
+            const confidence = props.confidence as ConfidenceTier | undefined;
+            const centroid = (props.centroid as number[] | undefined) ?? [0, 0];
+            const bboxProps = props.bbox as number[] | undefined;
+            const lon = centroid[0];
+            const lat = centroid[1];
+            // Focus bbox: the patch's own edges; fallback rings the centroid.
+            const bbox: [number, number, number, number] =
+              bboxProps && bboxProps.length === 4
+                ? [bboxProps[0], bboxProps[1], bboxProps[2], bboxProps[3]]
+                : [lon - 0.002, lat - 0.002, lon + 0.002, lat + 0.002];
             const rank = index + 1;
             const selected = selectedHotspot === rank;
-            // Map-driven hover (marker/polygon mouseenter) highlights the row too.
             const hovered = hoveredHotspot === rank;
-            const lat = hotspot.centroid[1];
-            const lon = hotspot.centroid[0];
             const coords = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
             return (
               <li
-                key={`${hotspot.centroid[0]}-${hotspot.centroid[1]}-${index}`}
+                key={String(event.id ?? `ev-${index}`)}
                 className={cn(
                   "group flex items-stretch gap-1 rounded border transition-colors duration-150",
                   selected ? "border-accent" : hovered ? "border-accent/50" : "border-border",
@@ -144,8 +236,11 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                   onMouseLeave={() => setHoveredHotspot(null)}
                   onFocus={() => setHoveredHotspot(rank)}
                   onBlur={() => setHoveredHotspot(null)}
-                  onClick={() => focusHotspot(rank, hotspot.bbox)}
-                  title="Zoom to this patch and open its map popup"
+                  onClick={() => {
+                    setSelectedHotspot(rank);
+                    focusHotspot(rank, bbox);
+                  }}
+                  title="Zoom to this event and open its map popup"
                   className={cn(
                     "flex min-w-0 flex-1 flex-col gap-1 rounded-l-[5px] px-2 py-1.5 text-left transition-colors duration-150",
                     hovered || selected ? "bg-surface-2" : "bg-surface hover:bg-surface-2",
@@ -160,15 +255,27 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                       style={{ background: rgb(color) }}
                       aria-hidden
                     />
-                    <span className="min-w-0 flex-1 truncate text-xs text-text">
-                      {hotspot.classLabel}
-                    </span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-text">{classLabel}</span>
                     <span className="mono-nums ml-auto shrink-0 whitespace-nowrap text-[11px] text-text">
-                      {hotspot.areaHa.toLocaleString("en", { maximumFractionDigits: 1 })} ha
+                      {areaHa.toLocaleString("en", { maximumFractionDigits: 1 })} ha
                     </span>
                   </span>
                   <span className="flex items-center gap-2 pl-7 text-[10px] text-muted">
-                    <span className="min-w-0 truncate">{hotspot.tehsilName}</span>
+                    {confidence && (
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-sm border px-1 py-px",
+                          confidence === "high"
+                            ? "border-success/40 text-success"
+                            : confidence === "medium"
+                              ? "border-warning/40 text-warning"
+                              : "border-border text-muted",
+                        )}
+                        title="Majority confidence tier of this patch's pixels"
+                      >
+                        {confidence}
+                      </span>
+                    )}
                     <span className="mono-nums ml-auto shrink-0 whitespace-nowrap">{coords}</span>
                   </span>
                 </button>
@@ -179,6 +286,22 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
             );
           })}
         </ol>
+
+        {eventsItems.length < eventsTotal && (
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={loading}
+            onClick={() => void fetchEvents(true)}
+          >
+            {loading && (
+              <Loader2 size={13} className="animate-spin" aria-hidden />
+            )}
+            {loading
+              ? "Loading…"
+              : `Load more (${eventsItems.length.toLocaleString("en")} of ${eventsTotal.toLocaleString("en")})`}
+          </Button>
+        )}
       </div>
     );
   }
@@ -374,6 +497,30 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                 : "—"}
             </dd>
           </div>
+          <div className="flex justify-between gap-2">
+            <dt className="text-muted">Engine</dt>
+            <dd className="mono-nums text-text">
+              {metadata.engine === "v2"
+                ? `v2 · ${metadata.inputMode === "composite" ? `±${metadata.compositeWindowDays} d composite` : "single-day"}`
+                : "v1 · single-day"}
+            </dd>
+          </div>
+          {v2 && (
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted" title="Processing Units for both renders (CDSE formula).">
+                Estimated cost
+              </dt>
+              <dd className="mono-nums text-text">{metadata.estimatedPu} PU</dd>
+            </div>
+          )}
+          {v2 && stats.confidence && (
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted" title="Share of changed pixels per confidence tier.">
+                Confidence
+              </dt>
+              <dd className="mono-nums text-text">{confidenceShares(stats.confidence)}</dd>
+            </div>
+          )}
           {Object.entries(metadata.thresholds).map(([key, value]) => (
             <div key={key} className="flex justify-between gap-2">
               <dt className="text-muted">{THRESHOLD_LABELS[key] ?? key}</dt>
@@ -381,6 +528,23 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
             </div>
           ))}
         </dl>
+
+        {v2 && (
+          <div>
+            <p className="mb-1 text-[11px] text-muted">
+              Inputs — composite smooths clouds over ±7 days; single day keeps timing detail
+            </p>
+            <Segmented
+              ariaLabel="Engine input mode"
+              value={inputMode}
+              onChange={(value) => setInputMode(value as CompareInputMode)}
+              options={[
+                { value: "composite", label: "Composite" },
+                { value: "single", label: "Single day" },
+              ]}
+            />
+          </div>
+        )}
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex-1">

@@ -6,7 +6,7 @@
  */
 import { CLASS, CLASS_DEFS, M2_PER_HA, PATCH_VECTOR_LIMIT, SUB, classLabel, subLabel } from "./config";
 import { eventId } from "./events";
-import { pixelToLngLat } from "./mask";
+import { pixelEdgesToBbox, pixelToLngLat } from "./mask";
 import { patchToMultiPolygon } from "./polygon";
 import { PERSIST, TIER } from "./v2/classify";
 import type {
@@ -427,6 +427,15 @@ export function buildPatchVectors(
     }
     const hasTiers = aux.tiers !== null;
     const centroid = pixelToLngLat((minCol + maxCol) / 2, (minRow + maxRow) / 2, grid);
+    // Outer edges of the first/last patch pixel — event bbox for map focusing.
+    const topLeft = pixelEdgesToBbox(minCol, minRow, grid);
+    const bottomRight = pixelEdgesToBbox(maxCol, maxRow, grid);
+    const bbox: [number, number, number, number] = [
+      topLeft[0],
+      bottomRight[1],
+      bottomRight[2],
+      topLeft[3],
+    ];
     const areaHa = Math.round(acc.count * pxAreaHa * 100) / 100;
     // #16: stable event id — GeoJSON Feature.id plus a copy in properties.
     const id = eventId(acc.classCode, acc.label, centroid, areaHa);
@@ -441,6 +450,7 @@ export function buildPatchVectors(
         classLabel: classLabel(acc.classCode),
         areaHa,
         centroid,
+        bbox,
         ...(hasTiers ? { confidence: majorityTier(acc.tierCounts) } : {}),
       },
     });
