@@ -1,0 +1,44 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "cls": "no_change", "note": "outer labeled rect with a square hole" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [74.691, 26.491],
+            [74.709, 26.491],
+            [74.709, 26.504],
+            [74.691, 26.504],
+            [74.691, 26.491]
+          ],
+          [
+            [74.696, 26.495],
+            [74.696, 26.501],
+            [74.704, 26.501],
+            [74.704, 26.495],
+            [74.696, 26.495]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "cls": "veg_gain", "note": "fills the hole exactly" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [74.696, 26.495],
+            [74.704, 26.495],
+            [74.704, 26.501],
+            [74.696, 26.501],
+            [74.696, 26.495]
+          ]
+        ]
+      }
+    }
+  ]
+}

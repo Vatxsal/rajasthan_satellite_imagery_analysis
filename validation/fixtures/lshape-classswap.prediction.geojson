@@ -1,0 +1,55 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "cls": "no_change" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [74.66, 26.47],
+            [74.68, 26.47],
+            [74.68, 26.485],
+            [74.66, 26.485],
+            [74.66, 26.47]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "classCode": 2, "note": "engine classCode 2 = vegLoss; vertical arm starts 0.001 lat too high (FN at the foot)" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [74.663, 26.473],
+            [74.667, 26.473],
+            [74.667, 26.48],
+            [74.671, 26.48],
+            [74.671, 26.483],
+            [74.663, 26.483],
+            [74.663, 26.473]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "classCode": 3, "note": "engine classCode 3 = bareBuilt -> builtup_gain: class swap on the arm tip" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [74.671, 26.48],
+            [74.675, 26.48],
+            [74.675, 26.483],
+            [74.671, 26.483],
+            [74.671, 26.48]
+          ]
+        ]
+      }
+    }
+  ]
+}

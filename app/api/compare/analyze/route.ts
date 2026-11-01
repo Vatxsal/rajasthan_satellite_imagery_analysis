@@ -2,6 +2,10 @@ import { z } from "zod";
 import { searchCatalog, type CatalogHit } from "@/lib/cdse/catalog";
 import { bboxAreaKm2, type ClipGeometry } from "@/lib/cdse/geometry";
 import { runCompare } from "@/lib/analysis/analyze";
+import {
+  COMPOSITE_WINDOW_DAYS_DEFAULT,
+  COMPOSITE_WINDOW_DAYS_MAX,
+} from "@/lib/analysis/config";
 import type { DateSceneMeta } from "@/lib/analysis/types";
 import { compareCacheKey, compareResultCache, type CompareArtifactEntry } from "@/lib/cache";
 import { dataSource, getServerEnv } from "@/lib/env";
@@ -29,6 +33,15 @@ const analyzeBodySchema = z
     dateB: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateB must be YYYY-MM-DD"),
     sensitivity: z.enum(["low", "medium", "high"]).default("medium"),
     minPatchHa: z.coerce.number().min(0.01).max(100).default(0.2),
+    /** Engine-v2 input mode (ignored while CHANGE_ENGINE=v1). */
+    inputMode: z.enum(["single", "composite"]).default("composite"),
+    /** ±days around each date for composite inputs (0-15; 0 = the single day). */
+    compositeWindowDays: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(COMPOSITE_WINDOW_DAYS_MAX)
+      .default(COMPOSITE_WINDOW_DAYS_DEFAULT),
   })
   .refine((value) => value.dateA !== value.dateB, {
     message: "Pick two different dates to compare.",
@@ -82,7 +95,9 @@ function streamErrorBody(error: unknown): { code: string; message: string } {
 /**
  * POST /api/compare/analyze
  *
- * Body: { areaId, level, dateA, dateB, sensitivity?, minPatchHa? }.
+ * Body: { areaId, level, dateA, dateB, sensitivity?, minPatchHa?,
+ *         inputMode?, compositeWindowDays? } (the last two only apply when
+ *         CHANGE_ENGINE=v2; v1 always uses single-date inputs).
  * Streams newline-delimited JSON:
  *   {"type":"stage","stage":"fetch-a"|"fetch-b"|"analyze"}   (progress, in order)
  *   {"type":"result","key","overlayUrl","aiEnabled","stats"} (final)
@@ -109,6 +124,11 @@ export async function POST(request: Request): Promise<Response> {
     const body = await readJsonBody(request, (raw) => analyzeBodySchema.parse(raw));
     // Normalise order: A is always the earlier date.
     const [dateA, dateB] = body.dateA < body.dateB ? [body.dateA, body.dateB] : [body.dateB, body.dateA];
+
+    // Engine v1 always runs single-date inputs; v2 honours the request mode.
+    const engine = env.CHANGE_ENGINE;
+    const inputMode = engine === "v2" ? body.inputMode : "single";
+    const compositeWindowDays = inputMode === "composite" ? body.compositeWindowDays : 0;
 
     const area = resolveArea(body.level, body.areaId);
     if (!area) {
@@ -154,6 +174,9 @@ export async function POST(request: Request): Promise<Response> {
       dateB,
       sensitivity: body.sensitivity,
       minPatchHa: body.minPatchHa,
+      engine,
+      inputMode,
+      compositeWindowDays,
     });
     const aiEnabled = Boolean(env.GEMINI_API_KEY);
 
@@ -187,6 +210,9 @@ export async function POST(request: Request): Promise<Response> {
               sceneA: sceneMeta(hitsA),
               sceneB: sceneMeta(hitsB),
               zones: districtZones(area),
+              engine,
+              inputMode,
+              compositeWindowDays,
             },
             (stage) => send({ type: "stage", stage }),
           );
@@ -199,6 +225,7 @@ export async function POST(request: Request): Promise<Response> {
             height: artifact.height,
             bbox: artifact.bbox,
             geometry: area.geometry,
+            events: artifact.patchVectors,
           };
           compareResultCache.set(key, entry, env.IMAGERY_CACHE_TTL_SECONDS);
 
@@ -211,6 +238,7 @@ export async function POST(request: Request): Promise<Response> {
           });
           controller.close();
         } catch (error) {
+          console.error("[compare:analyze] failed:", error instanceof Error ? `${error.name}: ${error.message}` : error);
           try {
             send({ type: "error", ...streamErrorBody(error) });
             controller.close();

@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "name": "circle-partial",
+      "reference": "validation/fixtures/circle-partial.reference.geojson",
+      "prediction": "validation/fixtures/circle-partial.prediction.geojson",
+      "note": "offset circle + water_gain false positive"
+    },
+    {
+      "name": "lshape-classswap",
+      "reference": "validation/fixtures/lshape-classswap.reference.geojson",
+      "prediction": "validation/fixtures/lshape-classswap.prediction.geojson",
+      "note": "L-shape with class swap (veg_loss vs builtup) and a missing foot"
+    },
+    {
+      "name": "hole-sliver",
+      "reference": "validation/fixtures/hole-sliver.reference.geojson",
+      "prediction": "validation/fixtures/hole-sliver.prediction.geojson",
+      "note": "polygon with hole, shrunk inner patch, thin sliver FP"
+    }
+  ]
+}

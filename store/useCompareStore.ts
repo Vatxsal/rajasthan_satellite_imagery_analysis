@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Sensitivity } from "@/lib/analysis/config";
-import type { CompareStats, SummaryData, SummaryLanguage } from "@/lib/analysis/types";
+import type { CompareStats, ConfidenceTier, SummaryData, SummaryLanguage } from "@/lib/analysis/types";
 import { bboxFromGeometry } from "@/lib/cdse/geometry";
 import { streamAnalyze } from "@/lib/compare/run";
 import { selectActiveSelection, useAppStore } from "@/store/useAppStore";
@@ -9,6 +9,13 @@ export type CompareTab = "swipe" | "change-map" | "statistics" | "hotspots" | "s
 export type CompareStage = "fetch-a" | "fetch-b" | "analyze";
 export type CompareSlot = "dateA" | "dateB";
 export type CompareSummaryStatus = "idle" | "loading" | "done" | "error";
+/** Events list lifecycle: idle = needs (re)fetch, ready = loaded (even if empty). */
+export type CompareEventsStatus = "idle" | "loading" | "ready" | "error";
+/** Engine v2 input mode — median composite vs the single date each. */
+export type CompareInputMode = "single" | "composite";
+
+/** One server page of /api/compare/events (route max is 500). */
+const EVENTS_PAGE_SIZE = 100;
 
 /** Progress frames → human labels for the compare bar. */
 export const COMPARE_STAGE_LABELS: Record<CompareStage, string> = {
@@ -48,6 +55,15 @@ interface CompareState {
   classVisible: Record<number, boolean>;
   sensitivity: Sensitivity;
   minPatchHa: number;
+  /** Engine v2 inputs: ±window composite or each scene's single day. */
+  inputMode: CompareInputMode;
+  /** Minimum confidence tier for the events list (null = all events). */
+  confidenceFilter: ConfidenceTier | null;
+  /** Paged change events from GET /api/compare/events (largest first). */
+  eventsItems: GeoJSON.Feature[];
+  eventsTotal: number;
+  eventsStatus: CompareEventsStatus;
+  eventsError: string | null;
   /** Swipe divider position, percent from the left edge (0-100). */
   divider: number;
   /** Display-only dilation + outline so small changes stay visible (default on). */
@@ -81,6 +97,10 @@ interface CompareState {
   toggleClass: (code: number) => void;
   setSensitivity: (value: Sensitivity) => void;
   setMinPatchHa: (value: number) => void;
+  setInputMode: (value: CompareInputMode) => void;
+  setConfidenceFilter: (value: ConfidenceTier | null) => void;
+  /** Loads the next events page (append) or (re)starts from offset 0. */
+  fetchEvents: (append: boolean) => Promise<void>;
   setDivider: (value: number) => void;
   setBoostVisibility: (value: boolean) => void;
   setStripExpanded: (value: boolean) => void;
@@ -98,6 +118,8 @@ interface CompareState {
 let activeController: AbortController | null = null;
 /** Monotonic run id: results from an aborted/superseded run are discarded. */
 let runSeq = 0;
+/** Monotonic events id: pages superseded by a filter change are discarded. */
+let eventsSeq = 0;
 
 function toast(tone: "info" | "success" | "error", message: string): void {
   useAppStore.getState().pushToast({ tone, message, duration: 5000 });
@@ -121,6 +143,11 @@ const RESULT_BOUND_RESET = {
   hoveredHotspot: null as number | null,
   selectedHotspot: null as number | null,
   tehsilHighlight: null as { id: string; name: string } | null,
+  confidenceFilter: null as ConfidenceTier | null,
+  eventsItems: [] as GeoJSON.Feature[],
+  eventsTotal: 0,
+  eventsStatus: "idle" as CompareEventsStatus,
+  eventsError: null as string | null,
 };
 
 function summaryIdle() {
@@ -145,6 +172,12 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   classVisible: { 1: true, 2: true, 3: true, 4: true, 5: true, 6: true },
   sensitivity: "medium",
   minPatchHa: 0.2,
+  inputMode: "composite",
+  confidenceFilter: null,
+  eventsItems: [],
+  eventsTotal: 0,
+  eventsStatus: "idle",
+  eventsError: null,
   divider: 50,
   boostVisibility: true,
   stripExpanded: false,
@@ -234,6 +267,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
           dateB: state.dateB,
           sensitivity: state.sensitivity,
           minPatchHa: state.minPatchHa,
+          inputMode: state.inputMode,
         },
         {
           signal: controller.signal,
@@ -244,6 +278,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       );
       if (seq !== runSeq) return; // superseded or cancelled
       activeController = null;
+      eventsSeq += 1; // discard events pages still in flight for the old result
       set({
         running: false,
         stage: null,
@@ -255,6 +290,11 @@ export const useCompareStore = create<CompareState>((set, get) => ({
         hoveredHotspot: null,
         selectedHotspot: null,
         tehsilHighlight: null,
+        confidenceFilter: null,
+        eventsItems: [],
+        eventsTotal: 0,
+        eventsStatus: "idle",
+        eventsError: null,
         ...summaryIdle(),
       });
       // Free map space on desktop: results now live in the right-hand panel.
@@ -284,6 +324,59 @@ export const useCompareStore = create<CompareState>((set, get) => ({
     set((s) => ({ classVisible: { ...s.classVisible, [code]: !s.classVisible[code] } })),
   setSensitivity: (value) => set({ sensitivity: value }),
   setMinPatchHa: (value) => set({ minPatchHa: Math.max(0.01, Math.min(100, value)) }),
+  setInputMode: (value) => set({ inputMode: value }),
+  setConfidenceFilter: (value) => {
+    eventsSeq += 1; // in-flight pages belong to the old filter
+    set({
+      confidenceFilter: value,
+      eventsItems: [],
+      eventsTotal: 0,
+      eventsStatus: "idle",
+      eventsError: null,
+    });
+  },
+
+  fetchEvents: async (append) => {
+    const state = get();
+    if (!state.result || state.eventsStatus === "loading") return;
+    if (append && state.eventsTotal > 0 && state.eventsItems.length >= state.eventsTotal) return;
+    const seq = ++eventsSeq;
+    const key = state.result.key;
+    set({ eventsStatus: "loading", eventsError: null });
+    try {
+      const params = new URLSearchParams({
+        key,
+        limit: String(EVENTS_PAGE_SIZE),
+        offset: String(append ? state.eventsItems.length : 0),
+      });
+      if (state.confidenceFilter) params.set("confidence", state.confidenceFilter);
+      const response = await fetch(`/api/compare/events?${params}`);
+      const body = (await response.json().catch(() => null)) as {
+        total?: number;
+        events?: GeoJSON.Feature[];
+        message?: string;
+      } | null;
+      if (!response.ok || !body || !Array.isArray(body.events)) {
+        throw new Error(body?.message ?? "Change events are unavailable. Run the analysis again.");
+      }
+      // Discard superseded responses (filter changed) or orphaned ones
+      // (result cleared/replaced while this page was in flight).
+      if (seq !== eventsSeq || get().result?.key !== key) return;
+      set({
+        eventsStatus: "ready",
+        eventsTotal: typeof body.total === "number" ? body.total : body.events.length,
+        eventsItems: append ? [...get().eventsItems, ...body.events] : body.events,
+        eventsError: null,
+      });
+    } catch (error) {
+      if (seq !== eventsSeq || get().result?.key !== key) return;
+      set({
+        eventsStatus: "error",
+        eventsError:
+          error instanceof Error && error.message ? error.message : "Change events failed to load.",
+      });
+    }
+  },
   setDivider: (value) => set({ divider: Math.max(0, Math.min(100, value)) }),
   setBoostVisibility: (value) => set({ boostVisibility: value }),
   setStripExpanded: (value) => set({ stripExpanded: value }),

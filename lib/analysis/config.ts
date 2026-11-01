@@ -43,6 +43,11 @@ export const SENSITIVITY_MULTIPLIER: Record<Sensitivity, number> = {
 export const DEFAULT_SENSITIVITY: Sensitivity = "medium";
 /** Long-side cap of the analysis grid (px) — server override COMPARE_MAX_PX. */
 export const DEFAULT_MAX_PX = 1500;
+/** Native Sentinel-2 optical resolution (m) — grid cap below COMPARE_MAX_PX
+ *  so small AOIs run at native pixels instead of being upscaled (#14). */
+export const GRID_NATIVE_RES_M = 10;
+/** Absolute floor of the analysis grid long side (px) — guards degenerate bboxes. */
+export const GRID_MIN_PX = 32;
 /** Minimum mapping unit in hectares — patches smaller than this become "no change". */
 export const DEFAULT_MIN_PATCH_HA = 0.2;
 /** 3×3 majority (mode) filter kernel size. */
@@ -69,6 +74,10 @@ export interface ScaledThresholds {
   bareBuiltD: number;
   bareBuiltNdviMax: number;
   bareBuiltMaxMndwi: number;
+  /** After-state gate: MNDWI(B) must exceed this (became open water; config 0). */
+  waterGainMndwiMin: number;
+  /** Before-state gate: MNDWI(A) must exceed this (was open water; config 0). */
+  waterLossMndwiMin: number;
 }
 
 /** Applies the sensitivity multiplier to every threshold. */
@@ -82,6 +91,8 @@ export function scaledThresholds(sensitivity: Sensitivity): ScaledThresholds {
     bareBuiltD: THRESHOLDS.bareBuilt.dNdbi * m,
     bareBuiltNdviMax: THRESHOLDS.bareBuilt.dNdviMax * m,
     bareBuiltMaxMndwi: THRESHOLDS.bareBuilt.maxMndwi * m,
+    waterGainMndwiMin: THRESHOLDS.waterGain.mndwiAfter,
+    waterLossMndwiMin: THRESHOLDS.waterLoss.mndwiBefore,
   };
 }
 
@@ -145,3 +156,125 @@ export const M2_PER_HA = 10_000;
 /** Sentinel SCL classes excluded from VALID: no-data, saturated/defective,
  *  cloud shadow, medium cloud, high cloud, thin cirrus, snow. */
 export const EXCLUDED_SCL = [0, 1, 3, 8, 9, 10, 11] as const;
+
+/** Engine-v2 composite: ±days around each date (0 = single day, v1-equivalent).
+ *  S2A+S2B revisit ≈ 5 d, so ±7 d → typically ~3 orbits per side (see audit §5). */
+export const COMPOSITE_WINDOW_DAYS_DEFAULT = 7;
+export const COMPOSITE_WINDOW_DAYS_MAX = 15;
+/** Composite sample gate: max per-pixel cloud probability (%, Sen2Cor CLD band). */
+export const COMPOSITE_MAX_CLOUD_PROB = 30;
+/** Composite valid-mask erosion radius (px) — twice v1's 1 px halo (cloud edges). */
+export const COMPOSITE_ERODE_RADIUS = 2;
+
+// ── Engine v2 ──────────────────────────────────────────────────────────────
+
+/** Sub-labels (v2): finer description attached to a change class. Codes are
+ *  offset from the class code (class × 10 + variant) and stay within uint8. */
+export const SUB = {
+  vegLossCleared: 20,
+  vegLossHarvest: 21,
+  vegLossStress: 22,
+  vegGainSeasonal: 11,
+  vegGainRecovery: 12,
+  waterGainNew: 40,
+  waterGainPonding: 41,
+  waterLossReceded: 50,
+  waterLossDrawdown: 51,
+  bareBuiltConstruction: 30,
+  bareBuiltBare: 31,
+} as const;
+
+export type SubCode = (typeof SUB)[keyof typeof SUB];
+
+const SUB_LABELS: Record<number, string> = {
+  [SUB.vegLossCleared]: "Vegetation cleared / land exposed",
+  [SUB.vegLossHarvest]: "Likely harvest / crop cycle",
+  [SUB.vegLossStress]: "Vegetation browning / stress",
+  [SUB.vegGainSeasonal]: "Seasonal greening / crop growth",
+  [SUB.vegGainRecovery]: "Vegetation recovery",
+  [SUB.waterGainNew]: "New open water",
+  [SUB.waterGainPonding]: "Temporary ponding",
+  [SUB.waterLossReceded]: "Water body receded",
+  [SUB.waterLossDrawdown]: "Water drawdown",
+  [SUB.bareBuiltConstruction]: "Built-up / construction signal",
+  [SUB.bareBuiltBare]: "Bare soil increase",
+};
+
+export function subLabel(subCode: number): string | null {
+  return SUB_LABELS[subCode] ?? null;
+}
+
+/** Seasonal (crop-cycle) windows as MM-DD ranges, Rajasthan kharif/rabi
+ *  calendar. A change inside a matching window is tagged and loses one
+ *  confidence step — vegetation change in harvest season is expected phenology,
+ *  not necessarily real land-cover change. Tunable heuristics, not physics. */
+export const SEASONAL_WINDOWS = [
+  { tag: "kharif-harvest", from: "10-01", to: "11-15", kind: "loss" },
+  { tag: "rabi-harvest", from: "03-15", to: "04-30", kind: "loss" },
+  { tag: "monsoon-greening", from: "06-15", to: "09-15", kind: "gain" },
+] as const;
+
+export type SeasonalTag = (typeof SEASONAL_WINDOWS)[number]["tag"];
+
+/** Seasonal tag for `date` when a class of `kind` ("loss" | "gain") changes. */
+export function seasonalTag(
+  date: string,
+  kind: "loss" | "gain",
+): SeasonalTag | null {
+  const mmdd = date.slice(5);
+  for (const w of SEASONAL_WINDOWS) {
+    if (w.kind !== kind) continue;
+    if (mmdd >= w.from && mmdd <= w.to) return w.tag;
+  }
+  return null;
+}
+
+/** Robust σ reference per Δ-index for the adaptive threshold scale
+ *  (scale = clamp(σ/ref, MIN..MAX); refs ≈ typical seasonal noise, audit §8.5). */
+export const V2_REFERENCE_SIGMA: Record<string, number> = {
+  ndvi: 0.08,
+  mndwi: 0.08,
+  ndbi: 0.05,
+  bsi: 0.06,
+};
+export const ADAPTIVE_SCALE_MIN = 0.7;
+export const ADAPTIVE_SCALE_MAX = 1.5;
+/** Gap below this (days) → vegetation classes lose one confidence step (§2.6). */
+export const V2_SHORT_GAP_DAYS = 14;
+
+/** Multi-index voting + confidence scoring constants (v2, §2.5/§2.8). */
+export const VOTE = {
+  /** Corroborating index must cross this × the primary adaptive Δ threshold. */
+  corrobFactor: 0.6,
+  /** |ΔAWEI| corroboration for water classes (× the MNDWI adaptive scale). */
+  aweiCorrob: 0.08,
+  /** Δbrightness corroboration for bare/built (× the NDBI adaptive scale). */
+  brightCorrob: 0.03,
+  /** CVA magnitude (in threshold units) that adds one confidence point. */
+  cvaBoost: 2.5,
+  /** Score ≥ highScore → high; ≥ mediumScore → medium; else low. */
+  highScore: 4,
+  mediumScore: 2,
+  /** Recent-orbit Δ must reach this fraction of the threshold to be persistent. */
+  persistFactor: 0.5,
+} as const;
+
+// ── Phase 3 — denoise & vector output ──────────────────────────────────────
+
+/** Confidence-aware MMU (v2): keep patches ≥ this × MMU when their pixels are
+ *  mostly high-confidence — fixes the hard MMU erasure of real small changes. */
+export const MMU_CONFIDENCE_SIZE_FACTOR = 0.5;
+export const MMU_CONFIDENCE_HIGH_SHARE = 0.4;
+
+/** Patch outlines: Douglas-Peucker tolerance (edge/pixel units) before
+ *  corner-cutting — 0.5 px collapses stair-steps into diagonals. */
+export const POLYGON_SIMPLIFY_PX = 0.5;
+/** Chaikin corner-cutting passes after simplification (visual smoothing only —
+ *  stats/areas always come from the raster, never from these vertices). */
+export const POLYGON_SMOOTH_PASSES = 2;
+
+// ── Phase 5 — cost model & full-coverage vectors ───────────────────────────
+
+/** Max change patches vectorized into the artifact's full-coverage layer (#13):
+ *  largest first, so the events/export pipeline always sees the big patches. */
+export const PATCH_VECTOR_LIMIT = 10_000;

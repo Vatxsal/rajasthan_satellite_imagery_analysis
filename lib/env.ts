@@ -28,6 +28,13 @@ const baseSchema = z.object({
   DAILY_RENDER_BUDGET: z.coerce.number().int().min(0).default(3000),
   /** Long-side cap (px) of the change-detection analysis grid. */
   COMPARE_MAX_PX: z.coerce.number().int().min(256).max(4096).default(1500),
+  /**
+   * PU cap per analysis (2 Process renders, CDSE formula — audit §5).
+   * Estimates run through prepareCompare before any fetch; 0 disables.
+   */
+  PER_ANALYSIS_PU_LIMIT: z.coerce.number().int().min(0).default(700),
+  /** Change engine: v1 = single-date inputs (stable), v2 = composite inputs. */
+  CHANGE_ENGINE: z.enum(["v1", "v2"]).default("v1"),
   /** Per-IP budget for /api/compare/analyze (each run costs 2 Process renders). */
   COMPARE_RATE_LIMIT_PER_MIN: z.coerce.number().positive().default(6),
   /** Per-IP budget for /api/compare/summary (Gemini). */
@@ -63,6 +70,8 @@ export interface ServerEnv {
   TILE_CACHE_DIR?: string;
   DAILY_RENDER_BUDGET: number;
   COMPARE_MAX_PX: number;
+  PER_ANALYSIS_PU_LIMIT: number;
+  CHANGE_ENGINE: "v1" | "v2";
   COMPARE_RATE_LIMIT_PER_MIN: number;
   AI_SUMMARY_RATE_LIMIT_PER_MIN: number;
   GEMINI_API_KEY?: string;

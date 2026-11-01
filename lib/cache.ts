@@ -46,9 +46,21 @@ export class MemoryLruCache implements BlobCache {
   }
 }
 
-export const imageryCache: BlobCache = new MemoryLruCache(64);
+/**
+ * Process-wide cache instances. `next dev` evaluates each route from its own
+ * module graph, so plain module-level caches fork per route (overlay/events
+ * would miss entries the analyze route just wrote — seen live). globalThis is
+ * shared across those compilations; production behaviour is unchanged.
+ */
+function sharedInstance<T>(globalKey: string, create: () => T): T {
+  const holder = globalThis as { [key: string]: unknown };
+  if (holder[globalKey] === undefined) holder[globalKey] = create();
+  return holder[globalKey] as T;
+}
+
+export const imageryCache: BlobCache = sharedInstance("rse.imageryCache", () => new MemoryLruCache(64));
 /** Larger LRU for 512px tiles (a single pan/zoom can touch hundreds). */
-export const tileCache: BlobCache = new MemoryLruCache(512);
+export const tileCache: BlobCache = sharedInstance("rse.tileCache", () => new MemoryLruCache(512));
 
 // ------------------------------------------------- change detection (compare)
 
@@ -66,6 +78,8 @@ export interface CompareArtifactEntry {
   bbox: [number, number, number, number];
   /** Clip geometry of the analysed area — lets the summary route re-render previews. */
   geometry: import("@/lib/cdse/geometry").ClipGeometry;
+  /** Full-coverage change events (patch vectors with stable ids, Phase 6 #13/#16). */
+  events: GeoJSON.FeatureCollection;
 }
 
 /** Generic TTL + LRU eviction for non-binary entries. */
@@ -98,9 +112,12 @@ export class MemoryObjectLru<T> {
 }
 
 /** Small LRU: each entry is a full analysis (PNG ~ hundreds of KB). */
-export const compareResultCache = new MemoryObjectLru<CompareArtifactEntry>(6);
+export const compareResultCache = sharedInstance(
+  "rse.compareResultCache",
+  () => new MemoryObjectLru<CompareArtifactEntry>(6),
+);
 /** Gemini summary text, keyed by prompt hash (stats numbers → text, 30 min TTL). */
-export const aiSummaryCache: BlobCache = new MemoryLruCache(64);
+export const aiSummaryCache: BlobCache = sharedInstance("rse.aiSummaryCache", () => new MemoryLruCache(64));
 
 /**
  * Bump whenever evalscripts or render settings change so previously cached
@@ -149,7 +166,7 @@ export function tileCacheKey(input: {
   return createHash("sha256").update(payload).digest("hex");
 }
 
-/** Cache key for one comparison run (area × dates × sensitivity × MMU). */
+/** Cache key for one comparison run (area × dates × sensitivity × MMU × engine × input). */
 export function compareCacheKey(input: {
   areaId: string;
   level: string;
@@ -157,6 +174,9 @@ export function compareCacheKey(input: {
   dateB: string;
   sensitivity: string;
   minPatchHa: number;
+  engine: string;
+  inputMode: string;
+  compositeWindowDays: number;
 }): string {
   const payload = JSON.stringify([
     COMPARE_VERSION,
@@ -166,6 +186,9 @@ export function compareCacheKey(input: {
     input.dateB,
     input.sensitivity,
     input.minPatchHa,
+    input.engine,
+    input.inputMode,
+    input.compositeWindowDays,
   ]);
   return createHash("sha256").update(payload).digest("hex");
 }
