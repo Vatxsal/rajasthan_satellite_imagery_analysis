@@ -29,9 +29,14 @@ export const maxDuration = 60;
  * the legacy WMTS proxy behaviour (requires CDSE_WMTS_INSTANCE_ID).
  */
 
-/** 1×1 fully transparent PNG — returned instead of calling Process API. */
+/**
+ * 1×1 fully transparent PNG (rgba(0,0,0,0), color type 6) — returned instead
+ * of calling Process API. Verified by inflating the IDAT: `00 00 00 00 00`.
+ * (The commonly copy-pasted "transparent pixel" base64 decodes to
+ * rgba(0,0,255,127) — a semi-transparent blue that washes every skipped tile.)
+ */
 const EMPTY_TILE = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4AWMAAQAABQABNtCI3QAAAABJRU5ErkJggg==",
   "base64",
 );
 
