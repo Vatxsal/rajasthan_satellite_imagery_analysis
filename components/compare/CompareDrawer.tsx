@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { BarChart3, Crosshair, Download, Flame, Layers3, Loader2, MoveHorizontal, Sparkles, X } from "lucide-react";
 import Button from "@/components/ui/Button";
+import Segmented from "@/components/ui/Segmented";
 import Slider from "@/components/ui/Slider";
 import { cn } from "@/components/ui/cn";
 import { downloadOverlayFile } from "@/lib/compare/export";
@@ -259,11 +260,16 @@ function SwipeHelp() {
   const dateB = useCompareStore((s) => s.dateB);
   const divider = useCompareStore((s) => s.divider);
   const setDivider = useCompareStore((s) => s.setDivider);
+  const swipeComposite = useCompareStore((s) => s.swipeComposite);
+  const setSwipeComposite = useCompareStore((s) => s.setSwipeComposite);
+  const swipeOutline = useCompareStore((s) => s.swipeOutline);
+  const setSwipeOutline = useCompareStore((s) => s.setSwipeOutline);
   return (
     <div className="flex flex-col gap-2 text-xs text-text">
       <p className="text-muted">
-        Date A imagery is on the left of the divider, date B on the right — drag the handle on the
-        map (or use arrow keys) to sweep between the two dates.
+        Raw satellite imagery for both dates — no change overlay, tint or filter. Date A (earlier)
+        is on the left, date B (later) on the right; drag the handle on the map (or use arrow
+        keys) to sweep between the two dates.
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <span className="mono-nums flex items-center gap-1.5">
@@ -288,6 +294,49 @@ function SwipeHelp() {
         />
         <span className="mono-nums">{Math.round(divider)}%</span>
       </label>
+      <div className="flex flex-col gap-1.5">
+        <p className="section-label">Imagery</p>
+        <Segmented
+          ariaLabel="Swipe imagery composite"
+          options={[
+            { value: "true-color", label: "True colour" },
+            { value: "false-color", label: "False colour" },
+            { value: "ndvi", label: "NDVI" },
+          ]}
+          value={swipeComposite}
+          onChange={(value) => setSwipeComposite(value)}
+        />
+        <button
+          type="button"
+          role="switch"
+          aria-checked={swipeOutline}
+          onClick={() => setSwipeOutline(!swipeOutline)}
+          className={cn(
+            "flex w-full items-center gap-2 rounded border border-border bg-surface-2 px-2 py-1.5 text-left text-xs transition-colors duration-150",
+            swipeOutline ? "text-text" : "text-muted",
+          )}
+          title="Draw a neutral grey outline of the analysed area over both dates."
+        >
+          <span
+            className={cn(
+              "inline-flex h-5 w-9 shrink-0 items-center rounded-full border px-0.5 transition-colors duration-150",
+              swipeOutline ? "border-accent bg-accent-soft" : "border-border bg-surface",
+            )}
+          >
+            <span
+              className={cn(
+                "inline-block h-3.5 w-3.5 rounded-full transition-transform duration-150",
+                swipeOutline ? "translate-x-4 bg-accent" : "translate-x-0 bg-muted",
+              )}
+            />
+          </span>
+          <span className="min-w-0 flex-1">Area outline</span>
+        </button>
+        <p className="text-[10px] leading-snug text-muted">
+          Both controls apply to both dates; display only — the imagery pixels themselves are
+          unchanged.
+        </p>
+      </div>
     </div>
   );
 }

@@ -1,22 +1,30 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import type { Map as MapLibreMap } from "maplibre-gl";
+import { useEffect, useRef, useState } from "react";
+import type { GeoJSONSource, Map as MapLibreMap, RasterTileSource } from "maplibre-gl";
 import { MoveHorizontal } from "lucide-react";
-import { getMainMap, setOverlayImage } from "@/lib/compare/bridge";
+import { getMainMap, setDebugMap, setOverlayImage, syncTabVisibility } from "@/lib/compare/bridge";
 import { buildOverlayBlobUrl, loadOverlayImageData, needsRecolor } from "@/lib/compare/recolor";
+import { swipeAttribution, swipeClipPath } from "@/lib/compare/swipe";
 import { POSITRON_STYLE_URL } from "@/lib/map/constants";
-import { buildTileUrlTemplate } from "@/lib/map/tiles";
+import { buildTileUrl } from "@/lib/map/tiles";
 import { selectActiveSelection, useAppStore } from "@/store/useAppStore";
 import { useCompareStore } from "@/store/useCompareStore";
 import { useTheme } from "@/store/useTheme";
 import { formatShortDate } from "./CompareBar";
+import SwipeDebugBadge from "./SwipeDebugBadge";
 
 /**
  * Map-layer side of compare mode: keeps the classified overlay recoloured,
- * and renders the swipe view — a secondary non-interactive maplibre instance
- * showing date B, clipped to the right of the divider (date A tiles are on
- * the main map via the bridge). Camera sync is one-way, main → secondary.
+ * and renders the swipe view — two clean secondary maplibre instances with
+ * no app layers, no overlay and no tint: the left half shows raw date-A
+ * tiles, the right half date B tiles, each clipped at the divider over a
+ * plain Positron basemap (imagery covers the labels inside the area,
+ * transparent outside so the basemap shows through). The main map sits
+ * covered underneath and only drives the camera (one-way sync); pointer
+ * events pass through the wrappers so pan/zoom/selection keep working.
+ * Root sits below the z-20 map controls (search, zoom, notices) so they
+ * stay reachable during the sweep.
  */
 export default function CompareMapController() {
   const result = useCompareStore((s) => s.result);
@@ -33,10 +41,12 @@ export default function CompareMapController() {
   const blobRef = useRef<string | null>(null);
 
   const swipeActive = Boolean(result) && tab === "swipe";
+  const stripOffset = useStripOffset();
 
   // ------------------------------------------------ overlay recolour
   useEffect(() => {
-    if (!result) return;
+    // Swipe shows raw imagery — the recoloured overlay is only for other tabs.
+    if (!result || tab === "swipe") return;
 
     const apply = (url: string | null): void => {
       const previous = blobRef.current;
@@ -70,7 +80,7 @@ export default function CompareMapController() {
     return () => {
       cancelled = true;
     };
-  }, [result, classVisible, boost, theme]);
+  }, [result, tab, classVisible, boost, theme]);
 
   useEffect(
     () => () => {
@@ -78,6 +88,12 @@ export default function CompareMapController() {
     },
     [],
   );
+
+  // Entering swipe hides the main-map compare layers immediately — the full
+  // bridge sync may defer to idle while the style is settling.
+  useEffect(() => {
+    syncTabVisibility();
+  }, [tab, result]);
 
   // ------------------------------------------------ divider drag + keys
   const startDrag = (event: React.PointerEvent<HTMLDivElement>): void => {
@@ -116,15 +132,24 @@ export default function CompareMapController() {
   };
 
   return (
-    <div ref={rootRef} className="pointer-events-none absolute inset-0 z-20">
+    <div ref={rootRef} className="pointer-events-none absolute inset-0 z-[15]">
       {swipeActive && (
-        <div
-          className="absolute inset-0 overflow-hidden"
-          style={{ clipPath: `inset(0 0 0 ${divider}%)` }}
-          aria-hidden
-        >
-          <SwipeMap />
-        </div>
+        <>
+          <div
+            className="absolute inset-0 overflow-hidden bg-[#F8F8F8]"
+            style={{ clipPath: swipeClipPath(divider, "left") }}
+            aria-hidden
+          >
+            <SwipeMap slot="left" />
+          </div>
+          <div
+            className="absolute inset-0 overflow-hidden bg-[#F8F8F8]"
+            style={{ clipPath: swipeClipPath(divider, "right") }}
+            aria-hidden
+          >
+            <SwipeMap slot="right" />
+          </div>
+        </>
       )}
 
       {swipeActive && (
@@ -160,20 +185,60 @@ export default function CompareMapController() {
               <MoveHorizontal size={15} aria-hidden />
             </span>
           </div>
+          <span
+            className="absolute left-3 rounded bg-surface/90 px-1.5 py-0.5 text-[11px] leading-tight text-muted"
+            style={{ bottom: stripOffset + 12 }}
+          >
+            {swipeAttribution({ dateA, dateB })}
+          </span>
+          {process.env.NODE_ENV !== "production" && (
+            <div className="absolute right-3" style={{ bottom: stripOffset + 12 }}>
+              <SwipeDebugBadge />
+            </div>
+          )}
         </>
       )}
     </div>
   );
 }
 
-/** Secondary map: date B tiles over the plain basemap, camera follows main. */
-function SwipeMap() {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const dateB = useCompareStore((s) => s.dateB);
+/** Desktop scene-strip offset for bottom-anchored chips (same rule as MapCanvas). */
+function useStripOffset(): number {
+  const resultsOpen = useAppStore((s) => s.resultsOpen);
+  const searching = useAppStore((s) => s.searching);
+  const hasSearched = useAppStore((s) => s.hasSearched);
+  const stripHeightPx = useAppStore((s) => s.stripHeightPx);
+  if (typeof window !== "undefined" && !window.matchMedia("(min-width: 1024px)").matches) return 0;
+  return resultsOpen && (searching || hasSearched) ? stripHeightPx : 0;
+}
 
+type SwipeSlot = "left" | "right";
+
+/** Neutral AOI outline colours — readable on imagery and on Positron. */
+const OUTLINE_COLORS = {
+  light: { line: "rgb(75, 85, 99)", casing: "rgba(255, 255, 255, 0.85)" },
+  dark: { line: "rgb(209, 213, 219)", casing: "rgba(24, 26, 32, 0.8)" },
+} as const;
+
+/**
+ * One half of the swipe view: a non-interactive Positron map carrying a
+ * single raw-imagery raster layer for its date (composite follows the store)
+ * plus an optional neutral outline of the analysed area. Camera follows the
+ * main map; tiles are recreated in place when the date/composite changes.
+ */
+function SwipeMap({ slot }: { slot: SwipeSlot }) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const lastTileUrlRef = useRef<string | null>(null);
+  const [ready, setReady] = useState(false);
+  const date = useCompareStore((s) => (slot === "left" ? s.dateA : s.dateB));
+  const composite = useCompareStore((s) => s.swipeComposite);
+  const outline = useCompareStore((s) => s.swipeOutline);
+  const theme = useTheme((s) => s.theme);
+
+  // ------------------------------------------------ map lifecycle (once per mount)
   useEffect(() => {
     let disposed = false;
-    let map: MapLibreMap | null = null;
     let detachSync: (() => void) | null = null;
 
     void (async () => {
@@ -190,60 +255,122 @@ function SwipeMap() {
         attributionControl: false,
         interactive: false,
       });
-      map = instance;
+      mapRef.current = instance;
+      setDebugMap(slot, instance);
+      instance.on("load", () => {
+        if (!disposed) setReady(true);
+      });
 
-      const addSceneBTiles = (): void => {
-        if (disposed || !map) return;
-        const compare = useCompareStore.getState();
-        const app = useAppStore.getState();
-        const selection = selectActiveSelection(app);
-        const scene = compare.dateB ? app.scenes.find((candidate) => candidate.date === compare.dateB) : null;
-        if (!selection || !scene || map.getSource("compare-scene-b")) return;
-        const url = buildTileUrlTemplate({
-          scene,
-          areaId: selection.id,
-          level: selection.level,
-          composite: scene.composite,
-        });
-        map.addSource("compare-scene-b", {
-          type: "raster",
-          tiles: [url],
-          tileSize: 512,
-          minzoom: 7,
-          maxzoom: 14,
-          attribution: `Contains modified Copernicus Sentinel data ${scene.date.slice(0, 4)}`,
-        });
-        map.addLayer({
-          id: "compare-scene-b-layer",
-          type: "raster",
-          source: "compare-scene-b",
-          paint: { "raster-opacity": 1, "raster-fade-duration": 200 },
-        });
-      };
-      instance.on("load", addSceneBTiles);
-
-      const mainMap = getMainMap();
       const syncFromMain = (): void => {
         const source = getMainMap();
-        if (!source || !map) return;
-        map.jumpTo({
+        if (!source || !mapRef.current) return;
+        mapRef.current.jumpTo({
           center: source.getCenter(),
           zoom: source.getZoom(),
           bearing: source.getBearing(),
           pitch: source.getPitch(),
         });
       };
-      mainMap?.on("move", syncFromMain);
-      detachSync = () => mainMap?.off("move", syncFromMain);
+      main?.on("move", syncFromMain);
+      detachSync = () => main?.off("move", syncFromMain);
     })();
 
     return () => {
       disposed = true;
       detachSync?.();
-      map?.remove();
-      map = null;
+      setDebugMap(slot, null);
+      mapRef.current?.remove();
+      mapRef.current = null;
+      lastTileUrlRef.current = null;
+      setReady(false);
     };
-  }, [dateB]);
+  }, [slot]);
+
+  // ------------------------------------------------ raw imagery tiles
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    const sourceId = `swipe-${slot}-tiles`;
+    const layerId = `${sourceId}-layer`;
+    const removeTiles = (): void => {
+      if (map.getLayer(layerId)) map.removeLayer(layerId);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+      lastTileUrlRef.current = null;
+    };
+    if (!date) {
+      removeTiles();
+      return;
+    }
+    const selection = selectActiveSelection(useAppStore.getState());
+    if (!selection) return;
+    const url = buildTileUrl({ date, areaId: selection.id, level: selection.level, composite });
+    if (lastTileUrlRef.current === url) return;
+    const existing = map.getSource(sourceId) as RasterTileSource | undefined;
+    if (existing) {
+      existing.setTiles([url]);
+      lastTileUrlRef.current = url;
+      return;
+    }
+    map.addSource(sourceId, {
+      type: "raster",
+      tiles: [url],
+      tileSize: 512,
+      minzoom: 7,
+      maxzoom: 14,
+      attribution: `Contains modified Copernicus Sentinel data ${date.slice(0, 4)}`,
+    });
+    map.addLayer({
+      id: layerId,
+      type: "raster",
+      source: sourceId,
+      paint: { "raster-opacity": 1, "raster-fade-duration": 200 },
+    });
+    lastTileUrlRef.current = url;
+  }, [ready, date, composite, slot]);
+
+  // ------------------------------------------------ neutral AOI outline
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    const sourceId = `swipe-${slot}-outline`;
+    const casingId = `${sourceId}-casing`;
+    const lineId = `${sourceId}-line`;
+    const selection = selectActiveSelection(useAppStore.getState());
+    if (selection) {
+      const data: GeoJSON.Feature = {
+        type: "Feature",
+        properties: {},
+        geometry: selection.geometry,
+      };
+      const source = map.getSource(sourceId) as GeoJSONSource | undefined;
+      if (source) source.setData(data);
+      else {
+        map.addSource(sourceId, { type: "geojson", data });
+        map.addLayer({
+          id: casingId,
+          type: "line",
+          source: sourceId,
+          paint: { "line-width": 3, "line-opacity": 0.85 },
+        });
+        map.addLayer({
+          id: lineId,
+          type: "line",
+          source: sourceId,
+          paint: { "line-width": 1.4 },
+        });
+      }
+    }
+    const colors = OUTLINE_COLORS[theme];
+    const visible = outline ? "visible" : "none";
+    if (map.getLayer(casingId)) {
+      map.setLayoutProperty(casingId, "visibility", visible);
+      map.setPaintProperty(casingId, "line-color", colors.casing);
+    }
+    if (map.getLayer(lineId)) {
+      map.setLayoutProperty(lineId, "visibility", visible);
+      map.setPaintProperty(lineId, "line-color", colors.line);
+    }
+  }, [ready, outline, theme, slot]);
 
   return <div ref={hostRef} className="absolute inset-0" />;
 }
