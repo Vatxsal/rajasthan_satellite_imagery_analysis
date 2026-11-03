@@ -32,7 +32,6 @@
 ## 📑 Table of Contents
 
 - [Features](#-features)
-- [Screenshots](#-screenshots)
 - [Quick Start](#-quick-start)
 - [Architecture](#-architecture)
 - [Connecting Copernicus (CDSE)](#-connecting-copernicus-cdse)
@@ -70,21 +69,6 @@
 | 🧱 | **Layers** | Eye toggles for district / tehsil / ILR boundaries and the imagery overlay (inline opacity slider), plus a scene footprint toggle. Rajasthan state outline with casing lines keeps borders visible on any basemap, in light and dark themes. |
 | 🌗 | **Themes** | Light / dark, persisted. Boundary, selection and change-layer colours mirror the theme on the map and are restored after every theme switch. |
 | 📏 | **Measure / Saved queries** | UI shells wired to the store state. |
-
----
-
-## 🖼️ Screenshots
-
-Add images under `docs/screenshots/` and link them here. Suggested set:
-
-| Screenshot | File |
-| --- | --- |
-| Overview with filters and scene strip (light) | `docs/screenshots/overview-light.png` |
-| Overview (dark) | `docs/screenshots/overview-dark.png` |
-| NDVI render with legend | `docs/screenshots/ndvi.png` |
-| Change detection: Changes tab | `docs/screenshots/compare-changes.png` |
-| Change detection: Hotspots popup | `docs/screenshots/compare-hotspot.png` |
-| Swipe comparison | `docs/screenshots/compare-swipe.png` |
 
 ---
 
