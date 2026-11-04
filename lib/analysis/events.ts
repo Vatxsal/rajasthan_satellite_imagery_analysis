@@ -12,6 +12,14 @@ export const EVENTS_PAGE_LIMIT_DEFAULT = 100;
 export const EVENTS_PAGE_LIMIT_MAX = 500;
 
 /**
+ * How many events the analyze stream ships inline (payload cap — a district
+ * run can vectorize up to PATCH_VECTOR_LIMIT=10k patches). The uncapped count
+ * rides along as stats.eventsTotal; further pages come from the stateless
+ * GET /api/compare/events route.
+ */
+export const ANALYZE_EVENTS_CAP = 500;
+
+/**
  * Deterministic event id (FNV-1a 32-bit, 8 hex chars) over the stable patch
  * fields — the same patch in the same analysis always maps to the same id,
  * and ids never collide between genuinely different patches in practice.

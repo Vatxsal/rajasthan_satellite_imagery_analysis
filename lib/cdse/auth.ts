@@ -1,4 +1,5 @@
 import { getServerEnv } from "@/lib/env";
+import { sharedInstance } from "../singleton";
 import { CdseHttpError, mapCdseStatus } from "./errors";
 
 interface TokenInfo {
@@ -8,8 +9,11 @@ interface TokenInfo {
   expiresIn: number;
 }
 
-let cachedToken: TokenInfo | null = null;
-let inflight: Promise<TokenInfo> | null = null;
+/** Process-wide token state — one refresh no matter how many route graphs load this module. */
+const tokenState = sharedInstance("rse.cdseAuth", () => ({
+  cached: null as TokenInfo | null,
+  inflight: null as Promise<TokenInfo> | null,
+}));
 
 /** Refresh 60s before the reported expiry to avoid using a dying token. */
 const SAFETY_MARGIN_MS = 60_000;
@@ -58,20 +62,20 @@ async function requestToken(): Promise<TokenInfo> {
 
 /** Returns a cached OAuth token, deduping concurrent refreshes. Secrets are never logged. */
 async function ensureToken(): Promise<TokenInfo> {
-  if (cachedToken && cachedToken.validUntil > Date.now()) {
-    return cachedToken;
+  if (tokenState.cached && tokenState.cached.validUntil > Date.now()) {
+    return tokenState.cached;
   }
-  if (!inflight) {
-    inflight = requestToken()
+  if (!tokenState.inflight) {
+    tokenState.inflight = requestToken()
       .then((info) => {
-        cachedToken = info;
+        tokenState.cached = info;
         return info;
       })
       .finally(() => {
-        inflight = null;
+        tokenState.inflight = null;
       });
   }
-  return inflight;
+  return tokenState.inflight;
 }
 
 export async function getAccessToken(): Promise<string> {

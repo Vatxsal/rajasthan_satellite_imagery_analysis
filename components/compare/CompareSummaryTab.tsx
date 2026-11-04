@@ -9,9 +9,11 @@ import { useCompareStore } from "@/store/useCompareStore";
 
 /**
  * Fifth compare tab: a server-side Gemini summary of the finished analysis
- * (structured JSON: overview + bullet lists). The browser only ever sends the
- * analysis cache key, language and the include-images flag — the numbers and
- * preview imagery are assembled server-side. User-initiated (privacy).
+ * (structured JSON: overview + bullet lists). The browser sends the analysis
+ * cache key, language, include-images flag and the analysis parameters — the
+ * numbers and preview imagery are assembled server-side, and the parameters
+ * let a cold cache recompute the artifact instead of failing with "expired".
+ * User-initiated (privacy).
  */
 export default function CompareSummaryTab() {
   const result = useCompareStore((s) => s.result);
@@ -20,6 +22,7 @@ export default function CompareSummaryTab() {
   const includeImages = useCompareStore((s) => s.summaryIncludeImages);
   const setIncludeImages = useCompareStore((s) => s.setSummaryIncludeImages);
   const status = useCompareStore((s) => s.summaryStatus);
+  const phase = useCompareStore((s) => s.summaryPhase);
   const data = useCompareStore((s) => s.summaryData);
   const error = useCompareStore((s) => s.summaryError);
   const fetchSummary = useCompareStore((s) => s.fetchSummary);
@@ -109,7 +112,9 @@ export default function CompareSummaryTab() {
           {loading && (
             <span className="flex items-center gap-1.5 text-xs text-muted">
               <Loader2 size={13} className="animate-spin" aria-hidden />
-              Writing the summary…
+              {phase === "ensure"
+                ? "Re-running the analysis… (cold cache; up to a minute)"
+                : "Writing the summary…"}
             </span>
           )}
           {status === "error" && !loading && (

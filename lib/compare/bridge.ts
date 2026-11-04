@@ -7,7 +7,8 @@ import type {
 } from "maplibre-gl";
 import { bboxFromGeometry, type ClipGeometry } from "@/lib/cdse/geometry";
 import { CLASS_DEFS, classColor } from "@/lib/analysis/config";
-import type { CompareStats, Hotspot } from "@/lib/analysis/types";
+import type { Hotspot } from "@/lib/analysis/types";
+import { selectVisibleEvents } from "@/lib/compare/eventList";
 import { bboxToBounds } from "@/lib/map/geojson";
 import { MAP_PALETTES } from "@/lib/map/palette";
 import { useAppStore } from "@/store/useAppStore";
@@ -287,20 +288,37 @@ function syncTehsilHighlight(map: MapLibreMap): void {
   map.setLayoutProperty(LAYER.tehsilHighlight, "visibility", "visible");
 }
 
-function hotspotPolygonFeatures(stats: CompareStats): GeoJSON.Feature[] {
+/**
+ * Visible list rows — the single source for map polygons AND numbered
+ * markers. Uses the exact helper CompareStatsTab renders with (same store
+ * slice: eventsItems + confidence filter + client cursor), so list rank N
+ * and marker rank N are the same feature by construction.
+ */
+function visibleEvents(): GeoJSON.Feature[] {
+  const state = useCompareStore.getState();
+  if (!state.result) return [];
+  return selectVisibleEvents(state.eventsItems, {
+    confidenceFilter: state.confidenceFilter,
+    limit: state.eventsLimit,
+  });
+}
+
+function eventPolygonFeatures(events: GeoJSON.Feature[]): GeoJSON.Feature[] {
   const polygons: GeoJSON.Feature[] = [];
-  stats.hotspots.forEach((hotspot, index) => {
-    if (!hotspot.polygon) return;
+  events.forEach((event, index) => {
+    const geometry = event.geometry;
+    if (!geometry || (geometry.type !== "MultiPolygon" && geometry.type !== "Polygon")) return;
+    const props = (event.properties ?? {}) as Record<string, unknown>;
     polygons.push({
       type: "Feature",
       properties: {
         rank: index + 1,
-        classCode: hotspot.classCode,
-        classLabel: hotspot.classLabel,
-        areaHa: hotspot.areaHa,
-        tehsilName: hotspot.tehsilName ?? "",
+        classCode: Number(props.classCode ?? -1),
+        classLabel: String(props.classLabel ?? "Change"),
+        areaHa: Number(props.areaHa ?? 0),
+        tehsilName: typeof props.tehsilName === "string" ? props.tehsilName : "",
       },
-      geometry: hotspot.polygon,
+      geometry,
     });
   });
   return polygons;
@@ -333,7 +351,7 @@ function syncHotspots(map: MapLibreMap): void {
     return;
   }
 
-  const polygons = hotspotPolygonFeatures(result.stats);
+  const polygons = eventPolygonFeatures(visibleEvents());
 
   if (!map.getSource(SRC.hotspotPolys)) {
     map.addSource(SRC.hotspotPolys, {
@@ -415,8 +433,9 @@ interface HotspotMarkerEntry {
 }
 
 let hotspotMarkers: HotspotMarkerEntry[] = [];
-/** Result key the current marker set belongs to (rebuild when it changes). */
-let markerResultKey: string | null = null;
+/** Signature of the current marker set (result × filter × cursor × count) —
+ *  rebuild only when it changes; hover/selection changes just restyle. */
+let markerSig: string | null = null;
 let markerSyncSeq = 0;
 type MapLibreBits = {
   Marker: typeof import("maplibre-gl").Marker;
@@ -442,7 +461,7 @@ function markerTextColor(color: [number, number, number]): string {
 function removeHotspotMarkers(): void {
   for (const entry of hotspotMarkers) entry.marker.remove();
   hotspotMarkers = [];
-  markerResultKey = null;
+  markerSig = null;
 }
 
 function applyMarkerState(entry: HotspotMarkerEntry): void {
@@ -462,8 +481,10 @@ function onMarkerClick(rank: number): void {
 
 /**
  * Numbered 22px DOM markers (class fill + surface ring + Plex Mono rank).
- * Rebuilt per result; hover/selected state follows the store so list and
- * map highlight each other. Async because maplibre loads on demand.
+ * One marker per visible list row — built from the same event features the
+ * Events tab renders, so ranks always match. Hover/selected state follows the
+ * store so list and map highlight each other. Async because maplibre loads on
+ * demand.
  */
 async function syncHotspotMarkers(map: MapLibreMap): Promise<void> {
   const seq = ++markerSyncSeq;
@@ -477,13 +498,20 @@ async function syncHotspotMarkers(map: MapLibreMap): Promise<void> {
   const maplibregl = await loadMaplibre();
   if (seq !== markerSyncSeq || mainMap !== map) return; // superseded mid-load
 
-  const hotspots = result.stats.hotspots;
-  if (markerResultKey !== result.key || hotspotMarkers.length !== hotspots.length) {
+  const events = visibleEvents();
+  const nextSig = `${result.key}|${state.confidenceFilter ?? "all"}|${state.eventsLimit}|${events.length}`;
+  if (markerSig !== nextSig) {
     removeHotspotMarkers();
-    markerResultKey = result.key;
-    hotspots.forEach((hotspot, index) => {
+    markerSig = nextSig;
+    events.forEach((event, index) => {
       const rank = index + 1;
-      const color = classColor(hotspot.classCode);
+      const props = (event.properties ?? {}) as Record<string, unknown>;
+      const centroid = props.centroid as number[] | undefined;
+      if (!Array.isArray(centroid) || centroid.length !== 2) return;
+      const classCode = Number(props.classCode ?? -1);
+      const classLabel = String(props.classLabel ?? "Change");
+      const areaHa = Number(props.areaHa ?? 0);
+      const color = classColor(classCode);
       const el = document.createElement("button");
       el.type = "button";
       el.className = "hs-marker";
@@ -492,7 +520,7 @@ async function syncHotspotMarkers(map: MapLibreMap): Promise<void> {
       el.style.setProperty("--hs-fg", markerTextColor(color));
       el.setAttribute(
         "aria-label",
-        `Hotspot ${rank}: ${hotspot.classLabel}, ${hotspot.areaHa.toLocaleString("en", { maximumFractionDigits: 1 })} hectares`,
+        `Change event ${rank}: ${classLabel}, ${areaHa.toLocaleString("en", { maximumFractionDigits: 1 })} hectares`,
       );
       el.addEventListener("mouseenter", () => useCompareStore.getState().setHoveredHotspot(rank));
       el.addEventListener("mouseleave", () => useCompareStore.getState().setHoveredHotspot(null));
@@ -503,7 +531,7 @@ async function syncHotspotMarkers(map: MapLibreMap): Promise<void> {
         onMarkerClick(rank);
       });
       const marker = new maplibregl.Marker({ element: el, anchor: "center" })
-        .setLngLat(hotspot.centroid)
+        .setLngLat([centroid[0], centroid[1]])
         .addTo(map);
       hotspotMarkers.push({ marker, el, rank });
     });
@@ -560,9 +588,40 @@ function hotspotPopupHtml(
   );
 }
 
+/** Hotspot-shaped view of an event feature (the popup/fly-to consumers expect
+ *  this shape; the raw properties carry every field the server vectorized). */
+function featureToHotspot(feature: GeoJSON.Feature): Hotspot | null {
+  const props = (feature.properties ?? {}) as Record<string, unknown>;
+  const centroidRaw = props.centroid as number[] | undefined;
+  if (!Array.isArray(centroidRaw) || centroidRaw.length !== 2) return null;
+  const centroid: [number, number] = [Number(centroidRaw[0]), Number(centroidRaw[1])];
+  const bboxRaw = props.bbox as number[] | undefined;
+  const bbox: [number, number, number, number] =
+    Array.isArray(bboxRaw) && bboxRaw.length === 4
+      ? [Number(bboxRaw[0]), Number(bboxRaw[1]), Number(bboxRaw[2]), Number(bboxRaw[3])]
+      : [centroid[0] - 0.002, centroid[1] - 0.002, centroid[0] + 0.002, centroid[1] + 0.002];
+  const geometry = feature.geometry;
+  return {
+    centroid,
+    bbox,
+    areaHa: Number(props.areaHa ?? 0),
+    classCode: Number(props.classCode ?? -1),
+    classLabel: String(props.classLabel ?? "Change"),
+    tehsilName: typeof props.tehsilName === "string" && props.tehsilName ? props.tehsilName : null,
+    polygon: geometry && geometry.type === "MultiPolygon" ? geometry : null,
+    ...(typeof props.confidence === "string"
+      ? { confidence: props.confidence as Hotspot["confidence"] }
+      : {}),
+    ...(typeof props.subLabel === "string" ? { subLabel: props.subLabel } : {}),
+    ...(Array.isArray(props.tags) ? { tags: props.tags as string[] } : {}),
+  };
+}
+
+/** The event at list rank N (1-based) — identical to the row the list shows. */
 function selectedHotspotAt(rank: number): Hotspot | null {
-  const result = useCompareStore.getState().result;
-  return result?.stats.hotspots[rank - 1] ?? null;
+  const feature = visibleEvents()[rank - 1];
+  if (!feature) return null;
+  return featureToHotspot(feature);
 }
 
 /** Opens the numbered popup for a hotspot (list click or map click). */

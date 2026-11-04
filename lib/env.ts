@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { dataSource } from "./dataSource";
+import { sharedInstance } from "./singleton";
 
 export { dataSource } from "./dataSource";
 
@@ -78,7 +79,12 @@ export interface ServerEnv {
   GEMINI_MODEL: string;
 }
 
-let cachedEnv: ServerEnv | null = null;
+/**
+ * Process-wide (globalThis) so every route graph shares one validated env —
+ * plain module state would fork per route under `next dev` HMR / Vercel
+ * function bundling (lib/singleton.ts).
+ */
+const envHolder = sharedInstance("rse.serverEnv", () => ({ cached: null as ServerEnv | null }));
 
 /**
  * Server-only env loader. Validates with zod and, when NEXT_PUBLIC_DATA_SOURCE=cdse,
@@ -87,7 +93,7 @@ let cachedEnv: ServerEnv | null = null;
  * and are therefore never inlined into the browser bundle.
  */
 export function getServerEnv(): ServerEnv {
-  if (cachedEnv) return cachedEnv;
+  if (envHolder.cached) return envHolder.cached;
 
   const schema = dataSource === "cdse" ? cdseSchema : mockSchema;
   const parsed = schema.safeParse(process.env);
@@ -101,6 +107,6 @@ export function getServerEnv(): ServerEnv {
     );
   }
 
-  cachedEnv = parsed.data;
-  return cachedEnv;
+  envHolder.cached = parsed.data;
+  return envHolder.cached;
 }

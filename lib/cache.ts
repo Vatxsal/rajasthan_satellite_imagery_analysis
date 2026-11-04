@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+// Relative import: the test harness compiles this file with commonjs where
+// the "@/lib/…" alias does not resolve.
+import { sharedInstance } from "./singleton";
 
 /**
  * Small cache abstraction for rendered imagery tiles/images.
@@ -47,16 +50,12 @@ export class MemoryLruCache implements BlobCache {
 }
 
 /**
- * Process-wide cache instances. `next dev` evaluates each route from its own
- * module graph, so plain module-level caches fork per route (overlay/events
- * would miss entries the analyze route just wrote — seen live). globalThis is
+ * Process-wide cache instances (lib/singleton.ts): `next dev` evaluates each
+ * route from its own module graph, so plain module-level caches fork per route
+ * (overlay/events would miss entries the analyze route just wrote — seen
+ * live), and Vercel bundles each route into its own process. globalThis is
  * shared across those compilations; production behaviour is unchanged.
  */
-function sharedInstance<T>(globalKey: string, create: () => T): T {
-  const holder = globalThis as { [key: string]: unknown };
-  if (holder[globalKey] === undefined) holder[globalKey] = create();
-  return holder[globalKey] as T;
-}
 
 export const imageryCache: BlobCache = sharedInstance("rse.imageryCache", () => new MemoryLruCache(64));
 /** Larger LRU for 512px tiles (a single pan/zoom can touch hundreds). */

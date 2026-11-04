@@ -206,6 +206,56 @@ function majorityTier(counts: [number, number, number]): ConfidenceTier {
   return TIER_TEXT[bestTier] ?? "low";
 }
 
+/**
+ * Majority SUB code over a patch (filtered to the patch's class — stale codes
+ * survive majority flips); ties resolve to the lower code; 0 = "no sub-label".
+ * Shared by computeHotspots and buildPatchVectors so hotspots and events agree.
+ */
+function majoritySub(subCounts: Map<number, number>, classCode: number): number {
+  let subBest = 0;
+  let subN = 0;
+  subCounts.forEach((count, sub) => {
+    if (Math.floor(sub / 10) !== classCode) return; // stale after majority flip
+    if (count > subN || (count === subN && (subBest === 0 || sub < subBest))) {
+      subBest = sub;
+      subN = count;
+    }
+  });
+  return subBest;
+}
+
+/** Majority zone (tehsil) name over a patch; null outside district level. */
+function majorityZoneName(zoneCounts: Map<number, number>, zoneMeta: ZoneMeta[] | null): string | null {
+  let bestZ = -1;
+  let bestCount = -1;
+  zoneCounts.forEach((n, z) => {
+    if (n > bestCount) {
+      bestCount = n;
+      bestZ = z;
+    }
+  });
+  if (bestZ > 0 && zoneMeta?.[bestZ - 1]) return zoneMeta[bestZ - 1].name;
+  return null;
+}
+
+/** v2 evidence tags for a patch: transient / crop-cycle / short-gap. */
+function patchTags(input: {
+  classCode: number;
+  subBest: number;
+  persistCounts: [number, number];
+  shortGap: boolean;
+}): string[] {
+  const tags: string[] = [];
+  if (input.persistCounts[1] > input.persistCounts[0] && input.persistCounts[1] > 0) {
+    tags.push("transient");
+  }
+  if (input.subBest !== 0 && CROP_SUBS.has(input.subBest)) tags.push("crop-cycle");
+  if (input.shortGap && (input.classCode === CLASS.vegLoss || input.classCode === CLASS.vegGain)) {
+    tags.push("short-gap");
+  }
+  return tags;
+}
+
 function computeHotspots(
   classGrid: Uint8Array,
   labels: Int32Array,
@@ -290,17 +340,7 @@ function computeHotspots(
     const north = bbox[3] - acc.minRow * pxLat;
     const south = bbox[3] - (acc.maxRow + 1) * pxLat;
 
-    let tehsilName: string | null = null;
-    let bestZ = -1;
-    let bestCount = -1;
-    acc.zoneCounts.forEach((n, z) => {
-      if (n > bestCount) {
-        bestCount = n;
-        bestZ = z;
-      }
-    });
-    if (bestZ > 0 && zoneMeta?.[bestZ - 1]) tehsilName = zoneMeta[bestZ - 1].name;
-
+    const tehsilName = majorityZoneName(acc.zoneCounts, zoneMeta);
     const pixels = pixelsByLabel.get(acc.label) ?? [];
 
     // v2 confidence/sub-label/tags: majorities over the patch pixels. Ties in
@@ -310,30 +350,14 @@ function computeHotspots(
     let tags: string[] | undefined;
     if (aux.tiers || aux.subs) {
       confidence = majorityTier(acc.tierCounts);
-
-      subText = null;
-      let subBest = 0;
-      let subN = 0;
-      acc.subCounts.forEach((count, sub) => {
-        if (Math.floor(sub / 10) !== acc.classCode) return; // stale after majority flip
-        if (count > subN || (count === subN && (subBest === 0 || sub < subBest))) {
-          subBest = sub;
-          subN = count;
-        }
-      });
+      const subBest = majoritySub(acc.subCounts, acc.classCode);
       subText = subBest === 0 ? null : subLabel(subBest);
-
-      tags = [];
-      if (acc.persistCounts[1] > acc.persistCounts[0] && acc.persistCounts[1] > 0) {
-        tags.push("transient");
-      }
-      if (subBest !== 0 && CROP_SUBS.has(subBest)) tags.push("crop-cycle");
-      if (
-        aux.shortGap &&
-        (acc.classCode === CLASS.vegLoss || acc.classCode === CLASS.vegGain)
-      ) {
-        tags.push("short-gap");
-      }
+      tags = patchTags({
+        classCode: acc.classCode,
+        subBest,
+        persistCounts: acc.persistCounts,
+        shortGap: aux.shortGap,
+      });
     }
 
     return {
@@ -366,24 +390,56 @@ export function buildPatchVectors(
   pxAreaHa: number,
   aux: AuxGrids,
   limit: number = PATCH_VECTOR_LIMIT,
+  /** Zone index+1 per pixel (rasterizeZones); null outside district level —
+   *  gives every event its tehsilName like the hotspots already carry. */
+  zones: Int16Array | null = null,
+  zoneMeta: ZoneMeta[] | null = null,
 ): GeoJSON.FeatureCollection {
   const { width } = grid;
   const patches = new Map<
     number,
-    { label: number; count: number; classCode: number; tierCounts: [number, number, number] }
+    {
+      label: number;
+      count: number;
+      classCode: number;
+      tierCounts: [number, number, number];
+      zoneCounts: Map<number, number>;
+      subCounts: Map<number, number>;
+      persistCounts: [number, number];
+    }
   >();
   for (let i = 0; i < labels.length; i++) {
     const label = labels[i];
     if (label === 0) continue;
     let acc = patches.get(label);
     if (!acc) {
-      acc = { label, count: 0, classCode: classGrid[i], tierCounts: [0, 0, 0] };
+      acc = {
+        label,
+        count: 0,
+        classCode: classGrid[i],
+        tierCounts: [0, 0, 0],
+        zoneCounts: new Map(),
+        subCounts: new Map(),
+        persistCounts: [0, 0],
+      };
       patches.set(label, acc);
     }
     acc.count += 1;
     if (aux.tiers) {
       const tier = aux.tiers[i];
       if (tier >= TIER.low && tier <= TIER.high) acc.tierCounts[tier - 1] += 1;
+    }
+    if (aux.subs && aux.subs[i] !== 0) {
+      const sub = aux.subs[i];
+      acc.subCounts.set(sub, (acc.subCounts.get(sub) ?? 0) + 1);
+    }
+    if (aux.persist) {
+      if (aux.persist[i] === PERSIST.yes) acc.persistCounts[0] += 1;
+      else if (aux.persist[i] === PERSIST.transient) acc.persistCounts[1] += 1;
+    }
+    if (zones) {
+      const z = zones[i];
+      if (z > 0) acc.zoneCounts.set(z, (acc.zoneCounts.get(z) ?? 0) + 1);
     }
   }
 
@@ -425,7 +481,24 @@ export function buildPatchVectors(
       if (row < minRow) minRow = row;
       if (row > maxRow) maxRow = row;
     }
-    const hasTiers = aux.tiers !== null;
+    // Same availability rule as computeHotspots: v2 evidence fields exist
+    // whenever tier or sub grids are present, so hotspots and events agree.
+    let confidence: ConfidenceTier | undefined;
+    let subText: string | null | undefined;
+    let tags: string[] | undefined;
+    if (aux.tiers || aux.subs) {
+      confidence = majorityTier(acc.tierCounts);
+      const subBest = majoritySub(acc.subCounts, acc.classCode);
+      subText = subBest === 0 ? null : subLabel(subBest);
+      tags = patchTags({
+        classCode: acc.classCode,
+        subBest,
+        persistCounts: acc.persistCounts,
+        shortGap: aux.shortGap,
+      });
+    }
+    const tehsilName = majorityZoneName(acc.zoneCounts, zoneMeta);
+
     const centroid = pixelToLngLat((minCol + maxCol) / 2, (minRow + maxRow) / 2, grid);
     // Outer edges of the first/last patch pixel — event bbox for map focusing.
     const topLeft = pixelEdgesToBbox(minCol, minRow, grid);
@@ -451,7 +524,10 @@ export function buildPatchVectors(
         areaHa,
         centroid,
         bbox,
-        ...(hasTiers ? { confidence: majorityTier(acc.tierCounts) } : {}),
+        ...(confidence ? { confidence } : {}),
+        ...(subText !== undefined ? { subLabel: subText } : {}),
+        ...(tags ? { tags } : {}),
+        ...(tehsilName ? { tehsilName } : {}),
       },
     });
   }

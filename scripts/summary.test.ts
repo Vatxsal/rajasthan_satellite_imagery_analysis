@@ -17,6 +17,7 @@ function sampleStats(): CompareStats {
     metadata: {
       areaName: "Ajmer",
       areaLevel: "district",
+      areaId: "d-ajmer",
       dateA: "2026-08-02",
       dateB: "2026-10-22",
       gapDays: 81,

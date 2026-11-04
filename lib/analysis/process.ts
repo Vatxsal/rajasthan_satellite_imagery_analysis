@@ -75,6 +75,9 @@ export interface RunCompareInput {
   dateB: string;
   areaName: string;
   areaLevel: "district" | "tehsil" | "ilr";
+  /** Stable area id (from the bounds route) — mirrors CompareMetadata.areaId so
+   *  cache-backed routes can rebuild this input and recompute statelessly. */
+  areaId: string;
   sensitivity: Sensitivity;
   minPatchHa?: number;
   /** Long-side cap of the analysis grid (COMPARE_MAX_PX). */
@@ -379,19 +382,23 @@ export function processCompare(
     shortGap,
   });
   // Phase 5 (#13): full-coverage vector layer for events/exports — kept off
-  // the client-facing result, so response size is unchanged.
+  // the client-facing result (except the count), so response size stays small.
   const patchVectors = buildPatchVectors(
     classGrid,
     labels,
     grid,
     (grid.metersX * grid.metersY) / M2_PER_HA,
     { tiers, subs, persist, shortGap },
+    undefined,
+    zones,
+    zoneMeta,
   );
   const result: CompareStats = {
     ...core,
     metadata: {
       areaName: input.areaName,
       areaLevel: input.areaLevel,
+      areaId: input.areaId,
       dateA: input.dateA,
       dateB: input.dateB,
       gapDays,
@@ -423,6 +430,9 @@ export function processCompare(
       ...(engineStats ? { engineStats } : {}),
       generatedAt: new Date().toISOString(),
     },
+    // Full event count for the Events tab header; the client only receives
+    // the first ANALYZE_EVENTS_CAP features inline (fetched in analyze.ts).
+    eventsTotal: patchVectors.features.length,
   };
 
   const overlayPng = encodePng(classToRgba(classGrid, width), width, height);

@@ -1,4 +1,5 @@
 import { getServerEnv } from "@/lib/env";
+import { sharedInstance } from "./singleton";
 
 interface Bucket {
   count: number;
@@ -10,12 +11,17 @@ const WINDOW_MS = 60_000;
 /** Which rate-limit bucket a request consumes. */
 export type RateLimitKind = "api" | "tiles" | "compare" | "ai";
 
-const buckets: Record<RateLimitKind, Map<string, Bucket>> = {
+/**
+ * Process-wide buckets (globalThis): each route graph would otherwise get its
+ * own Maps under `next dev` HMR / Vercel function bundling, silently dividing
+ * the per-IP budget by the number of instances.
+ */
+const buckets = sharedInstance("rse.rateBuckets", (): Record<RateLimitKind, Map<string, Bucket>> => ({
   api: new Map(),
   tiles: new Map(),
   compare: new Map(),
   ai: new Map(),
-};
+}));
 
 export function getClientIp(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for");

@@ -7,7 +7,9 @@ import Segmented from "@/components/ui/Segmented";
 import Slider from "@/components/ui/Slider";
 import { cn } from "@/components/ui/cn";
 import { focusHotspot, focusTehsil } from "@/lib/compare/bridge";
+import { eventsViewState, selectVisibleEvents } from "@/lib/compare/eventList";
 import { downloadEventsGeoJson, downloadStatsCsv } from "@/lib/compare/export";
+import { analysisParamsQuery } from "@/lib/compare/params";
 import type { CompareStats, ConfidenceTier } from "@/lib/analysis/types";
 import type { Sensitivity } from "@/lib/analysis/config";
 import { classColor } from "@/lib/analysis/config";
@@ -104,16 +106,23 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const setConfidenceFilter = useCompareStore((s) => s.setConfidenceFilter);
   const eventsItems = useCompareStore((s) => s.eventsItems);
   const eventsTotal = useCompareStore((s) => s.eventsTotal);
+  const eventsFilteredTotal = useCompareStore((s) => s.eventsFilteredTotal);
+  const eventsLimit = useCompareStore((s) => s.eventsLimit);
   const eventsStatus = useCompareStore((s) => s.eventsStatus);
   const eventsError = useCompareStore((s) => s.eventsError);
-  const fetchEvents = useCompareStore((s) => s.fetchEvents);
+  const loadMoreEvents = useCompareStore((s) => s.loadMoreEvents);
 
-  // The events list is server-backed: fetch the first page when the tab
-  // opens (or after a confidence-filter change returns the status to idle).
+  // Slow-load hint: a cold server cache recomputes the analysis for the next
+  // page/overlay — tell the user instead of spinning silently.
+  const [slowLoad, setSlowLoad] = useState(false);
   useEffect(() => {
-    if (!result || tab !== "hotspots") return;
-    if (eventsStatus === "idle") void fetchEvents(false);
-  }, [result, tab, eventsStatus, fetchEvents]);
+    if (tab !== "hotspots" || eventsStatus !== "loading") {
+      setSlowLoad(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSlowLoad(true), 1500);
+    return () => window.clearTimeout(timer);
+  }, [tab, eventsStatus]);
 
   if (!result) return null;
   const stats: CompareStats = result.stats;
@@ -127,33 +136,52 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
 
   if (tab === "hotspots") {
     const loading = eventsStatus === "loading";
+    // One source for list rows AND map markers (bridge reads the same helper).
+    const visible = selectVisibleEvents(eventsItems, { confidenceFilter, limit: eventsLimit });
+    const view = eventsViewState({ status: eventsStatus, error: eventsError, visibleCount: visible.length });
+    // The retry banner rides on the status alone — an error with rows already
+    // loaded keeps the list (header + rows) while still offering the retry.
+    const showError = eventsStatus === "error";
+    const errorMessage = (eventsError ?? "").trim() || "Change events failed to load.";
+    // Header count: exact raw total, or the probed filtered total when a
+    // confidence filter is active (falls back to the visible rows while the
+    // probe is still in flight — never a bogus "0 patches").
+    const headerTotal = confidenceFilter !== null ? (eventsFilteredTotal ?? visible.length) : eventsTotal;
+    const hasMore = visible.length < headerTotal;
+
     return (
       <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="min-w-0 text-xs text-muted">
-            Change events — {eventsTotal.toLocaleString("en")}{" "}
-            {eventsTotal === 1 ? "patch" : "patches"}, largest first. Click one to zoom the map.
-          </p>
-          <Button
-            size="sm"
-            disabled={eventsTotal === 0}
-            title="Download every change event as one GeoJSON file (paged from the server)."
-            onClick={() => {
-              void downloadEventsGeoJson(result.key, { dateA: metadata.dateA, dateB: metadata.dateB }).catch(
-                (error: unknown) => {
+        {view.kind === "list" && (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="min-w-0 text-xs text-muted">
+              Change events — {headerTotal.toLocaleString("en")}{" "}
+              {headerTotal === 1 ? "patch" : "patches"}
+              {confidenceFilter ? ` matching ${confidenceFilter} confidence` : ""}, largest first.
+              Click one to zoom the map.
+            </p>
+            <Button
+              size="sm"
+              disabled={loading}
+              title="Download every change event as one GeoJSON file (paged from the server)."
+              onClick={() => {
+                void downloadEventsGeoJson(
+                  result.key,
+                  { dateA: metadata.dateA, dateB: metadata.dateB },
+                  analysisParamsQuery(metadata),
+                ).catch((error: unknown) => {
                   const message =
                     error instanceof Error && error.message
                       ? error.message
                       : "The events file is unavailable.";
                   useAppStore.getState().pushToast({ tone: "error", message, duration: 5000 });
-                },
-              );
-            }}
-          >
-            <FileJson size={13} />
-            GeoJSON
-          </Button>
-        </div>
+                });
+              }}
+            >
+              <FileJson size={13} />
+              GeoJSON
+            </Button>
+          </div>
+        )}
 
         {v2 && (
           <div>
@@ -176,32 +204,50 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
           </div>
         )}
 
-        {eventsStatus === "error" && (
+        {showError && (
           <div className="flex flex-col gap-2 rounded border border-warning/40 bg-warning/10 px-3 py-3">
-            <p className="text-xs text-text">{eventsError ?? "Change events failed to load."}</p>
-            <Button size="sm" className="self-start" disabled={loading} onClick={() => void fetchEvents(false)}>
+            <p className="text-xs text-text">{errorMessage}</p>
+            <Button
+              size="sm"
+              className="self-start"
+              disabled={loading}
+              onClick={() => {
+                // Loaded rows → just retry the page; nothing loaded → the full
+                // analysis re-run refreshes every tab.
+                if (eventsItems.length > 0) void loadMoreEvents();
+                else void run();
+              }}
+            >
               Retry
             </Button>
           </div>
         )}
 
-        {eventsStatus !== "error" && !loading && eventsTotal === 0 && (
-          <p className="rounded border border-dashed border-border px-3 py-4 text-center text-xs text-muted">
-            {confidenceFilter
-              ? "No events match this confidence filter."
-              : "No change events — no patch survived the thresholds and minimum patch size."}
-          </p>
+        {view.kind === "empty" && (
+          <div className="flex flex-col gap-1 rounded border border-dashed border-border px-3 py-4 text-center text-xs text-muted">
+            <p>
+              {confidenceFilter
+                ? "No events match this confidence filter."
+                : "No significant change events at these settings."}
+            </p>
+            {!confidenceFilter && (
+              <p>
+                Try lowering the minimum patch size or raising the sensitivity in the Statistics
+                tab, then re-run the analysis.
+              </p>
+            )}
+          </div>
         )}
 
-        {loading && eventsItems.length === 0 && (
+        {view.kind === "loading" && (
           <p className="flex items-center gap-1.5 rounded border border-dashed border-border px-3 py-4 text-center text-xs text-muted">
             <Loader2 size={13} className="animate-spin" aria-hidden />
-            Loading events…
+            {slowLoad ? "Re-running analysis… (this can take up to a minute)" : "Loading events…"}
           </p>
         )}
 
         <ol className="flex flex-col gap-1">
-          {eventsItems.map((event, index) => {
+          {visible.map((event, index) => {
             const props = (event.properties ?? {}) as Record<string, unknown>;
             const classCode = Number(props.classCode ?? -1);
             const color = classColor(classCode);
@@ -287,19 +333,21 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
           })}
         </ol>
 
-        {eventsItems.length < eventsTotal && (
+        {view.kind === "list" && hasMore && (
           <Button
             variant="secondary"
             size="sm"
             disabled={loading}
-            onClick={() => void fetchEvents(true)}
+            onClick={() => void loadMoreEvents()}
           >
             {loading && (
               <Loader2 size={13} className="animate-spin" aria-hidden />
             )}
             {loading
-              ? "Loading…"
-              : `Load more (${eventsItems.length.toLocaleString("en")} of ${eventsTotal.toLocaleString("en")})`}
+              ? slowLoad
+                ? "Re-running analysis…"
+                : "Loading…"
+              : `Load more (${visible.length.toLocaleString("en")} of ${headerTotal.toLocaleString("en")})`}
           </Button>
         )}
       </div>
