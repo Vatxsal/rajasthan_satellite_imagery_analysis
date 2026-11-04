@@ -33,6 +33,7 @@ function makeInput(
     dateB: "2026-05-20",
     areaName: "Test area",
     areaLevel: "tehsil",
+    areaId: "test-area",
     sensitivity: "medium",
     ...over,
   };

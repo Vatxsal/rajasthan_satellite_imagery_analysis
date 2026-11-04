@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { BarChart3, Crosshair, Download, Flame, Layers3, Loader2, MoveHorizontal, Sparkles, X } from "lucide-react";
 import Button from "@/components/ui/Button";
@@ -302,6 +302,17 @@ function ChangeMapTab() {
   const setBoostVisibility = useCompareStore((s) => s.setBoostVisibility);
   const [exporting, setExporting] = useState<"png" | "geotiff" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  // A cold server cache recomputes the analysis before the file can be served —
+  // swap the caption after 1.5 s so a long wait reads as re-analysis.
+  const [exportSlow, setExportSlow] = useState(false);
+  useEffect(() => {
+    if (!exporting) {
+      setExportSlow(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setExportSlow(true), 1500);
+    return () => window.clearTimeout(timer);
+  }, [exporting]);
 
   if (!result) return null;
   const stats = result.stats;
@@ -453,11 +464,11 @@ function ChangeMapTab() {
         <p className="section-label">Export</p>
         <Button size="sm" className="w-full" disabled={exporting !== null} onClick={() => void doExport("png")}>
           <Download size={13} />
-          {exporting === "png" ? "Preparing…" : "Change map PNG"}
+          {exporting === "png" ? (exportSlow ? "Re-running analysis…" : "Preparing…") : "Change map PNG"}
         </Button>
         <Button size="sm" className="w-full" disabled={exporting !== null} onClick={() => void doExport("geotiff")}>
           <Download size={13} />
-          {exporting === "geotiff" ? "Preparing…" : "GeoTIFF"}
+          {exporting === "geotiff" ? (exportSlow ? "Re-running analysis…" : "Preparing…") : "GeoTIFF"}
         </Button>
         <p className="text-[10px] leading-relaxed text-muted">
           GeoTIFF is uint8 with nodata 255 outside the polygon — opens directly in QGIS.

@@ -362,6 +362,7 @@ function runScenario(engine: CompareEngine, spec: ScenarioSpec): ValidationCase 
     dateB: DATE_B,
     areaName: `Scenario ${spec.name}`,
     areaLevel: "tehsil",
+    areaId: `scenario-${spec.name.toLowerCase().replace(/\s+/g, "-")}`,
     sensitivity: "medium",
     maxPx: WIDTH_PX,
     engine,

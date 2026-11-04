@@ -101,6 +101,9 @@ export type CompareInputMode = "single" | "composite";
 export interface CompareMetadata {
   areaName: string;
   areaLevel: "district" | "tehsil" | "ilr";
+  /** Stable area id (same as the analyze request's areaId) — lets every cache-backed
+   *  route re-derive the analysis key and recompute statelessly after a cache miss. */
+  areaId: string;
   dateA: string;
   dateB: string;
   gapDays: number;
@@ -147,6 +150,9 @@ export interface CompareStats {
   negligible: boolean;
   /** v2 only: change pixels per confidence tier (UI filter counts). */
   confidence?: { high: number; medium: number; low: number };
+  /** Total patch-vector events stored with this analysis (the client ships the
+   *  first ANALYZE_EVENTS_CAP of them; more pages come from /api/compare/events). */
+  eventsTotal?: number;
 }
 
 /** Result of an /api/compare/analyze call (final NDJSON frame). */
@@ -155,6 +161,12 @@ export interface AnalyzeResponse {
   overlayUrl: string;
   aiEnabled: boolean;
   stats: CompareStats;
+  /**
+   * Full-coverage change events for the Events list + map markers (largest
+   * first), capped at ANALYZE_EVENTS_CAP. stats.eventsTotal carries the
+   * uncapped count — further pages come from GET /api/compare/events.
+   */
+  events: GeoJSON.Feature[];
 }
 
 /** Structured AI summary the /api/compare/summary route returns. */

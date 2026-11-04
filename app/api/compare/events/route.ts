@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { EVENTS_PAGE_LIMIT_DEFAULT, EVENTS_PAGE_LIMIT_MAX, pageEvents } from "@/lib/analysis/events";
-import { compareResultCache } from "@/lib/cache";
-import { apiError, errorResponse, rateLimitGuard } from "@/lib/server/api";
+import { errorResponse, rateLimitGuard } from "@/lib/server/api";
+import { entryForKey } from "@/lib/server/compareRun";
 
 export const runtime = "nodejs";
-export const maxDuration = 15;
+/** 60 s — a cold cache now recomputes the analysis (same cost as analyze). */
+export const maxDuration = 60;
 
 const querySchema = z.object({
   key: z.string().regex(/^[a-f0-9]{64}$/, "key must be a 64-char hex digest"),
@@ -20,15 +21,31 @@ const querySchema = z.object({
   classCode: z.coerce.number().int().optional(),
   /** Minimum confidence tier (engine v2; v1 events carry no tier and are excluded). */
   confidence: z.enum(["low", "medium", "high"]).optional(),
+  // Optional analysis parameters — when present the route re-derives the key
+  // and recomputes statelessly after a cache miss (no more "expired" for a
+  // result the client still holds markers/stats for). Omitted → cache-only.
+  areaId: z.string().optional(),
+  level: z.enum(["district", "tehsil", "ilr"]).optional(),
+  dateA: z.string().optional(),
+  dateB: z.string().optional(),
+  sensitivity: z.enum(["low", "medium", "high"]).optional(),
+  minPatchHa: z.coerce.number().optional(),
+  inputMode: z.enum(["single", "composite"]).optional(),
+  compositeWindowDays: z.coerce.number().int().optional(),
 });
 
 /**
  * GET /api/compare/events?key=…&limit=…&offset=…&classCode=…&confidence=…
+ *   [+ areaId&level&dateA&dateB&sensitivity&minPatchHa&inputMode&compositeWindowDays]
  *
  * The full-coverage change events of a completed analysis (Phase 6, #13/#16):
  * one feature per kept change patch — largest first — with a stable id,
  * class, area, centroid and (v2) majority confidence tier. Paging is applied
  * after the optional filters; `total` is the filtered count.
+ *
+ * With analysis parameters the server rebuilds the artifact on a cache miss
+ * (in-flight deduped) — the first page can therefore take as long as an
+ * analysis run when the cache is cold.
  */
 export async function GET(request: Request): Promise<Response> {
   const guard = rateLimitGuard(request);
@@ -38,10 +55,7 @@ export async function GET(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const query = querySchema.parse(Object.fromEntries(url.searchParams));
 
-    const entry = compareResultCache.get(query.key);
-    if (!entry) {
-      throw apiError(404, "EVENTS_NOT_FOUND", "This comparison result has expired. Run the analysis again.");
-    }
+    const entry = await entryForKey(query.key, query);
 
     const page = pageEvents(entry.events.features, {
       limit: query.limit,

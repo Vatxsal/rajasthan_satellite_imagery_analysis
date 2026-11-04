@@ -27,7 +27,16 @@ export class CompareRunError extends Error {
 
 type Frame =
   | { type: "stage"; stage: CompareStage }
-  | { type: "result"; key: string; overlayUrl: string; aiEnabled: boolean; stats: AnalyzeResponse["stats"] }
+  | {
+      type: "result";
+      key: string;
+      overlayUrl: string;
+      aiEnabled: boolean;
+      stats: AnalyzeResponse["stats"];
+      /** Inline events (first ANALYZE_EVENTS_CAP) — the Events list/markers read
+       *  them from here, no follow-up fetch. Optional for older servers. */
+      events?: AnalyzeResponse["events"];
+    }
   | { type: "error"; code: string; message: string };
 
 interface StreamOptions {
@@ -82,7 +91,13 @@ export async function streamAnalyze(
     if (frame.type === "error") {
       throw new CompareRunError(frame.code, frame.message);
     }
-    return { key: frame.key, overlayUrl: frame.overlayUrl, aiEnabled: frame.aiEnabled, stats: frame.stats };
+    return {
+      key: frame.key,
+      overlayUrl: frame.overlayUrl,
+      aiEnabled: frame.aiEnabled,
+      stats: frame.stats,
+      events: frame.events ?? [],
+    };
   };
 
   for (;;) {

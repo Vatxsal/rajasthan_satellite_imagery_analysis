@@ -147,18 +147,22 @@ const EVENTS_EXPORT_MAX_PAGES = 100;
  * Full-coverage change events (Phase 6, #13): pages /api/compare/events until
  * the filtered set is complete and saves one FeatureCollection. The loops are
  * strictly bounded (max pages + empty-page break) so a bad server response
- * can never spin forever.
+ * can never spin forever. `params` carries the analysis parameters (from
+ * lib/compare/params) so a cold server cache recomputes statelessly instead
+ * of failing with "expired".
  */
 export async function downloadEventsGeoJson(
   key: string,
   dates: { dateA: string; dateB: string },
+  params?: URLSearchParams,
 ): Promise<void> {
+  const paramSuffix = params ? `&${params.toString()}` : "";
   const features: GeoJSON.Feature[] = [];
   let offset = 0;
   let total = 0;
   for (let page = 0; page < EVENTS_EXPORT_MAX_PAGES; page++) {
     const response = await fetch(
-      `/api/compare/events?key=${encodeURIComponent(key)}&limit=${EVENTS_EXPORT_PAGE}&offset=${offset}`,
+      `/api/compare/events?key=${encodeURIComponent(key)}&limit=${EVENTS_EXPORT_PAGE}&offset=${offset}${paramSuffix}`,
     );
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { message?: string } | null;

@@ -10,9 +10,10 @@ import {
   summaryOutputSchema,
   type SummaryOutput,
 } from "@/lib/analysis/prompt";
-import { aiSummaryCache, compareResultCache, summaryCacheKey } from "@/lib/cache";
+import { aiSummaryCache, summaryCacheKey } from "@/lib/cache";
 import { getServerEnv } from "@/lib/env";
 import { codedError, generateStructuredJson, type GeminiImagePart } from "@/lib/server/gemini";
+import { entryForKey } from "@/lib/server/compareRun";
 import { buildSummaryImages } from "@/lib/server/summaryImages";
 import {
   apiError,
@@ -33,6 +34,17 @@ const summaryBodySchema = z.object({
   analysisKey: z.string().trim().min(8).max(128),
   language: z.enum(["en", "hi"]).default("en"),
   includeImages: z.boolean().default(true),
+  // Optional analysis parameters — with them the server recomputes a cold
+  // artifact instead of failing with ANALYSIS_EXPIRED (same contract as the
+  // events/overlay routes); without them the legacy cache-only path applies.
+  areaId: z.string().optional(),
+  level: z.enum(["district", "tehsil", "ilr"]).optional(),
+  dateA: z.string().optional(),
+  dateB: z.string().optional(),
+  sensitivity: z.enum(["low", "medium", "high"]).optional(),
+  minPatchHa: z.coerce.number().optional(),
+  inputMode: z.enum(["single", "composite"]).optional(),
+  compositeWindowDays: z.coerce.number().int().optional(),
 });
 
 type SummaryBody = z.infer<typeof summaryBodySchema>;
@@ -56,9 +68,12 @@ function userPrompt(
 /**
  * POST /api/compare/summary
  *
- * Body: { analysisKey, language?, includeImages? }. The deterministic stats
- * are looked up server-side by analysisKey — the client never sends numbers.
- * Missing/evicted artifact → 404 ANALYSIS_EXPIRED (re-run the comparison).
+ * Body: { analysisKey, language?, includeImages?, …analysis params }. The
+ * deterministic stats are looked up server-side — the client never sends
+ * numbers. An already-generated summary is served straight from cache; a
+ * cold artifact with analysis parameters recomputes statelessly (can take
+ * as long as an analysis run); key-only bodies keep the legacy 404
+ * ANALYSIS_EXPIRED contract.
  * With includeImages the server attaches three ≤768 px JPEG previews (date A,
  * date B, overlay-on-B); without, only the whitelisted statistics are sent.
  * Gemini returns structured JSON (schema-enforced), validated with zod and
@@ -78,15 +93,6 @@ export async function POST(request: Request): Promise<Response> {
 
     const body = await readJsonBody(request, (raw) => summaryBodySchema.parse(raw), SUMMARY_BODY_LIMIT);
 
-    const artifact = compareResultCache.get(body.analysisKey);
-    if (!artifact) {
-      throw apiError(
-        404,
-        "ANALYSIS_EXPIRED",
-        "This comparison is no longer cached on the server. Run the analysis again to get a summary.",
-      );
-    }
-
     const model = env.GEMINI_MODEL || SUMMARY_MODEL_FALLBACK;
     const cacheKey = summaryCacheKey(body);
     const cached = aiSummaryCache.get(cacheKey);
@@ -94,6 +100,8 @@ export async function POST(request: Request): Promise<Response> {
       const summary = JSON.parse(cached.toString("utf8")) as SummaryOutput;
       return NextResponse.json({ summary, cached: true, model, imageCount: 0 });
     }
+
+    const artifact = await entryForKey(body.analysisKey, body);
 
     let images: GeminiImagePart[] = [];
     if (body.includeImages) {

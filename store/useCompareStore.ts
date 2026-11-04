@@ -2,6 +2,8 @@ import { create } from "zustand";
 import type { Sensitivity } from "@/lib/analysis/config";
 import type { CompareStats, ConfidenceTier, SummaryData, SummaryLanguage } from "@/lib/analysis/types";
 import { bboxFromGeometry } from "@/lib/cdse/geometry";
+import { filterEvents } from "@/lib/compare/eventList";
+import { analysisParamsFromMetadata, analysisParamsQuery } from "@/lib/compare/params";
 import { streamAnalyze } from "@/lib/compare/run";
 import { selectActiveSelection, useAppStore } from "@/store/useAppStore";
 
@@ -9,12 +11,14 @@ export type CompareTab = "swipe" | "change-map" | "statistics" | "hotspots" | "s
 export type CompareStage = "fetch-a" | "fetch-b" | "analyze";
 export type CompareSlot = "dateA" | "dateB";
 export type CompareSummaryStatus = "idle" | "loading" | "done" | "error";
-/** Events list lifecycle: idle = needs (re)fetch, ready = loaded (even if empty). */
+/** Which server step a loading summary is in (artifact recompute vs Gemini). */
+export type CompareSummaryPhase = "ensure" | "write" | null;
+/** Events list lifecycle: idle = never shown yet, ready = loaded (even if empty). */
 export type CompareEventsStatus = "idle" | "loading" | "ready" | "error";
 /** Engine v2 input mode — median composite vs the single date each. */
 export type CompareInputMode = "single" | "composite";
 
-/** One server page of /api/compare/events (route max is 500). */
+/** One page of change events — client cursor growth step AND server page size. */
 const EVENTS_PAGE_SIZE = 100;
 
 /** Progress frames → human labels for the compare bar. */
@@ -30,6 +34,12 @@ export interface CompareResult {
   overlayUrl: string;
   aiEnabled: boolean;
   stats: CompareStats;
+  /**
+   * Inline change events (first ANALYZE_EVENTS_CAP from the analyze stream).
+   * The Events list AND the map markers read these — no follow-up fetch, so
+   * the tab works the instant a run finishes (and survives cold caches).
+   */
+  events: GeoJSON.Feature[];
   /** Analysis-grid bbox (geometry bbox, same as the server) for the image source. */
   bbox: [number, number, number, number];
 }
@@ -59,9 +69,15 @@ interface CompareState {
   inputMode: CompareInputMode;
   /** Minimum confidence tier for the events list (null = all events). */
   confidenceFilter: ConfidenceTier | null;
-  /** Paged change events from GET /api/compare/events (largest first). */
+  /** Loaded change events, raw and unfiltered (inline from analyze + server pages).
+   *  List rows and map markers both derive from this via lib/compare/eventList. */
   eventsItems: GeoJSON.Feature[];
+  /** Total change events for the raw set (stats.eventsTotal / server page total). */
   eventsTotal: number;
+  /** Exact total matching the active confidence filter (probe result; null = unknown). */
+  eventsFilteredTotal: number | null;
+  /** Client page cursor: how many visible events the list shows (and markers number). */
+  eventsLimit: number;
   eventsStatus: CompareEventsStatus;
   eventsError: string | null;
   /** Swipe divider position, percent from the left edge (0-100). */
@@ -84,6 +100,8 @@ interface CompareState {
   summaryLanguage: SummaryLanguage;
   summaryIncludeImages: boolean;
   summaryStatus: CompareSummaryStatus;
+  /** Which phase the loading summary is in ("ensure" = artifact recompute). */
+  summaryPhase: CompareSummaryPhase;
   summaryData: SummaryData | null;
   summaryError: string | null;
 
@@ -99,8 +117,12 @@ interface CompareState {
   setMinPatchHa: (value: number) => void;
   setInputMode: (value: CompareInputMode) => void;
   setConfidenceFilter: (value: ConfidenceTier | null) => void;
-  /** Loads the next events page (append) or (re)starts from offset 0. */
-  fetchEvents: (append: boolean) => Promise<void>;
+  /** Advances the events view: grows the client cursor when rows are already
+   *  loaded, else fetches the next raw server page (stateless recompute on a
+   *  cold cache — params included). */
+  loadMoreEvents: () => Promise<void>;
+  /** Best-effort exact total for the active confidence filter (limit=1 probe). */
+  probeEventsTotal: () => Promise<void>;
   setDivider: (value: number) => void;
   setBoostVisibility: (value: boolean) => void;
   setStripExpanded: (value: boolean) => void;
@@ -146,6 +168,8 @@ const RESULT_BOUND_RESET = {
   confidenceFilter: null as ConfidenceTier | null,
   eventsItems: [] as GeoJSON.Feature[],
   eventsTotal: 0,
+  eventsFilteredTotal: null as number | null,
+  eventsLimit: EVENTS_PAGE_SIZE,
   eventsStatus: "idle" as CompareEventsStatus,
   eventsError: null as string | null,
 };
@@ -153,6 +177,7 @@ const RESULT_BOUND_RESET = {
 function summaryIdle() {
   return {
     summaryStatus: "idle" as CompareSummaryStatus,
+    summaryPhase: null as CompareSummaryPhase,
     summaryData: null as SummaryData | null,
     summaryError: null as string | null,
   };
@@ -176,6 +201,8 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   confidenceFilter: null,
   eventsItems: [],
   eventsTotal: 0,
+  eventsFilteredTotal: null,
+  eventsLimit: EVENTS_PAGE_SIZE,
   eventsStatus: "idle",
   eventsError: null,
   divider: 50,
@@ -189,6 +216,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   summaryLanguage: "en",
   summaryIncludeImages: true,
   summaryStatus: "idle",
+  summaryPhase: null,
   summaryData: null,
   summaryError: null,
 
@@ -291,9 +319,13 @@ export const useCompareStore = create<CompareState>((set, get) => ({
         selectedHotspot: null,
         tehsilHighlight: null,
         confidenceFilter: null,
-        eventsItems: [],
-        eventsTotal: 0,
-        eventsStatus: "idle",
+        // Single source: the list + map markers start from the inline events —
+        // no follow-up fetch, no "expired" on a cold server cache.
+        eventsItems: result.events,
+        eventsTotal: result.stats.eventsTotal ?? result.events.length,
+        eventsFilteredTotal: null,
+        eventsLimit: EVENTS_PAGE_SIZE,
+        eventsStatus: "ready" as CompareEventsStatus,
         eventsError: null,
         ...summaryIdle(),
       });
@@ -326,31 +358,67 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   setMinPatchHa: (value) => set({ minPatchHa: Math.max(0.01, Math.min(100, value)) }),
   setInputMode: (value) => set({ inputMode: value }),
   setConfidenceFilter: (value) => {
-    eventsSeq += 1; // in-flight pages belong to the old filter
+    eventsSeq += 1; // in-flight pages/probes belong to the old filter
+    // Items stay loaded: the filter is applied client-side (list + markers
+    // update instantly from the same array), only the cursor resets.
     set({
       confidenceFilter: value,
-      eventsItems: [],
-      eventsTotal: 0,
-      eventsStatus: "idle",
+      eventsLimit: EVENTS_PAGE_SIZE,
+      eventsFilteredTotal: null,
+      // A result exists → the list is served from its inline events, so the
+      // view stays ready (empty only when nothing matches the filter).
+      eventsStatus: get().result ? "ready" : "idle",
       eventsError: null,
     });
+    if (value && get().result) void get().probeEventsTotal();
   },
 
-  fetchEvents: async (append) => {
+  probeEventsTotal: async () => {
+    const state = get();
+    const result = state.result;
+    const filter = state.confidenceFilter;
+    if (!result || !filter) return;
+    try {
+      const query = analysisParamsQuery(result.stats.metadata);
+      query.set("key", result.key);
+      query.set("limit", "1");
+      query.set("offset", "0");
+      query.set("confidence", filter);
+      const response = await fetch(`/api/compare/events?${query}`);
+      const body = (await response.json().catch(() => null)) as { total?: number } | null;
+      if (!response.ok || typeof body?.total !== "number") return;
+      const current = get();
+      // Discard stale probes (filter or result changed while it was in flight).
+      if (current.result?.key !== result.key || current.confidenceFilter !== filter) return;
+      set({ eventsFilteredTotal: body.total });
+    } catch {
+      // Best-effort: the header falls back to the loaded count.
+    }
+  },
+
+  loadMoreEvents: async () => {
     const state = get();
     if (!state.result || state.eventsStatus === "loading") return;
-    if (append && state.eventsTotal > 0 && state.eventsItems.length >= state.eventsTotal) return;
+    const result = state.result;
+    const filter = state.confidenceFilter;
+
+    // Rows already loaded but past the cursor → just advance it (no network).
+    const loadedMatches = filterEvents(state.eventsItems, filter);
+    if (state.eventsLimit < loadedMatches.length) {
+      set({ eventsLimit: state.eventsLimit + EVENTS_PAGE_SIZE });
+      return;
+    }
+    // Every raw row is in — nothing left to fetch (cursor growth covered above).
+    if (state.eventsItems.length >= state.eventsTotal) return;
+
     const seq = ++eventsSeq;
-    const key = state.result.key;
     set({ eventsStatus: "loading", eventsError: null });
     try {
-      const params = new URLSearchParams({
-        key,
-        limit: String(EVENTS_PAGE_SIZE),
-        offset: String(append ? state.eventsItems.length : 0),
-      });
-      if (state.confidenceFilter) params.set("confidence", state.confidenceFilter);
-      const response = await fetch(`/api/compare/events?${params}`);
+      const query = analysisParamsQuery(result.stats.metadata);
+      query.set("key", result.key);
+      query.set("limit", String(EVENTS_PAGE_SIZE));
+      query.set("offset", String(state.eventsItems.length));
+      const response = await fetch(`/api/compare/events?${query}`);
       const body = (await response.json().catch(() => null)) as {
         total?: number;
         events?: GeoJSON.Feature[];
@@ -359,17 +427,24 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       if (!response.ok || !body || !Array.isArray(body.events)) {
         throw new Error(body?.message ?? "Change events are unavailable. Run the analysis again.");
       }
-      // Discard superseded responses (filter changed) or orphaned ones
-      // (result cleared/replaced while this page was in flight).
-      if (seq !== eventsSeq || get().result?.key !== key) return;
+      // Discard superseded responses (filter/result changed while in flight).
+      if (seq !== eventsSeq || get().result?.key !== result.key) return;
+      const current = get();
+      const seen = new Set(
+        current.eventsItems.map((feature) => String(feature.id ?? (feature.properties as { id?: unknown } | undefined)?.id ?? "")),
+      );
+      const additions = body.events.filter(
+        (feature) => !seen.has(String(feature.id ?? (feature.properties as { id?: unknown } | undefined)?.id ?? "")),
+      );
       set({
         eventsStatus: "ready",
-        eventsTotal: typeof body.total === "number" ? body.total : body.events.length,
-        eventsItems: append ? [...get().eventsItems, ...body.events] : body.events,
+        eventsTotal: typeof body.total === "number" ? body.total : current.eventsTotal,
+        eventsItems: [...current.eventsItems, ...additions],
+        eventsLimit: current.eventsLimit + EVENTS_PAGE_SIZE,
         eventsError: null,
       });
     } catch (error) {
-      if (seq !== eventsSeq || get().result?.key !== key) return;
+      if (seq !== eventsSeq || get().result?.key !== result.key) return;
       set({
         eventsStatus: "error",
         eventsError:
@@ -392,8 +467,23 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   fetchSummary: async () => {
     const { result, summaryStatus, summaryLanguage, summaryIncludeImages } = get();
     if (!result || summaryStatus === "loading") return;
-    set({ summaryStatus: "loading", summaryError: null });
+    const metadata = result.stats.metadata;
+    set({ summaryStatus: "loading", summaryError: null, summaryPhase: "ensure" });
     try {
+      // Probe with analysis params: warms/verifies the artifact first so the
+      // caption can say "re-running the analysis" instead of silently hanging
+      // on a cold cache. The POST below recomputes too (in-flight deduped) —
+      // a failed probe just falls through to it.
+      try {
+        const probe = analysisParamsQuery(metadata);
+        probe.set("key", result.key);
+        probe.set("limit", "1");
+        probe.set("offset", "0");
+        await fetch(`/api/compare/events?${probe}`);
+      } catch {
+        // Network hiccup — the POST below surfaces real failures.
+      }
+      set({ summaryPhase: "write" });
       const response = await fetch("/api/compare/summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -401,6 +491,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
           analysisKey: result.key,
           language: summaryLanguage,
           includeImages: summaryIncludeImages,
+          ...analysisParamsFromMetadata(metadata),
         }),
       });
       const body = (await response.json().catch(() => null)) as {
@@ -410,11 +501,12 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       if (!response.ok || !body?.summary) {
         throw new Error(body?.message ?? "AI summary is unavailable right now.");
       }
-      set({ summaryStatus: "done", summaryData: body.summary });
+      set({ summaryStatus: "done", summaryData: body.summary, summaryPhase: null });
     } catch (error) {
       set({
         summaryStatus: "error",
         summaryError: error instanceof Error && error.message ? error.message : "AI summary failed.",
+        summaryPhase: null,
       });
     }
   },
