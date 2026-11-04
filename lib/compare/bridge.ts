@@ -4,7 +4,6 @@ import type {
   ImageSource,
   Map as MapLibreMap,
   MapGeoJSONFeature,
-  RasterTileSource,
 } from "maplibre-gl";
 import { bboxFromGeometry, type ClipGeometry } from "@/lib/cdse/geometry";
 import { CLASS_DEFS, classColor } from "@/lib/analysis/config";
@@ -12,8 +11,7 @@ import type { Hotspot } from "@/lib/analysis/types";
 import { selectVisibleEvents } from "@/lib/compare/eventList";
 import { bboxToBounds } from "@/lib/map/geojson";
 import { MAP_PALETTES } from "@/lib/map/palette";
-import { buildTileUrlTemplate } from "@/lib/map/tiles";
-import { selectActiveSelection, useAppStore } from "@/store/useAppStore";
+import { useAppStore } from "@/store/useAppStore";
 import { useCompareStore } from "@/store/useCompareStore";
 import { useTheme } from "@/store/useTheme";
 
@@ -23,7 +21,6 @@ import { useTheme } from "@/store/useTheme";
  * compare store without prop-drilling through MapCanvas.
  *
  * Layer stack (bottom → top), all rebuilt from the store on every style.load:
- *  - "compare-scene-a-layer"  date A raster tiles      (Swipe tab only)
  *  - "compare-overlay-layer"  classified change PNG     (every tab except Swipe)
  *  - "compare-choropleth"     per-tehsil alpha shading  (toggle, district level)
  *  - "compare-tehsil-highlight" clicked tehsil outline
@@ -32,20 +29,20 @@ import { useTheme } from "@/store/useTheme";
  * Numbered 22px hotspot markers are DOM elements (maplibre Marker) layered
  * above the canvas and styled in globals.css (.hs-marker).
  *
- * The date-B tiles live on the secondary swipe map (CompareMapController).
- * Anchors: everything thematic sits directly above the basemap/imagery and
- * below the boundary lines + labels ("districts-line"), so boundaries and
- * names stay readable over the overlay.
+ * Swipe tab: raw date-A and date-B tiles live on two clean secondary maps
+ * (CompareMapController) clipped left/right of the divider — the main map is
+ * covered underneath and only drives the camera. Anchors: everything thematic
+ * sits directly above the basemap/imagery and below the boundary lines +
+ * labels ("districts-line"), so boundaries and names stay readable over the
+ * overlay.
  */
 
 const SRC = {
-  sceneA: "compare-scene-a",
   overlay: "compare-overlay",
   hotspotPolys: "compare-hotspot-polygons",
 } as const;
 
 const LAYER = {
-  sceneA: "compare-scene-a-layer",
   overlay: "compare-overlay-layer",
   choropleth: "compare-choropleth",
   tehsilHighlight: "compare-tehsil-highlight",
@@ -75,10 +72,23 @@ let appliedOverlayUrl: string | null = null;
 let appliedOverlayBbox: string | null = null;
 /** Result key the display URL belongs to — reset when a new run lands. */
 let displayKey: string | null = null;
-/** Tiles currently loaded on the date-A source (skip redundant setTiles). */
-let appliedSceneAUrl: string | null = null;
 /** Result bbox already framed after its run (fit once per result). */
 let fittedResultKey: string | null = null;
+
+/**
+ * Dev-only: expose live MapLibre instances on `window.__rieMaps` so browser
+ * verification scripts can dump styles/layers/paint without a public API.
+ * No-op in production builds.
+ */
+export function setDebugMap(slot: "main" | "left" | "right", map: MapLibreMap | null): void {
+  if (process.env.NODE_ENV === "production") return;
+  const g = window as unknown as {
+    __rieMaps?: Partial<Record<"main" | "left" | "right", MapLibreMap>>;
+  };
+  if (!g.__rieMaps) g.__rieMaps = {};
+  if (map) g.__rieMaps[slot] = map;
+  else delete g.__rieMaps[slot];
+}
 
 /** Maps whose delegated hotspot events are already bound. */
 const hotspotEventsBound = new WeakSet<MapLibreMap>();
@@ -145,69 +155,11 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function sceneTileUrl(date: string | null): string | null {
-  if (!date) return null;
-  const app = useAppStore.getState();
-  const selection = selectActiveSelection(app);
-  if (!selection) return null;
-  const scene = app.scenes.find((candidate) => candidate.date === date);
-  if (!scene) return null;
-  return buildTileUrlTemplate({
-    scene,
-    areaId: selection.id,
-    level: selection.level,
-    composite: scene.composite,
-  });
-}
-
 function removeSourceLayer(map: MapLibreMap, sourceId: string, layerIds: string[]): void {
   for (const layerId of layerIds) {
     if (map.getLayer(layerId)) map.removeLayer(layerId);
   }
   if (map.getSource(sourceId)) map.removeSource(sourceId);
-}
-
-/** Date-A tiles: only while the Swipe tab is showing a completed result. */
-function syncSceneA(map: MapLibreMap): void {
-  const state = useCompareStore.getState();
-  const result = state.result;
-  const wanted = result && state.tab === "swipe" ? sceneTileUrl(state.dateA) : null;
-  if (!wanted || !result) {
-    removeSourceLayer(map, SRC.sceneA, [LAYER.sceneA]);
-    appliedSceneAUrl = null;
-    return;
-  }
-
-  const existing = map.getSource(SRC.sceneA) as RasterTileSource | undefined;
-  if (existing) {
-    if (typeof existing.setTiles === "function" && appliedSceneAUrl !== wanted) {
-      existing.setTiles([wanted]);
-    }
-    appliedSceneAUrl = wanted;
-    if (map.getLayer(LAYER.sceneA)) map.setLayoutProperty(LAYER.sceneA, "visibility", "visible");
-    return;
-  }
-
-  const year = state.dateA?.slice(0, 4) ?? result.stats.metadata.dateA.slice(0, 4);
-  map.addSource(SRC.sceneA, {
-    type: "raster",
-    tiles: [wanted],
-    tileSize: 512,
-    minzoom: 7,
-    maxzoom: 14,
-    attribution: `Contains modified Copernicus Sentinel data ${year}`,
-  });
-  appliedSceneAUrl = wanted;
-  addThematicLayer(
-    map,
-    {
-      id: LAYER.sceneA,
-      type: "raster",
-      source: SRC.sceneA,
-      paint: { "raster-opacity": 1, "raster-fade-duration": 200 },
-    },
-    layerAnchor(map),
-  );
 }
 
 /** Classified overlay image source — visibility follows the active tab. */
@@ -793,7 +745,6 @@ function bindHotspotEvents(map: MapLibreMap): void {
 function syncCompareMap(map: MapLibreMap): void {
   try {
     if (!map.isStyleLoaded()) return; // style.load → addAppLayers → addCompareLayers
-    syncSceneA(map);
     syncOverlay(map);
     ensureChoroplethLayer(map);
     syncChoropleth(map);
@@ -835,26 +786,66 @@ function fitToBbox(
  * the sync is deferred to the next `idle`, which is guaranteed to follow.
  */
 export function addCompareLayers(map: MapLibreMap): void {
+  requestSync(map);
+}
+
+/** At most one deferred sync per map until its style settles. */
+const pendingSync = new WeakSet<MapLibreMap>();
+
+/**
+ * Full compare sync now, or on the next `idle` when the style is momentarily
+ * settling (glyphs/sprite in flight). Without the deferred path a tab/theme
+ * change during a busy style would silently leave stale layer visibility.
+ */
+function requestSync(map: MapLibreMap): void {
   if (map.isStyleLoaded()) {
     syncCompareMap(map);
     return;
   }
+  if (pendingSync.has(map)) return;
+  pendingSync.add(map);
   map.once("idle", () => {
-    try {
-      syncCompareMap(map);
-    } catch {
-      // Map disposed before the style settled.
-    }
+    pendingSync.delete(map);
+    syncCompareMap(map);
   });
+}
+
+/**
+ * Entering the Swipe tab: hide every main-map compare layer immediately —
+ * pure layout operations that are safe even while the style settles, so the
+ * overlay/hotspots never linger behind the swipe maps (the full sync may
+ * defer to idle). No-op on other tabs; the regular sync owns those states.
+ */
+export function syncTabVisibility(): void {
+  const map = mainMap;
+  if (!map) return;
+  try {
+    const state = useCompareStore.getState();
+    if (!state.result || state.tab !== "swipe") return;
+    const hide = (layerId: string): void => {
+      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", "none");
+    };
+    hide(LAYER.overlay);
+    hide(LAYER.choropleth);
+    hide(LAYER.hotspotFill);
+    hide(LAYER.hotspotLine);
+    hide(LAYER.hotspotHover);
+  } catch {
+    // Map disposed mid-sync.
+  }
 }
 
 export function registerMainMap(map: MapLibreMap): void {
   mainMap = map;
-  syncCompareMap(map);
+  setDebugMap("main", map);
+  requestSync(map);
 }
 
 export function unregisterMainMap(map: MapLibreMap): void {
-  if (mainMap === map) mainMap = null;
+  if (mainMap === map) {
+    setDebugMap("main", null);
+    mainMap = null;
+  }
   hotspotPopup?.remove();
   hotspotPopup = null;
   removeHotspotMarkers();
@@ -949,10 +940,10 @@ useCompareStore.subscribe((state, previous) => {
     fittedResultKey = state.result.key;
     fitToBbox(state.result.bbox);
   }
-  if (mainMap) syncCompareMap(mainMap);
+  if (mainMap) requestSync(mainMap);
 });
 
 // Theme flips the outline/marker colours of the compare display layers.
 useTheme.subscribe(() => {
-  if (mainMap) syncCompareMap(mainMap);
+  if (mainMap) requestSync(mainMap);
 });

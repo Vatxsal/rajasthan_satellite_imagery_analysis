@@ -4,7 +4,9 @@ import type { CompareStats, ConfidenceTier, SummaryData, SummaryLanguage } from 
 import { bboxFromGeometry } from "@/lib/cdse/geometry";
 import { filterEvents } from "@/lib/compare/eventList";
 import { analysisParamsFromMetadata, analysisParamsQuery } from "@/lib/compare/params";
+import { normalizeComparePair } from "@/lib/compare/swipe";
 import { streamAnalyze } from "@/lib/compare/run";
+import type { CompositeId } from "@/lib/data";
 import { selectActiveSelection, useAppStore } from "@/store/useAppStore";
 
 export type CompareTab = "swipe" | "change-map" | "statistics" | "hotspots" | "summary";
@@ -82,6 +84,10 @@ interface CompareState {
   eventsError: string | null;
   /** Swipe divider position, percent from the left edge (0-100). */
   divider: number;
+  /** Swipe-tab raster composite shown for BOTH dates (raw imagery control). */
+  swipeComposite: CompositeId;
+  /** Neutral grey outline of the analysed area on the swipe maps. */
+  swipeOutline: boolean;
   /** Display-only dilation + outline so small changes stay visible (default on). */
   boostVisibility: boolean;
   /** Slim compare strip: scene cards hidden until expanded. */
@@ -124,6 +130,8 @@ interface CompareState {
   /** Best-effort exact total for the active confidence filter (limit=1 probe). */
   probeEventsTotal: () => Promise<void>;
   setDivider: (value: number) => void;
+  setSwipeComposite: (value: CompositeId) => void;
+  setSwipeOutline: (value: boolean) => void;
   setBoostVisibility: (value: boolean) => void;
   setStripExpanded: (value: boolean) => void;
   setPanelWidth: (value: number) => void;
@@ -206,6 +214,8 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   eventsStatus: "idle",
   eventsError: null,
   divider: 50,
+  swipeComposite: "true-color",
+  swipeOutline: true,
   boostVisibility: true,
   stripExpanded: false,
   panelWidth: 420,
@@ -255,7 +265,12 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       toast("error", "Pick two different dates to compare.");
       return;
     }
-    set(slot === "dateA" ? { dateA: date } : { dateB: date });
+    // A is always the earlier date — silently swap reversed picks.
+    const pair = normalizeComparePair(
+      slot === "dateA" ? date : state.dateA,
+      slot === "dateB" ? date : state.dateB,
+    );
+    set(pair);
   },
 
   clearPair: () => {
@@ -273,6 +288,10 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       return;
     }
 
+    // Analyse in chronological order: A = earlier, B = later.
+    const pair = normalizeComparePair(state.dateA, state.dateB);
+    if (!pair.dateA || !pair.dateB) return; // unreachable — guarded above
+
     activeController?.abort();
     const controller = new AbortController();
     activeController = controller;
@@ -284,15 +303,22 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       return;
     }
 
-    set({ running: true, stage: "fetch-a", error: null, ...summaryIdle() });
+    set({
+      dateA: pair.dateA,
+      dateB: pair.dateB,
+      running: true,
+      stage: "fetch-a",
+      error: null,
+      ...summaryIdle(),
+    });
 
     try {
       const result = await streamAnalyze(
         {
           areaId: selection.id,
           level: selection.level,
-          dateA: state.dateA,
-          dateB: state.dateB,
+          dateA: pair.dateA,
+          dateB: pair.dateB,
           sensitivity: state.sensitivity,
           minPatchHa: state.minPatchHa,
           inputMode: state.inputMode,
@@ -453,6 +479,8 @@ export const useCompareStore = create<CompareState>((set, get) => ({
     }
   },
   setDivider: (value) => set({ divider: Math.max(0, Math.min(100, value)) }),
+  setSwipeComposite: (value) => set({ swipeComposite: value }),
+  setSwipeOutline: (value) => set({ swipeOutline: value }),
   setBoostVisibility: (value) => set({ boostVisibility: value }),
   setStripExpanded: (value) => set({ stripExpanded: value }),
   setPanelWidth: (value) =>
