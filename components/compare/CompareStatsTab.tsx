@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Copy, FileJson, Info, Loader2 } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { AlertTriangle, Check, ChevronDown, Copy, FileJson, Info, Loader2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
 import Slider from "@/components/ui/Slider";
+import Tooltip from "@/components/ui/Tooltip";
 import { cn } from "@/components/ui/cn";
 import { focusHotspot, focusTehsil } from "@/lib/compare/bridge";
 import { eventsViewState, selectVisibleEvents } from "@/lib/compare/eventList";
@@ -16,17 +17,26 @@ import { classColor } from "@/lib/analysis/config";
 import { useCompareStore, type CompareInputMode } from "@/store/useCompareStore";
 import { useAppStore } from "@/store/useAppStore";
 
-const THRESHOLD_LABELS: Record<string, string> = {
-  waterGainDMndwi: "ΔMNDWI water gain ≥",
-  waterLossDMndwi: "ΔMNDWI water loss ≤",
-  vegLossDNdvi: "ΔNDVI vegetation loss ≤",
-  vegGainDNdvi: "ΔNDVI vegetation gain ≥",
-  bareBuiltDNdbi: "ΔNDBI bare / built ≥",
-  bareBuiltDNdviMax: "ΔNDVI max (bare / built) ≤",
-};
+/** "Sentinel-2C" from whatever casing the catalogue reported. */
+function satelliteName(raw: string): string {
+  const match = raw.match(/^sentinel-?2([abc])$/i);
+  if (match) return `Sentinel-2${match[1]!.toUpperCase()}`;
+  if (/^sentinel-?2$/i.test(raw)) return "Sentinel-2";
+  return raw;
+}
+
+/** "+0.20" / "−0.15" — sign always visible, minus is U+2212. */
+function fmtDelta(value: number): string {
+  return `${value >= 0 ? "+" : "\u2212"}${Math.abs(value).toFixed(2)}`;
+}
 
 function ha(value: number): string {
   return `${value.toLocaleString("en", { maximumFractionDigits: 1 })} ha`;
+}
+
+/** Analysed-area formatting per spec: whole hectares, no decimals. */
+function haRound(value: number): string {
+  return `${Math.round(value).toLocaleString("en")} ha`;
 }
 
 function rgb(color: [number, number, number]): string {
@@ -47,6 +57,26 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
       <p className="text-[11px] text-muted">{label}</p>
       <p className="mono-nums text-sm font-medium text-text">{value}</p>
       {hint && <p className="mono-nums text-[10px] text-muted">{hint}</p>}
+    </div>
+  );
+}
+
+/** Label-left / value-right row for the Method & settings card (single column). */
+function MethodRow({
+  label,
+  title,
+  children,
+}: {
+  label: string;
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+      <dt className="shrink-0 text-muted" title={title}>
+        {label}
+      </dt>
+      <dd className="mono-nums min-w-0 text-right text-text">{children}</dd>
     </div>
   );
 }
@@ -85,6 +115,8 @@ interface CompareStatsTabProps {
 /** Statistics + events tabs (the drawer renders this for both). */
 export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const result = useCompareStore((s) => s.result);
+  const dateA = useCompareStore((s) => s.dateA);
+  const dateB = useCompareStore((s) => s.dateB);
   const sensitivity = useCompareStore((s) => s.sensitivity);
   const minPatchHa = useCompareStore((s) => s.minPatchHa);
   const inputMode = useCompareStore((s) => s.inputMode);
@@ -115,6 +147,12 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   // Slow-load hint: a cold server cache recomputes the analysis for the next
   // page/overlay — tell the user instead of spinning silently.
   const [slowLoad, setSlowLoad] = useState(false);
+  // Method & settings card: top section always visible; controls + thresholds
+  // start collapsed (default = top section only expanded).
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [thresholdsOpen, setThresholdsOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [patchDraft, setPatchDraft] = useState<string | null>(null);
   useEffect(() => {
     if (tab !== "hotspots" || eventsStatus !== "loading") {
       setSlowLoad(false);
@@ -129,10 +167,65 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const { metadata } = stats;
   const lowValid = stats.validPct < 70;
   const v2 = metadata.engine === "v2";
+  // The card shows the analysed (frozen) pair — the header, Scene rows and
+  // Date gap all read result.stats.metadata. Changing the store dates after a
+  // run only marks the card stale; it can never desync the displayed pair.
+  const pairChanged =
+    (dateA !== null && dateA !== metadata.dateA) || (dateB !== null && dateB !== metadata.dateB);
   const stale =
     metadata.sensitivity !== sensitivity ||
     Math.abs(metadata.minPatchHa - minPatchHa) > 1e-9 ||
-    (v2 && metadata.inputMode !== inputMode);
+    (v2 && metadata.inputMode !== inputMode) ||
+    pairChanged;
+
+  const engineLabel =
+    metadata.engine === "v2"
+      ? `v2 · ${metadata.inputMode === "composite" ? `±${metadata.compositeWindowDays} d composite` : "single-day"}`
+      : "v1 · single-day";
+
+  const t = metadata.thresholds;
+  const mainThresholdRows: Array<{ label: string; value: string }> = [
+    { label: "Water gain", value: `ΔMNDWI ≥ ${fmtDelta(t.waterGainDMndwi ?? 0)}` },
+    { label: "Water loss", value: `ΔMNDWI ≤ ${fmtDelta(t.waterLossDMndwi ?? 0)}` },
+    { label: "Vegetation loss", value: `ΔNDVI ≤ ${fmtDelta(t.vegLossDNdvi ?? 0)}` },
+    { label: "Vegetation gain", value: `ΔNDVI ≥ ${fmtDelta(t.vegGainDNdvi ?? 0)}` },
+    {
+      label: "Bare / built-up increase",
+      value: `ΔNDBI ≥ ${fmtDelta(t.bareBuiltDNdbi ?? 0)} and ΔNDVI ≤ ${fmtDelta(t.bareBuiltDNdviMax ?? 0)}`,
+    },
+  ];
+  const advancedThresholdRows: Array<{ label: string; value: string; hint: string }> = [
+    {
+      label: "Bare / built-up max MNDWI",
+      value: `≤ ${(t.bareBuiltMaxMndwi ?? 0).toFixed(2)}`,
+      hint: "Skips pixels that look like open water on either date.",
+    },
+    {
+      label: "Water gain min MNDWI",
+      value: `> ${(t.waterGainMndwiMin ?? 0).toFixed(2)}`,
+      hint: "Date B must actually look like open water for a water-gain patch.",
+    },
+    {
+      label: "Water loss min MNDWI",
+      value: `> ${(t.waterLossMndwiMin ?? 0).toFixed(2)}`,
+      hint: "Date A must have looked like open water for a water-loss patch.",
+    },
+    {
+      label: "Grid size (px)",
+      value: `${metadata.width}×${metadata.height}`,
+      hint: "Analysis grid actually rendered — the long side is capped for large areas.",
+    },
+  ];
+
+  /** Commits the minimum-patch text input (blur / Enter) with clamping. */
+  const commitPatchDraft = (): void => {
+    if (patchDraft === null) return;
+    const parsed = Number(patchDraft);
+    if (patchDraft.trim() !== "" && Number.isFinite(parsed)) {
+      setMinPatchHa(Math.min(10, Math.max(0.01, parsed)));
+    }
+    setPatchDraft(null);
+  };
 
   if (tab === "hotspots") {
     const loading = eventsStatus === "loading";
@@ -504,141 +597,226 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
       )}
 
       {/* ---------------------------------------------------- method + settings */}
-      <div className="rounded border border-border bg-surface-2 p-2.5">
-        <p className="mb-2 text-xs font-medium text-text">Method &amp; settings</p>
-        <dl className="mb-3 grid grid-cols-1 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-2">
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted">Resolution</dt>
-            <dd className="mono-nums text-text">
-              {metadata.metersPerPixel.toFixed(1)} m/px{metadata.coarse ? " (coarse)" : ""}
-            </dd>
+      <div aria-label="Method and settings" className="rounded border border-border bg-surface-2 p-2.5">
+        {/* Header: title + engine badge + chevron (toggles sections 2–3) */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+            <p className="text-xs font-medium text-text">Method &amp; settings</p>
+            <span
+              className="mono-nums shrink-0 rounded-sm border border-border bg-surface px-1.5 py-px text-[10px] text-muted"
+              title="Change engine that produced this result."
+            >
+              {engineLabel}
+            </span>
           </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted">Grid</dt>
-            <dd className="mono-nums text-text">
-              {metadata.width}×{metadata.height} px
-            </dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted">Analysed area</dt>
-            <dd className="mono-nums text-text">
-              {ha(stats.areaHa)} (valid {ha(stats.validHa)})
-            </dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted">Date gap</dt>
-            <dd className="mono-nums text-text">{metadata.gapDays} d</dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted">Scene A</dt>
-            <dd className="mono-nums text-text">
-              {metadata.sceneA
-                ? `${metadata.sceneA.satellite} · ${metadata.sceneA.cloudCover.toFixed(0)}% cloud`
-                : "—"}
-            </dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted">Scene B</dt>
-            <dd className="mono-nums text-text">
-              {metadata.sceneB
-                ? `${metadata.sceneB.satellite} · ${metadata.sceneB.cloudCover.toFixed(0)}% cloud`
-                : "—"}
-            </dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted">Engine</dt>
-            <dd className="mono-nums text-text">
-              {metadata.engine === "v2"
-                ? `v2 · ${metadata.inputMode === "composite" ? `±${metadata.compositeWindowDays} d composite` : "single-day"}`
-                : "v1 · single-day"}
-            </dd>
-          </div>
+          <button
+            type="button"
+            aria-expanded={settingsOpen}
+            aria-label={settingsOpen ? "Collapse controls and thresholds" : "Expand controls and thresholds"}
+            onClick={() => setSettingsOpen((open) => !open)}
+            className="grid h-6 w-6 shrink-0 place-items-center rounded border border-transparent text-muted transition-colors duration-150 hover:border-border hover:bg-surface hover:text-text focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+          >
+            <ChevronDown
+              size={14}
+              className={cn("transition-transform duration-150", settingsOpen && "rotate-180")}
+              aria-hidden
+            />
+          </button>
+        </div>
+
+        {/* Section 1 — always visible facts (same normalized pair as the header) */}
+        <dl className="mt-2 flex flex-col gap-1 text-[11px]">
+          <MethodRow label="Resolution">
+            <span className="inline-flex flex-wrap items-baseline justify-end gap-1.5">
+              <span>{metadata.metersPerPixel.toFixed(1)} m/px</span>
+              {metadata.coarse && (
+                <Tooltip
+                  content="Large area analysed on a capped grid; choose a tehsil for finer detail"
+                  side="top"
+                >
+                  <span
+                    tabIndex={0}
+                    className="rounded-sm border border-warning/40 bg-warning/10 px-1 py-px text-[10px] text-warning"
+                  >
+                    coarse
+                  </span>
+                </Tooltip>
+              )}
+            </span>
+          </MethodRow>
+          <MethodRow label="Analysed area">{haRound(stats.areaHa)}</MethodRow>
+          <MethodRow label="Valid data">{stats.validPct.toFixed(1)}% of the area</MethodRow>
+          <MethodRow label="Date gap">{metadata.gapDays} days</MethodRow>
+          <MethodRow label="Scene A">
+            {metadata.dateA}
+            {metadata.sceneA
+              ? ` · ${satelliteName(metadata.sceneA.satellite)} · ${Math.round(metadata.sceneA.cloudCover)}% cloud`
+              : ""}
+          </MethodRow>
+          <MethodRow label="Scene B">
+            {metadata.dateB}
+            {metadata.sceneB
+              ? ` · ${satelliteName(metadata.sceneB.satellite)} · ${Math.round(metadata.sceneB.cloudCover)}% cloud`
+              : ""}
+          </MethodRow>
           {v2 && (
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted" title="Processing Units for both renders (CDSE formula).">
-                Estimated cost
-              </dt>
-              <dd className="mono-nums text-text">{metadata.estimatedPu} PU</dd>
-            </div>
+            <MethodRow label="Estimated cost" title="Processing Units for both renders (CDSE formula).">
+              {metadata.estimatedPu} PU
+            </MethodRow>
           )}
           {v2 && stats.confidence && (
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted" title="Share of changed pixels per confidence tier.">
-                Confidence
-              </dt>
-              <dd className="mono-nums text-text">{confidenceShares(stats.confidence)}</dd>
-            </div>
+            <MethodRow label="Confidence" title="Share of changed pixels per confidence tier.">
+              {confidenceShares(stats.confidence)}
+            </MethodRow>
           )}
-          {Object.entries(metadata.thresholds).map(([key, value]) => (
-            <div key={key} className="flex justify-between gap-2">
-              <dt className="text-muted">{THRESHOLD_LABELS[key] ?? key}</dt>
-              <dd className="mono-nums text-text">{value.toFixed(2)}</dd>
-            </div>
-          ))}
         </dl>
-
-        {v2 && (
-          <div>
-            <p className="mb-1 text-[11px] text-muted">
-              Inputs — composite smooths clouds over ±7 days; single day keeps timing detail
-            </p>
-            <Segmented
-              ariaLabel="Engine input mode"
-              value={inputMode}
-              onChange={(value) => setInputMode(value as CompareInputMode)}
-              options={[
-                { value: "composite", label: "Composite" },
-                { value: "single", label: "Single day" },
-              ]}
-            />
-          </div>
+        {pairChanged && !running && (
+          <p className="mt-1.5 text-[10px] text-warning">
+            The selected dates changed since this run — the rows above show the analysed pair.
+          </p>
         )}
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="flex-1">
-            <p className="mb-1 text-[11px] text-muted">
-              Sensitivity — low = fewer, stronger changes
-            </p>
-            <Segmented
-              ariaLabel="Change detection sensitivity"
-              value={sensitivity}
-              onChange={(value) => setSensitivity(value as Sensitivity)}
-              options={[
-                { value: "low", label: "Low" },
-                { value: "medium", label: "Medium" },
-                { value: "high", label: "High" },
-              ]}
-            />
+        {/* Sections 2–3 behind the header chevron (default: top section only) */}
+        {settingsOpen && (
+          <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
+            {/* Section 2 — controls, one full-width row each */}
+            <div className="flex flex-col gap-2.5">
+              {v2 && (
+                <div className="flex flex-col gap-1">
+                  <p className="text-[11px] text-muted">
+                    Inputs — composite smooths clouds over ±7 days; single day keeps timing detail
+                  </p>
+                  <Segmented
+                    ariaLabel="Engine input mode"
+                    value={inputMode}
+                    onChange={(value) => setInputMode(value as CompareInputMode)}
+                    options={[
+                      { value: "composite", label: "Composite" },
+                      { value: "single", label: "Single day" },
+                    ]}
+                  />
+                </div>
+              )}
+              <div className="flex flex-col gap-1">
+                <p className="text-[11px] text-muted">Sensitivity</p>
+                <Segmented
+                  ariaLabel="Change detection sensitivity"
+                  value={sensitivity}
+                  onChange={(value) => setSensitivity(value as Sensitivity)}
+                  options={[
+                    { value: "low", label: "Low" },
+                    { value: "medium", label: "Medium" },
+                    { value: "high", label: "High" },
+                  ]}
+                />
+                <p className="text-[10px] text-muted">
+                  Low = fewer, stronger changes · Medium = balanced · High = more, weaker changes
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="min-patch-ha" className="text-[11px] text-muted">
+                    Minimum patch
+                  </label>
+                  <span className="flex items-center gap-1">
+                    <input
+                      id="min-patch-ha"
+                      type="text"
+                      inputMode="decimal"
+                      value={patchDraft ?? minPatchHa.toFixed(2)}
+                      onChange={(event) => setPatchDraft(event.target.value)}
+                      onBlur={commitPatchDraft}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") commitPatchDraft();
+                      }}
+                      aria-label="Minimum patch size in hectares"
+                      className="mono-nums w-16 rounded border border-border bg-surface px-1.5 py-0.5 text-right text-[11px] text-text focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                    />
+                    <span className="text-[11px] text-muted">ha</span>
+                  </span>
+                </div>
+                <Slider
+                  aria-label="Minimum patch slider"
+                  min={0.01}
+                  max={10}
+                  step={0.01}
+                  value={minPatchHa}
+                  onChange={(event) => setMinPatchHa(Number(event.target.value))}
+                />
+              </div>
+              <Button
+                variant="primary"
+                disabled={running}
+                className="w-full"
+                title="Runs the analysis again with the current settings (new result)."
+                onClick={() => void run()}
+              >
+                {running && stage ? "Working…" : stale ? "Re-run with settings" : "Re-run"}
+              </Button>
+              {running && (
+                <p className="flex items-center gap-1.5 text-[11px] text-muted">
+                  <Loader2 size={12} className="animate-spin" aria-hidden />
+                  Re-running the analysis…
+                </p>
+              )}
+            </div>
+
+            {/* Section 3 — thresholds used (accordion, default closed) */}
+            <div className="rounded border border-border bg-surface px-2 py-1.5">
+              <button
+                type="button"
+                aria-expanded={thresholdsOpen}
+                onClick={() => setThresholdsOpen((open) => !open)}
+                className="flex w-full items-center justify-between gap-2 text-[11px] font-medium text-text transition-colors duration-150 hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+              >
+                Thresholds used
+                <ChevronDown
+                  size={13}
+                  className={cn("text-muted transition-transform duration-150", thresholdsOpen && "rotate-180")}
+                  aria-hidden
+                />
+              </button>
+              {thresholdsOpen && (
+                <div className="mt-2 flex flex-col gap-2">
+                  <dl className="flex flex-col gap-1 text-[11px]">
+                    {mainThresholdRows.map((row) => (
+                      <MethodRow key={row.label} label={row.label}>
+                        {row.value}
+                      </MethodRow>
+                    ))}
+                  </dl>
+                  <div className="rounded border border-border bg-surface-2 px-2 py-1.5">
+                    <button
+                      type="button"
+                      aria-expanded={advancedOpen}
+                      onClick={() => setAdvancedOpen((open) => !open)}
+                      className="flex w-full items-center justify-between gap-2 text-[11px] text-text transition-colors duration-150 hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                    >
+                      Advanced
+                      <ChevronDown
+                        size={13}
+                        className={cn("text-muted transition-transform duration-150", advancedOpen && "rotate-180")}
+                        aria-hidden
+                      />
+                    </button>
+                    {advancedOpen && (
+                      <div className="mt-2 flex flex-col gap-1.5 text-[11px]">
+                        {advancedThresholdRows.map((row) => (
+                          <div key={row.label} className="flex flex-col gap-0.5">
+                            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                              <span className="shrink-0 text-muted">{row.label}</span>
+                              <span className="mono-nums min-w-0 text-right text-text">{row.value}</span>
+                            </div>
+                            <p className="text-[10px] leading-snug text-muted">{row.hint}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="flex-1">
-            <p className="mb-1 flex items-center justify-between text-[11px] text-muted">
-              Minimum patch
-              <span className="mono-nums text-text">{minPatchHa.toFixed(2)} ha</span>
-            </p>
-            <Slider
-              aria-label="Minimum patch size in hectares"
-              min={0.01}
-              max={10}
-              step={0.01}
-              value={minPatchHa}
-              onChange={(event) => setMinPatchHa(Number(event.target.value))}
-            />
-          </div>
-          <Button
-            variant={stale ? "primary" : "secondary"}
-            disabled={running}
-            className="shrink-0"
-            title="Runs the analysis again with the current settings (new result)."
-            onClick={() => void run()}
-          >
-            {running && stage ? "Working…" : stale ? "Re-run with settings" : "Re-run"}
-          </Button>
-        </div>
-        {running && (
-          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted">
-            <Loader2 size={12} className="animate-spin" aria-hidden />
-            Re-running the analysis…
-          </p>
         )}
       </div>
 

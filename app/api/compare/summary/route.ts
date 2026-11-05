@@ -12,11 +12,15 @@ import {
 } from "@/lib/analysis/prompt";
 import { aiSummaryCache, summaryCacheKey } from "@/lib/cache";
 import { getServerEnv } from "@/lib/env";
-import { codedError, generateStructuredJson, type GeminiImagePart } from "@/lib/server/gemini";
+import {
+  assertGeminiKey,
+  codedError,
+  generateWithFallback,
+  type GeminiImagePart,
+} from "@/lib/server/gemini";
 import { entryForKey } from "@/lib/server/compareRun";
 import { buildSummaryImages } from "@/lib/server/summaryImages";
 import {
-  apiError,
   errorResponse,
   rateLimitGuard,
   readJsonBody,
@@ -87,9 +91,7 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const env = getServerEnv();
-    if (!env.GEMINI_API_KEY) {
-      throw apiError(503, "AI_DISABLED", "AI summary is not enabled on this deployment.");
-    }
+    const apiKey = assertGeminiKey(env.GEMINI_API_KEY);
 
     const body = await readJsonBody(request, (raw) => summaryBodySchema.parse(raw), SUMMARY_BODY_LIMIT);
 
@@ -97,8 +99,13 @@ export async function POST(request: Request): Promise<Response> {
     const cacheKey = summaryCacheKey(body);
     const cached = aiSummaryCache.get(cacheKey);
     if (cached) {
-      const summary = JSON.parse(cached.toString("utf8")) as SummaryOutput;
-      return NextResponse.json({ summary, cached: true, model, imageCount: 0 });
+      // Envelope { summary, imagesFallback }; plain summaries written by
+      // older builds are tolerated (no fallback flag).
+      const parsed = JSON.parse(cached.toString("utf8")) as SummaryOutput | { summary?: SummaryOutput; imagesFallback?: boolean };
+      const envelope = typeof (parsed as { summary?: unknown }).summary === "object" && (parsed as { summary?: unknown }).summary !== null;
+      const summary = envelope ? (parsed as { summary: SummaryOutput }).summary : (parsed as SummaryOutput);
+      const imagesFallback = envelope ? Boolean((parsed as { imagesFallback?: boolean }).imagesFallback) : false;
+      return NextResponse.json({ summary, cached: true, model, imageCount: 0, imagesFallback });
     }
 
     const artifact = await entryForKey(body.analysisKey, body);
@@ -115,7 +122,7 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const options = {
-      apiKey: env.GEMINI_API_KEY,
+      apiKey,
       model,
       systemInstruction: SUMMARY_SYSTEM_PROMPT,
       prompt: userPrompt(body, artifact.stats, artifact.events),
@@ -126,12 +133,16 @@ export async function POST(request: Request): Promise<Response> {
     };
 
     // Structured output is schema-guided, but validate + one fresh attempt
-    // guards against occasional malformed payloads.
+    // guards against occasional malformed payloads. generateWithFallback
+    // implements the 400-with-images retry (statistics-only note) and the
+    // schema-less JSON-in-prompt fallback.
     let summary: SummaryOutput | null = null;
     let lastValidationError: z.ZodError | null = null;
+    let imagesFallback = false;
     for (let attempt = 0; attempt < 2 && !summary; attempt++) {
-      const parsedJson = await generateStructuredJson(options);
-      const result = summaryOutputSchema.safeParse(parsedJson);
+      const generated = await generateWithFallback(options);
+      imagesFallback = generated.imagesFallback;
+      const result = summaryOutputSchema.safeParse(generated.data);
       if (result.success) {
         summary = result.data;
       } else {
@@ -143,8 +154,12 @@ export async function POST(request: Request): Promise<Response> {
       throw codedError(502, "AI_BAD_OUTPUT", "AI summary had an unexpected shape. Try again shortly.");
     }
 
-    aiSummaryCache.set(cacheKey, Buffer.from(JSON.stringify(summary), "utf8"), SUMMARY_TTL_SECONDS);
-    return NextResponse.json({ summary, cached: false, model, imageCount: images.length });
+    aiSummaryCache.set(
+      cacheKey,
+      Buffer.from(JSON.stringify({ summary, imagesFallback }), "utf8"),
+      SUMMARY_TTL_SECONDS,
+    );
+    return NextResponse.json({ summary, cached: false, model, imageCount: images.length, imagesFallback });
   } catch (error) {
     return errorResponse(error);
   }

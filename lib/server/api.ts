@@ -5,6 +5,8 @@ import { checkRateLimit, type RateLimitKind } from "@/lib/rateLimit";
 export interface ApiErrorBody {
   code: string;
   message: string;
+  /** Dev-only short upstream snippet (never rendered in production builds). */
+  detail?: string;
 }
 
 export function jsonError(status: number, code: string, message: string): NextResponse<ApiErrorBody> {
@@ -116,9 +118,15 @@ export function errorResponse(error: unknown): NextResponse<ApiErrorBody> {
     return jsonError(400, "INVALID_REQUEST", detail);
   }
 
-  const err = error as { status?: number; code?: string; message?: string };
+  const err = error as { status?: number; code?: string; message?: string; detail?: string };
   if (err && typeof err.status === "number" && typeof err.code === "string") {
-    return jsonError(err.status, err.code, err.message ?? "Request failed.");
+    const body: ApiErrorBody = { code: err.code, message: err.message ?? "Request failed." };
+    // Dev-only: a short upstream status/body snippet aids diagnosis and is
+    // never included in production responses.
+    if (typeof err.detail === "string" && process.env.NODE_ENV !== "production") {
+      body.detail = err.detail.slice(0, 300);
+    }
+    return NextResponse.json(body, { status: err.status });
   }
 
   // Configuration problems (missing CDSE_* vars) surface clearly without secrets.
