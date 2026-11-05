@@ -9,7 +9,7 @@ import { z } from "zod";
 import { classLabel } from "./config";
 import type { CompareStats, SummaryLanguage } from "./types";
 
-export const SUMMARY_MODEL_FALLBACK = "gemini-3.8-flash";
+export const SUMMARY_MODEL_FALLBACK = "gemini-2.5-flash";
 
 export type { SummaryLanguage };
 

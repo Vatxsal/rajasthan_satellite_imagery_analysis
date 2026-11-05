@@ -25,12 +25,18 @@ export default function CompareSummaryTab() {
   const phase = useCompareStore((s) => s.summaryPhase);
   const data = useCompareStore((s) => s.summaryData);
   const error = useCompareStore((s) => s.summaryError);
+  const errorCode = useCompareStore((s) => s.summaryErrorCode);
+  const imagesFallback = useCompareStore((s) => s.summaryImagesFallback);
   const fetchSummary = useCompareStore((s) => s.fetchSummary);
 
   if (!result) return null;
 
   const loading = status === "loading";
   const disabled = !result.aiEnabled;
+  // The failure involved the preview images when a 400/bad-output hit while
+  // they were attached — offer a statistics-only retry.
+  const imagesInvolved =
+    status === "error" && includeImages && (errorCode === "AI_BAD_REQUEST" || errorCode === "AI_BAD_OUTPUT");
 
   return (
     <div className="flex flex-col gap-3">
@@ -123,6 +129,20 @@ export default function CompareSummaryTab() {
               Retry
             </Button>
           )}
+          {imagesInvolved && !loading && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="w-full"
+              title="Retry the summary with the statistics only (no preview images are sent)."
+              onClick={() => {
+                setIncludeImages(false);
+                window.setTimeout(() => void fetchSummary(), 0);
+              }}
+            >
+              Try without images
+            </Button>
+          )}
         </div>
         {disabled && (
           <p className="text-[11px] text-muted">
@@ -130,11 +150,25 @@ export default function CompareSummaryTab() {
             server-side to enable the summary.
           </p>
         )}
-        {status === "error" && error && <p className="text-xs text-danger">{error}</p>}
+        {status === "error" && error && (
+          <p className="flex flex-wrap items-baseline gap-1.5 text-xs text-danger">
+            <span>{error}</span>
+            {errorCode && (
+              <span className="mono-nums rounded-sm border border-border bg-surface px-1 py-px text-[10px] text-muted">
+                {errorCode}
+              </span>
+            )}
+          </p>
+        )}
       </div>
 
       {data && status === "done" && (
         <article className="flex flex-col gap-3 text-xs leading-relaxed text-text">
+          {imagesFallback && (
+            <p className="rounded border border-warning/40 bg-warning/10 px-2.5 py-2 text-[11px] text-text">
+              Generated from statistics only because the images could not be processed.
+            </p>
+          )}
           <p className="whitespace-pre-wrap">{data.overview}</p>
           <SummaryList title="Key changes" items={data.keyChanges} />
           <SummaryList title="Where the changes occurred" items={data.whereChangesOccurred} />

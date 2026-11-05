@@ -214,11 +214,11 @@ test("generateStructuredJson maps 429 to AI_RATE_LIMITED and keeps retry-after",
     (error: Error & { status?: number; code?: string }) => {
       assert.equal(error.code, "AI_RATE_LIMITED");
       assert.equal(error.status, 429);
-      assert.match(error.message, /30s/);
+      assert.match(error.message, /try again in 30 seconds/);
       return true;
     },
   );
-  assert.equal(calls, 2, "429 is retryable - both attempts used");
+  assert.equal(calls, 1, "429 is never retried in-request — Retry-After far exceeds our backoff and the free-tier quota is tiny");
 });
 
 test("generateStructuredJson: 400 is not retried", async () => {
@@ -230,7 +230,7 @@ test("generateStructuredJson: 400 is not retried", async () => {
   await assert.rejects(
     () => generateStructuredJson(baseOptions(fetchFn)),
     (error: Error & { code?: string }) => {
-      assert.equal(error.code, "AI_UPSTREAM_ERROR");
+      assert.equal(error.code, "AI_BAD_REQUEST");
       return true;
     },
   );
@@ -260,11 +260,11 @@ test("generateStructuredJson: non-JSON inner text -> AI_BAD_OUTPUT", async () =>
 });
 
 test("codedError carries status + code", () => {
-  const error = codedError(504, "AI_TIMEOUT", "timed out") as Error & {
+  const error = codedError(504, "AI_UNAVAILABLE", "timed out") as Error & {
     status?: number;
     code?: string;
   };
   assert.equal(error.status, 504);
-  assert.equal(error.code, "AI_TIMEOUT");
+  assert.equal(error.code, "AI_UNAVAILABLE");
   assert.equal(error.message, "timed out");
 });

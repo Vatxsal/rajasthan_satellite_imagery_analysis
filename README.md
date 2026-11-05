@@ -158,6 +158,7 @@ NEXT_PUBLIC_DATA_SOURCE=cdse
 | **Compare** | `/api/compare/*` | Change analysis, overlay and AI summary. See [Change Detection](#-change-detection). |
 | **Errors** | all routes | Every route returns `{ code, message }`. Auth, config and quota failures map to friendly codes (see [Troubleshooting](#-troubleshooting)). |
 | **Health** | `GET /api/health/cdse` | Reports whether a token can be obtained. Never returns secrets. |
+| **AI health** | `GET /api/health/gemini` | Runs a tiny probe against the configured Gemini model. Returns `{ ok, model, status }` on success or the mapped AI error code otherwise; never returns the key. |
 
 ### 3. Environment variables
 
@@ -212,7 +213,7 @@ Compare two Sentinel-2 dates over the selected district / tehsil / ILR and see *
    - **Desktop (≥1024px):** a resizable right-hand panel (drag its left edge, or focus it and use ← / →). **Mobile:** a bottom sheet capped at 45vh. The layout is single-column so nothing overlaps at panel widths from 360 to 600 px.
    - **Swipe**: drag the divider (or arrow-key it) to compare date A (left) and date B (right) on two synchronised maps.
    - **Changes**: classified overlay with a legend (class name, share and area per row), per-class visibility, opacity slider, **Boost visibility** (display-only dilation and contrast outline so small patches stay visible), **Zoom to changes**, and **PNG** / **GeoTIFF** export (uint8, nodata 255, opens in QGIS). After a run the map auto-frames the analysed area.
-   - **Stats**: totals, class breakdown, per-tehsil table (district-level runs; click a row to highlight that tehsil on the map, optional **choropleth** shading), applied thresholds, sensitivity / minimum-patch re-run, **CSV** export.
+   - **Stats**: totals, class breakdown, per-tehsil table (district-level runs; click a row to highlight that tehsil on the map, optional **choropleth** shading), and the **Method & settings** card — a single-column card that stays readable from 360 px panel widths up (label-left / value-right rows for resolution, analysed area, valid data, date gap and both scenes; the controls and the threshold accordions collapse behind chevrons; thresholds show readable labels such as `ΔMNDWI ≥ +0.20` for Water gain, while the raw config keys live in the Advanced accordion), sensitivity / minimum-patch re-run, **CSV** export.
    - **Hotspots**: top-10 surviving patches as numbered map markers and polygons; hovering a list row highlights the patch on the map and vice versa; clicking zooms to the patch and opens a themed popup (class, rank, area, coordinates with copy). Export the list as **GeoJSON**.
    - **Summary**: optional AI briefing, see [AI Summary](#-ai-summary-gemini).
 
@@ -227,7 +228,7 @@ Changing the area or running a new search clears the pair (the old polygons no l
 | **Classify** | `lib/analysis/classify.ts` | Index differencing with fixed precedence: water gain → water loss → vegetation loss → vegetation gain → bare/built increase. |
 | **Clean** | `lib/analysis/filter.ts` | 3×3 majority filter, then 8-connected minimum mapping unit (default 0.2 ha). |
 | **Stats** | `lib/analysis/stats.ts` | Per-class areas (from pixel counts and real pixel size), valid %, per-tehsil zonal breakdown (district-level), top-10 patch hotspots with GeoJSON polygons and change bbox. |
-| **Summary** | `lib/server/gemini.ts` + `lib/server/summaryImages.ts` | Structured-output Gemini call (zod-validated, one retry on 429/5xx) with optional ≤768 px JPEG previews rendered server-side. |
+| **Summary** | `lib/server/gemini.ts` + `lib/server/summaryImages.ts` | Structured-output Gemini call (zod-validated; one retry on 5xx / bad output, never on 429 — the free-tier quota is tiny and a retried 429 burns it twice; on a 400 it retries once without images, then schema-less) with optional ≤768 px JPEG previews rendered server-side. |
 | **Routes** | `app/api/compare/` | `POST analyze` streams NDJSON progress + result · `GET overlay` serves the classified PNG / GeoTIFF · `POST summary` returns the structured Gemini summary. |
 | **UI** | `components/compare/` | `store/useCompareStore.ts` + `lib/compare/bridge.ts` drive the overlay, hotspot, tehsil and choropleth layers on the main map; the swipe view is a second non-interactive MapLibre instance with one-way camera sync. |
 
@@ -255,7 +256,7 @@ Tunables live in **one file**, `lib/analysis/config.ts`, and every run echoes th
 | `COMPARE_RATE_LIMIT_PER_MIN` | server | no | `6` | Per-IP cap for `POST /api/compare/analyze` |
 | `AI_SUMMARY_RATE_LIMIT_PER_MIN` | server | no | `5` | Per-IP cap for `POST /api/compare/summary` |
 | `GEMINI_API_KEY` | 🔒 **secret** | no | unset | Enables the Summary tab (server-side only; without it the tab shows a setup hint) |
-| `GEMINI_MODEL` | server | no | see `.env.example` | Gemini model used for the summary (check Google's current model list) |
+| `GEMINI_MODEL` | server | no | `gemini-2.5-flash` | Gemini model for the summary. It must appear in the key's ListModels output **and** have free-tier `generateContent` quota — some 3.x flash models currently allow only ~20 requests/day per project (see [AI Summary](#-ai-summary-gemini)) |
 
 ---
 
@@ -268,12 +269,15 @@ The **Summary** tab writes a plain-language briefing of a finished comparison, i
 1. Create a free API key in [Google AI Studio](https://aistudio.google.com/).
 2. Put it in `.env.local` as `GEMINI_API_KEY` (and in Vercel as a **Sensitive** variable).
 3. Restart. Without a key the tab stays visible and shows a setup hint.
+4. Check it: open [`/api/health/gemini`](/api/health/gemini) — you want `{"ok":true,"model":"…","status":200}`. A mapped error code there (no key required to read) tells you exactly what is wrong.
 
 **How it behaves:**
 
 - The numbers (areas, percentages, tehsil table, hotspots) come from the deterministic pipeline. The model only narrates them and is instructed not to invent places, causes or numbers.
 - You choose whether to attach three small preview images (date A, date B, change overlay on B, each ≤768 px). Image observations are hedged and must not contradict the statistics.
 - The output is validated against a schema, cached, and labelled as AI-generated.
+- Failures show an honest per-code message plus a **Retry** button — `AI_DISABLED`, `AI_AUTH`, `AI_MODEL_NOT_FOUND`, `AI_RATE_LIMITED`, `AI_BAD_REQUEST`, `AI_BAD_OUTPUT`, `AI_UNAVAILABLE` (fixes in [Troubleshooting](#-troubleshooting)). When a 400 or bad output hit while the preview images were attached, the tab also offers **Try without images**; a statistics-only success is flagged in the result.
+- **Free-tier quota:** some models (e.g. the 3.x flash line) currently allow only ~20 `generateContent` requests **per day** per project, so the default is `gemini-2.5-flash`. A 429 surfaces as `AI_RATE_LIMITED` with Google's own "try again in Ns" hint instead of a generic upstream error.
 
 **Privacy:** the statistics and the (optional) three small images of public Sentinel-2 data are sent to the Google Gemini API from the server. No user data is sent. The free tier's data terms differ from paid terms; check Google's current terms, and for sensitive deployments use a paid tier or leave `GEMINI_API_KEY` unset.
 
@@ -574,7 +578,13 @@ To add another (PostGIS, Supabase, a different STAC…), implement the interface
 | Analyze refused in mock mode | `CDSE_CONFIG` (400) | Change detection needs `NEXT_PUBLIC_DATA_SOURCE=cdse` with CDSE credentials |
 | "No Sentinel-2 scene on \<date\>" | `COMPARE_NO_SCENE` (404) | Nothing over that area on the chosen day. Pick another date |
 | Export fails after a while | `OVERLAY_NOT_FOUND` (404) | The result aged out of the LRU cache. Run the analysis again |
-| AI summary unavailable | `AI_DISABLED` (503) | Set `GEMINI_API_KEY` (server-only) and redeploy; the Summary tab shows a setup hint without it |
+| AI summary disabled | `AI_DISABLED` (503) | Set `GEMINI_API_KEY` (server-only) and redeploy; the Summary tab shows a setup hint without it |
+| AI summary: key rejected | `AI_AUTH` (401/403) | The key was revoked or lacks access — create a fresh key in AI Studio |
+| AI summary: model not found | `AI_MODEL_NOT_FOUND` (404) | `GEMINI_MODEL` is not in this key's ListModels output — fix the value (default `gemini-2.5-flash`) |
+| AI summary: "Free-tier limit reached…" | `AI_RATE_LIMITED` (429) | Upstream daily/RPM quota exhausted (some 3.x flash models allow only ~20 requests/day). Wait for the stated time or pick a model with more quota; `GET /api/health/gemini` shows the same code |
+| AI summary: request rejected | `AI_BAD_REQUEST` (400) | Usually the preview images or schema — use **Try without images** in the Summary tab |
+| AI summary: "not valid JSON" | `AI_BAD_OUTPUT` (502) | Truncated/blocked model output. Retry; dev logs record the upstream status and body |
+| AI summary unavailable | `AI_UNAVAILABLE` (502/504) | Gemini outage or timeout. The Summary tab shows **Retry**; dev logs record the upstream status and body |
 | Vercel build fails at "Linting" | n/a | Run `npm run verify` locally. Unused variables are lint **errors** and stop the build |
 | `npm run dev` exits with `EADDRINUSE` | n/a | Another process holds :3000. Stop it or use `npm run dev -- -p 3001` |
 | PowerShell breaks `curl` JSON | n/a | PowerShell mangles quotes. Use the browser, Postman, or a small Node script for POST tests |

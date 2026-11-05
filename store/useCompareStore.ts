@@ -110,6 +110,10 @@ interface CompareState {
   summaryPhase: CompareSummaryPhase;
   summaryData: SummaryData | null;
   summaryError: string | null;
+  /** Contract code of the last failed summary request (AI_* …). */
+  summaryErrorCode: string | null;
+  /** Last success fell back to statistics-only (the images were rejected). */
+  summaryImagesFallback: boolean;
 
   toggleCompareMode: () => void;
   toggleSlot: (date: string, slot: CompareSlot) => void;
@@ -169,6 +173,8 @@ const RESULT_BOUND_RESET = {
   summaryStatus: "idle" as CompareSummaryStatus,
   summaryData: null as SummaryData | null,
   summaryError: null as string | null,
+  summaryErrorCode: null as string | null,
+  summaryImagesFallback: false,
   choropleth: false,
   hoveredHotspot: null as number | null,
   selectedHotspot: null as number | null,
@@ -188,6 +194,8 @@ function summaryIdle() {
     summaryPhase: null as CompareSummaryPhase,
     summaryData: null as SummaryData | null,
     summaryError: null as string | null,
+    summaryErrorCode: null as string | null,
+    summaryImagesFallback: false,
   };
 }
 
@@ -229,6 +237,8 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   summaryPhase: null,
   summaryData: null,
   summaryError: null,
+  summaryErrorCode: null,
+  summaryImagesFallback: false,
 
   toggleCompareMode: () => {
     const next = !get().compareMode;
@@ -496,7 +506,13 @@ export const useCompareStore = create<CompareState>((set, get) => ({
     const { result, summaryStatus, summaryLanguage, summaryIncludeImages } = get();
     if (!result || summaryStatus === "loading") return;
     const metadata = result.stats.metadata;
-    set({ summaryStatus: "loading", summaryError: null, summaryPhase: "ensure" });
+    set({
+      summaryStatus: "loading",
+      summaryError: null,
+      summaryErrorCode: null,
+      summaryImagesFallback: false,
+      summaryPhase: "ensure",
+    });
     try {
       // Probe with analysis params: warms/verifies the artifact first so the
       // caption can say "re-running the analysis" instead of silently hanging
@@ -525,15 +541,28 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       const body = (await response.json().catch(() => null)) as {
         summary?: SummaryData;
         message?: string;
+        code?: string;
+        imagesFallback?: boolean;
       } | null;
       if (!response.ok || !body?.summary) {
-        throw new Error(body?.message ?? "AI summary is unavailable right now.");
+        throw Object.assign(new Error(body?.message ?? "AI summary is unavailable right now."), {
+          code: typeof body?.code === "string" ? body.code : null,
+        });
       }
-      set({ summaryStatus: "done", summaryData: body.summary, summaryPhase: null });
+      set({
+        summaryStatus: "done",
+        summaryData: body.summary,
+        summaryImagesFallback: Boolean(body.imagesFallback),
+        summaryPhase: null,
+      });
     } catch (error) {
       set({
         summaryStatus: "error",
         summaryError: error instanceof Error && error.message ? error.message : "AI summary failed.",
+        summaryErrorCode:
+          typeof (error as { code?: unknown }).code === "string"
+            ? ((error as { code: string }).code)
+            : null,
         summaryPhase: null,
       });
     }

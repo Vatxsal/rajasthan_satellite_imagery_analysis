@@ -42,8 +42,9 @@ const baseSchema = z.object({
   AI_SUMMARY_RATE_LIMIT_PER_MIN: z.coerce.number().positive().default(5),
   /** Optional Gemini key for the AI summary card; empty disables it (AI_DISABLED). */
   GEMINI_API_KEY: optionalString,
-  /** Gemini model id for the summary (free-tier Flash by default). */
-  GEMINI_MODEL: z.string().trim().min(1).default("gemini-3.8-flash"),
+  /** Gemini model id for the summary (free-tier Flash class). Must appear in
+   *  the Gemini ListModels response — verify via GET /api/health/gemini. */
+  GEMINI_MODEL: z.string().trim().min(1).default("gemini-2.5-flash"),
 });
 
 /** Strict shape used when NEXT_PUBLIC_DATA_SOURCE=cdse — credentials are mandatory. */
