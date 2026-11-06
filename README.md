@@ -38,6 +38,7 @@
 - [Quota & Cost](#-quota--cost)
 - [Change Detection](#-change-detection)
 - [AI Summary (Gemini)](#-ai-summary-gemini)
+- [Email Report](#-email-report)
 - [Known Limitations](#-known-limitations)
 - [Deploying to Vercel](#-deploying-to-vercel)
 - [Security & Guard Rails](#-security--guard-rails)
@@ -283,6 +284,38 @@ The **Summary** tab writes a plain-language briefing of a finished comparison, i
 
 ---
 
+## 📧 Email Report
+
+The **Email report** button in the comparison panel sends one self-contained email: the top-10 change events, the statistics, the optional AI summary, an inline change-map JPEG, an `events.csv` attachment, and a deep link that reopens the exact analysis (`?a=…&l=…&A=…&B=…&tab=events`).
+
+**Setup:**
+
+1. Set `NEXT_PUBLIC_SITE_URL` (canonical origin used in deep links) — required for every provider.
+2. Pick a provider in `.env.local` / Vercel:
+
+   | `EMAIL_PROVIDER` | Behaviour |
+   | --- | --- |
+   | `console` (default) | Never sends. Writes `.html/.txt/.eml` previews to `.email-preview/`. Dev-only: a production build refuses with `EMAIL_DISABLED`. |
+   | `smtp` | Any SMTP server via Nodemailer. Gmail: app password + `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_SECURE=false`, `SMTP_USER`, `SMTP_PASS`. Brevo and institutional relays use the same fields. |
+   | `resend` | Resend HTTP API (free tier). Verify a sending domain, set `RESEND_API_KEY`. |
+
+3. `EMAIL_FROM="Rajasthan Imagery Explorer <reports@example.org>"` — must match a verified sender (required for `smtp`/`resend`).
+4. Optional anti-abuse: Cloudflare Turnstile — set `TURNSTILE_SITE_KEY` **and** `TURNSTILE_SECRET_KEY` together (a secret without a key hides the button). Optional quotas: `EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY` (3), `EMAIL_RATE_LIMIT_PER_IP_PER_DAY` (10), `EMAIL_DAILY_CAP` (80) — UTC-day windows, in-memory per instance.
+5. Optional dev target: `EMAIL_TEST_RECIPIENT` for `npm run email:test`.
+
+**Limits & privacy:**
+
+- HTML is capped at **100 KB** (the change-map JPEG is downscaled to fit the remaining budget); `events.csv` at 1 MB; the subject line at 90 chars with no CR/LF.
+- Guard order: same-origin → per-minute rate limits → honeypot → Turnstile (if configured, fail-closed) → daily quotas → configuration check → analysis. Failures return `{code, message}` with `EMAIL_*` codes; a rate-limit response carries `Retry-After`.
+- The recipient address is never logged (only a SHA-256 prefix), never appears in the HTML, and is only used to send that one report — no marketing, no tracking.
+- The AI summary is optional (shared cache with the Summary tab); if it fails the send continues without it.
+
+**Template tooling:** `npm run email:preview` renders all fixtures to `.email-preview/`; `npm run email:test` sends one through the configured provider. Automated coverage: `scripts/email-{route,rate,providers,template}.test.ts` (part of `npm test`). Manual QA log: [`docs/email-qa.md`](docs/email-qa.md).
+
+> **Vercel:** add `NEXT_PUBLIC_SITE_URL`, `EMAIL_PROVIDER`, `EMAIL_FROM`, plus `SMTP_*` or `RESEND_API_KEY`; mark `SMTP_PASS` / `RESEND_API_KEY` / `TURNSTILE_SECRET_KEY` as 🔒 Sensitive. Cloudflare's always-pass **test** keys (site `1x00000000000000000000AA`, secret `1x0000000000000000000000000000000AA`) are for local smoke only — create real keys for production. The CSP already allows `challenges.cloudflare.com` in `script-src`, `connect-src` and `frame-src`.
+
+---
+
 ## ⚠️ Known Limitations
 
 | Area | Limitation |
@@ -319,6 +352,14 @@ The **Summary** tab writes a plain-language briefing of a finished comparison, i
 | `AI_SUMMARY_RATE_LIMIT_PER_MIN` | `5` | server |
 | `GEMINI_API_KEY` | optional | 🔒 Sensitive |
 | `GEMINI_MODEL` | optional | server |
+| `NEXT_PUBLIC_SITE_URL` | `https://your-domain.vercel.app` | public |
+| `EMAIL_PROVIDER` | `smtp` or `resend` (`console` refuses in production) | server |
+| `EMAIL_FROM` | `Rajasthan Imagery Explorer <reports@your-domain>` | server |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` | only when `EMAIL_PROVIDER=smtp` | server |
+| `SMTP_PASS` | only when `EMAIL_PROVIDER=smtp` | 🔒 Sensitive |
+| `RESEND_API_KEY` | only when `EMAIL_PROVIDER=resend` | 🔒 Sensitive |
+| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | optional CAPTCHA pair (see [Email Report](#-email-report)) | server / 🔒 Sensitive |
+| `EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY` / `EMAIL_RATE_LIMIT_PER_IP_PER_DAY` / `EMAIL_DAILY_CAP` | optional (defaults `3` / `10` / `80`) | server |
 
    Leave `TILE_CACHE_DIR` and `CDSE_WMTS_INSTANCE_ID` unset. Serverless disks are ephemeral, and the app disables the disk cache automatically when `process.env.VERCEL` is set. `.env.example` is the source of truth.
 3. **Region**: `vercel.json` pins the function region to **`fra1`** (Frankfurt) to keep the server ↔ Copernicus round-trip short.
@@ -386,6 +427,8 @@ npm run typecheck    # tsc --noEmit
 npm run lint         # next lint
 npm test             # compiles tsconfig.test.json → node --test
 npm run build        # production build incl. type + lint pass
+npm run email:preview  # render every report-template fixture to .email-preview/
+npm run email:test     # send one report through EMAIL_PROVIDER to EMAIL_TEST_RECIPIENT
 node scripts/smoke.browser.cjs   # full browser flow: map, basemap switch,
                                  # address search, scene search, streamed
                                  # imagery, CSP enforcement (requires Chrome)

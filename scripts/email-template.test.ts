@@ -1,0 +1,180 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  MAX_CSV_BYTES,
+  MAX_HTML_BYTES,
+  assertHtmlBudget,
+  buildEventsCsv,
+  buildReportEmailData,
+  buildSubject,
+  renderReportEmail,
+  sanitizeSubject,
+} from "../lib/email/template";
+import { buildFixtures, DEEP_LINK } from "../lib/email/template/fixtures";
+
+/** Report template contract: hostile input is escaped, subjects stay
+ *  single-line ≤90 chars, every fixture fits the 100 KB HTML budget,
+ *  the plain-text alternative carries the same facts, Hindi renders,
+ *  and the no-summary fixture shows the fallback line. */
+
+const hostileFeature: GeoJSON.Feature = {
+  type: "Feature",
+  id: "ev_deadbeef",
+  geometry: { type: "Point", coordinates: [75.7123, 26.8531] },
+  properties: {
+    id: "ev_deadbeef",
+    classCode: 2,
+    classLabel: 'Loss <b>bold</b> & "quoted"',
+    areaHa: 12.3,
+    centroid: [75.7123, 26.8531],
+    confidence: "high",
+    tehsilName: 'Bassi"><img src=x onerror=alert(2)>',
+  },
+};
+
+function fixtureInput(name: string) {
+  const fixture = buildFixtures().find((entry) => entry.name === name);
+  assert.ok(fixture, `fixture ${name}`);
+  return fixture.input;
+}
+
+test("hostile names are escaped in HTML and never become live markup", async () => {
+  const base = fixtureInput("all-events");
+  const data = buildReportEmailData({
+    ...base,
+    areaName: 'Evil <script>alert(1)</script> Lagoon',
+    events: [hostileFeature],
+    summary: {
+      ...base.summary!,
+      overview: "Watch </script><script>alert(3)</script> end.",
+    },
+  });
+  const rendered = await renderReportEmail(data);
+
+  assert.ok(!rendered.html.includes("<script>alert"), "no raw script tag");
+  assert.ok(!rendered.html.includes("<img src=x onerror"), "no raw injected tag");
+  assert.ok(rendered.html.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
+  assert.ok(rendered.html.includes("&lt;img src=x onerror=alert(2)&gt;"));
+  // The subject/preheader carry the name as data — what matters is that the
+  // HTML body never renders it as markup (asserted above) and the subject
+  // stays single-line (asserted in the subject test).
+});
+
+test("subject is single-line, ≤90 chars, even with header-injection input", () => {
+  const hostile = buildSubject(
+    "Jaisalmer\r\nBcc: victim@example.org",
+    "2026-10-10",
+    "2026-10-25",
+  );
+  // Newlines collapse to spaces — no way to split the header, so the
+  // residual "Bcc:" text is inert data inside a single subject line.
+  assert.ok(!/[\r\n]/.test(hostile), "no CR/LF in subject");
+  assert.ok(!/[\r\n].*:/m.test(hostile), "no smuggled header line");
+  assert.ok(hostile.length <= 90);
+
+  const long = buildSubject(
+    "A".repeat(200),
+    "2026-10-10",
+    "2026-10-25",
+  );
+  assert.ok(long.length <= 90, `length ${long.length}`);
+  assert.ok(long.endsWith("…"), "truncated with an ellipsis");
+
+  assert.equal(sanitizeSubject("  spaced \n out  "), "spaced out");
+});
+
+test("every fixture renders under the 100 KB HTML budget with non-empty text", async () => {
+  for (const fixture of buildFixtures()) {
+    const data = buildReportEmailData(fixture.input);
+    const rendered = await renderReportEmail(data);
+    const bytes = Buffer.byteLength(rendered.html, "utf8");
+    assert.ok(
+      bytes <= MAX_HTML_BYTES,
+      `${fixture.name}: ${bytes} bytes > ${MAX_HTML_BYTES}`,
+    );
+    assert.ok(rendered.text.trim().length > 0, `${fixture.name}: empty text part`);
+    assert.doesNotThrow(() => assertHtmlBudget(rendered.html), fixture.name);
+  }
+});
+
+test("plain-text alternative carries the same facts without HTML", async () => {
+  const rendered = await renderReportEmail(buildReportEmailData(fixtureInput("all-events")));
+  assert.ok(rendered.text.includes("Bassi"), "area name present");
+  assert.ok(rendered.text.includes("486.7"), "changed hectares present");
+  assert.ok(rendered.text.includes("486.7 ha") || /486\.7\s*ha/i.test(rendered.text));
+  assert.ok(!/<[a-z][^>]*>/i.test(rendered.text), "no HTML tags in the text part");
+});
+
+test("the Hindi fixture renders Devanagari copy with lang=hi", async () => {
+  const rendered = await renderReportEmail(buildReportEmailData(fixtureInput("hindi")));
+  assert.match(rendered.html, /<html[^>]*lang="hi"/);
+  assert.match(rendered.html, /[\u0900-\u097F]/, "Devanagari in the HTML");
+  assert.match(rendered.text, /[\u0900-\u097F]/, "Devanagari in the text part");
+});
+
+test("the no-summary fixture shows the fallback line, not a blank section", async () => {
+  const rendered = await renderReportEmail(
+    buildReportEmailData(fixtureInput("no-summary")),
+  );
+  assert.ok(
+    rendered.html.includes("The AI summary could not be generated for this report."),
+    "English fallback copy",
+  );
+  assert.ok(rendered.text.includes("The AI summary could not be generated for this report."));
+});
+
+test("events.csv is RFC-4180 escaped, CRLF, capped at 1 MB", () => {
+  const hostile: GeoJSON.Feature = {
+    type: "Feature",
+    id: 'ev_1"quoted',
+    geometry: { type: "Point", coordinates: [75.7, 26.8] },
+    properties: {
+      id: 'ev_1"quoted',
+      classLabel: 'Bare, "built-up"\nsecond line',
+      areaHa: 5,
+      confidence: "high",
+      tehsilName: 'Bassi, "West"',
+      centroid: [75.7, 26.8],
+    },
+  };
+  const csv = buildEventsCsv([hostile], DEEP_LINK);
+  const lines = csv.split("\r\n");
+  assert.equal(
+    lines[0],
+    "id,class,area_ha,confidence,tehsil,lat,lon,link",
+  );
+  assert.ok(csv.endsWith("\r\n"));
+  const row = lines[1]!;
+  assert.ok(row.includes('"Bare, ""built-up""'), `quoted cell: ${row}`);
+  assert.ok(!/(?<!")\n/.test(row), "embedded newline stays inside quotes");
+  assert.ok(csv.includes(`${DEEP_LINK}&e=`), "per-event deep link column");
+
+  // Size cap: a flood of long rows stops before the 1 MB ceiling.
+  const flood: GeoJSON.Feature[] = Array.from({ length: 4_000 }, (_, index) => ({
+    type: "Feature" as const,
+    id: `ev_${index}`,
+    geometry: { type: "Point" as const, coordinates: [75.7, 26.8] },
+    properties: {
+      id: `ev_${index}`,
+      classLabel: "Vegetation loss",
+      areaHa: 1,
+      confidence: "high",
+      tehsilName: "N".repeat(600),
+      centroid: [75.7, 26.8],
+    },
+  }));
+  const big = buildEventsCsv(flood, DEEP_LINK);
+  assert.ok(
+    Buffer.byteLength(big, "utf8") <= MAX_CSV_BYTES,
+    `csv ${Buffer.byteLength(big, "utf8")} > ${MAX_CSV_BYTES}`,
+  );
+  assert.ok(big.split("\r\n").length > 100, "cap still yields many rows");
+});
+
+test("assertHtmlBudget rejects anything over the cap", () => {
+  assert.throws(
+    () => assertHtmlBudget("a".repeat(MAX_HTML_BYTES + 1)),
+    /EMAIL_HTML_TOO_LARGE/,
+  );
+  assert.doesNotThrow(() => assertHtmlBudget("a".repeat(100)));
+});

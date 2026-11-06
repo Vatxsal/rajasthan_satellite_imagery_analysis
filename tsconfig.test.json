@@ -5,9 +5,17 @@
     "outDir": ".test-build",
     "module": "commonjs",
     "moduleResolution": "node",
+    "jsx": "react-jsx",
     "incremental": false,
     "sourceMap": false,
     "declaration": false
   },
-  "include": ["scripts/*.test.ts", "scripts/validate.ts", "validation/**/*.ts", "types/*.d.ts"]
+  "include": [
+    "scripts/*.test.ts",
+    "scripts/validate.ts",
+    "scripts/email-preview.ts",
+    "scripts/email-test.ts",
+    "validation/**/*.ts",
+    "types/*.d.ts"
+  ]
 }

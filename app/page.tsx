@@ -8,6 +8,7 @@ import SceneStrip from "@/components/scenes/SceneStrip";
 import CompareDrawer from "@/components/compare/CompareDrawer";
 import CompareMapController from "@/components/compare/CompareMapController";
 import DownloadDialog from "@/components/scenes/DownloadDialog";
+import ShareLinkLoader from "@/components/ShareLinkLoader";
 import ToastStack from "@/components/ui/ToastStack";
 import { useIsDesktop } from "@/lib/hooks/useMediaQuery";
 
@@ -32,6 +33,8 @@ export default function Page() {
       {!isDesktop && <CompareDrawer />}
       <ToastStack />
       <DownloadDialog />
+      {/* Renders null: reopens an emailed report from ?a=&l=&A=&B=… links. */}
+      <ShareLinkLoader />
     </div>
   );
 }

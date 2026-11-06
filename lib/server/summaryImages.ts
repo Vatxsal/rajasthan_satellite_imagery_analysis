@@ -30,13 +30,17 @@ interface RgbaImage {
 }
 
 /** Renders (or serves from the imagery cache) one true-colour PNG preview. */
-async function renderPreview(geometry: ClipGeometry, date: string): Promise<RgbaImage> {
+async function renderPreview(
+  geometry: ClipGeometry,
+  date: string,
+  size: number = SUMMARY_IMAGE_MAX_PX,
+): Promise<RgbaImage> {
   const env = getServerEnv();
   const key = imageryCacheKey({
     geometry,
     date,
     composite: "true-color",
-    size: SUMMARY_IMAGE_MAX_PX,
+    size,
     format: "png",
   });
   let png = imageryCache.get(key);
@@ -45,7 +49,7 @@ async function renderPreview(geometry: ClipGeometry, date: string): Promise<Rgba
       geometry,
       date,
       composite: "true-color",
-      maxSize: SUMMARY_IMAGE_MAX_PX,
+      maxSize: size,
       format: "png",
     });
     imageryCache.set(key, png, env.IMAGERY_CACHE_TTL_SECONDS);
@@ -99,12 +103,19 @@ function flattenWhite(src: RgbaImage): Uint8Array {
 }
 
 function encodeJpeg(image: RgbaImage, flattenAlpha: boolean): SummaryImage {
+  return {
+    mimeType: "image/jpeg",
+    data: encodeJpegBuffer(image, JPEG_QUALITY, flattenAlpha).toString("base64"),
+  };
+}
+
+function encodeJpegBuffer(image: RgbaImage, quality: number, flattenAlpha: boolean): Buffer {
   const data = flattenAlpha ? flattenWhite(image) : toRgb(image);
   const encoded = jpeg.encode(
     { data: Buffer.from(data.buffer, data.byteOffset, data.byteLength), width: image.width, height: image.height },
-    JPEG_QUALITY,
+    quality,
   );
-  return { mimeType: "image/jpeg", data: encoded.data.toString("base64") };
+  return encoded.data;
 }
 
 function toRgb(image: RgbaImage): Uint8Array {
@@ -146,4 +157,61 @@ export async function buildSummaryImages(input: {
     encodeJpeg(imageB, true),
     encodeJpeg(composite, false), // already opaque
   ];
+}
+
+export interface ChangeMapJpeg {
+  /** Raw JPEG bytes (the email route base64s them for the CID attachment). */
+  content: Buffer;
+  width: number;
+  height: number;
+}
+
+/**
+ * Change-map JPEG for the emailed report: classified overlay composited over
+ * the date-B true-colour render, long side ≤ maxPx (spec: 700), quality
+ * stepped down (then the image scaled) until it fits maxBytes — the HTML
+ * budget forces the inline base64 image to stay small. Returns null when even
+ * the smallest attempt cannot fit; callers drop the image rather than fail
+ * the send.
+ */
+export async function buildChangeMapJpeg(input: {
+  geometry: ClipGeometry;
+  dateB: string;
+  overlayPng: Buffer;
+  maxPx?: number;
+  maxBytes?: number;
+}): Promise<ChangeMapJpeg | null> {
+  const maxPx = input.maxPx ?? 700;
+  const maxBytes = input.maxBytes ?? 30_000;
+  if (maxBytes < 4_000) return null;
+
+  const base = await renderPreview(input.geometry, input.dateB, maxPx);
+  const overlayPng = PNG.sync.read(input.overlayPng);
+  const overlay = scaleNearest(
+    { width: overlayPng.width, height: overlayPng.height, data: new Uint8Array(overlayPng.data) },
+    base.width,
+    base.height,
+  );
+  let composite = compositeOver(base, overlay);
+
+  for (const quality of [80, 60, 45, 30]) {
+    const encoded = encodeJpegBuffer(composite, quality, false);
+    if (encoded.byteLength <= maxBytes) {
+      return { content: encoded, width: composite.width, height: composite.height };
+    }
+  }
+
+  // Still too big: shrink once per pass until the budget fits or we give up.
+  for (const factor of [0.75, 0.55, 0.4]) {
+    const width = Math.max(240, Math.round(composite.width * factor));
+    const height = Math.max(240, Math.round(composite.height * factor));
+    composite = scaleNearest(composite, width, height);
+    for (const quality of [60, 40]) {
+      const encoded = encodeJpegBuffer(composite, quality, false);
+      if (encoded.byteLength <= maxBytes) {
+        return { content: encoded, width, height };
+      }
+    }
+  }
+  return null;
 }

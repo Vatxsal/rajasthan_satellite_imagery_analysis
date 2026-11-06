@@ -114,6 +114,8 @@ interface CompareState {
   summaryErrorCode: string | null;
   /** Last success fell back to statistics-only (the images were rejected). */
   summaryImagesFallback: boolean;
+  /** Opened via an emailed report deep link (drawer shows a quiet banner). */
+  shareOpened: boolean;
 
   toggleCompareMode: () => void;
   toggleSlot: (date: string, slot: CompareSlot) => void;
@@ -146,6 +148,8 @@ interface CompareState {
   setSummaryLanguage: (value: SummaryLanguage) => void;
   setSummaryIncludeImages: (value: boolean) => void;
   fetchSummary: () => Promise<void>;
+  /** Marks the current result as opened from an emailed report link. */
+  markShareOpened: () => void;
 }
 
 /** Active run — kept out of the store state (AbortController is not reactive). */
@@ -186,6 +190,7 @@ const RESULT_BOUND_RESET = {
   eventsLimit: EVENTS_PAGE_SIZE,
   eventsStatus: "idle" as CompareEventsStatus,
   eventsError: null as string | null,
+  shareOpened: false,
 };
 
 function summaryIdle() {
@@ -239,6 +244,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   summaryError: null,
   summaryErrorCode: null,
   summaryImagesFallback: false,
+  shareOpened: false,
 
   toggleCompareMode: () => {
     const next = !get().compareMode;
@@ -363,6 +369,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
         eventsLimit: EVENTS_PAGE_SIZE,
         eventsStatus: "ready" as CompareEventsStatus,
         eventsError: null,
+        shareOpened: false,
         ...summaryIdle(),
       });
       // Free map space on desktop: results now live in the right-hand panel.
@@ -501,6 +508,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   setTehsilHighlight: (value) => set({ tehsilHighlight: value }),
   setSummaryLanguage: (value) => set({ summaryLanguage: value }),
   setSummaryIncludeImages: (value) => set({ summaryIncludeImages: value }),
+  markShareOpened: () => set({ shareOpened: true }),
 
   fetchSummary: async () => {
     const { result, summaryStatus, summaryLanguage, summaryIncludeImages } = get();
