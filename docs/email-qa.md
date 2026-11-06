@@ -3,7 +3,7 @@
 Feature: `POST /api/compare/email` + the **Email report** dialog (PR: see branch `feat/email-report`).
 Last run: **2026-11-06**, local dev (`next dev`, `EMAIL_PROVIDER=console`, Cloudflare always-pass test keys).
 
-## What is automated (`npm test` — 184 tests, all green)
+## What is automated (`npm test` — 183 tests, all green)
 
 | File | Covers |
 | --- | --- |

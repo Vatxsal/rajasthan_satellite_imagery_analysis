@@ -14,7 +14,7 @@
     "scripts/*.test.ts",
     "scripts/validate.ts",
     "scripts/email-preview.ts",
-    "scripts/email-test.ts",
+    "scripts/send-test-report.ts",
     "validation/**/*.ts",
     "types/*.d.ts"
   ]
