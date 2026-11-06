@@ -6,14 +6,18 @@ const contentSecurityPolicy = [
   "object-src 'none'",
   // 'unsafe-eval' is required by MapLibre GL JS (expression/worker compilation);
   // 'unsafe-inline' by Next.js bootstrap + MapLibre control styles.
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  // challenges.cloudflare.com — Turnstile captcha (widget script, iframe, API).
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com",
   "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data: https://tiles.openfreemap.org",
   "img-src 'self' data: blob: https://server.arcgisonline.com https://tiles.openfreemap.org",
   // blob: — MapLibre loads the recoloured overlay (blob URL from the client
   // class/boost recolour) through fetch(), which is governed by connect-src.
-  "connect-src 'self' blob: https://tiles.openfreemap.org https://server.arcgisonline.com https://nominatim.openstreetmap.org ws://localhost:3000 ws://127.0.0.1:3000",
+  "connect-src 'self' blob: https://tiles.openfreemap.org https://server.arcgisonline.com https://nominatim.openstreetmap.org https://challenges.cloudflare.com ws://localhost:3000 ws://127.0.0.1:3000",
+  // frame-src falls back to default-src 'self' — the Turnstile widget iframe
+  // needs an explicit allow (frame-ancestors 'none' only guards OUR pages).
+  "frame-src 'self' https://challenges.cloudflare.com",
   "manifest-src 'self'",
 ].join("; ");
 

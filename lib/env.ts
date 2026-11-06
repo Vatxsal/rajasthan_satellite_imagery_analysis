@@ -6,6 +6,19 @@ export { dataSource } from "./dataSource";
 
 const optionalString = z.string().trim().optional();
 
+/**
+ * Env-var boolean: accepts true/false/1/0/yes/no/on/off case-insensitively.
+ * z.coerce.boolean would treat the string "false" as true, so parse explicitly.
+ */
+const boolEnv = () =>
+  z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off", ""].includes(normalized)) return false;
+    return value; // unknown token → zod type error below
+  }, z.boolean());
+
 const baseSchema = z.object({
   CDSE_TOKEN_URL: z
     .string()
@@ -45,6 +58,35 @@ const baseSchema = z.object({
   /** Gemini model id for the summary (free-tier Flash class). Must appear in
    *  the Gemini ListModels response — verify via GET /api/health/gemini. */
   GEMINI_MODEL: z.string().trim().min(1).default("gemini-2.5-flash"),
+
+  // ── Email report (/api/compare/email) ──────────────────────────────────
+  /** Delivery backend. console (default) writes .email-preview/ files and never sends. */
+  EMAIL_PROVIDER: z.enum(["console", "smtp", "resend"]).default("console"),
+  /** Sender: `Display Name <address@example.org>` (bare address also accepted). */
+  EMAIL_FROM: optionalString,
+  /** SMTP (EMAIL_PROVIDER=smtp): host/port/auth. STARTTLS on 587, implicit TLS on 465. */
+  SMTP_HOST: optionalString,
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  /** "true" = implicit TLS (SMTPS, usually 465); "false" = STARTTLS. */
+  SMTP_SECURE: boolEnv().default(false),
+  SMTP_USER: optionalString,
+  SMTP_PASS: optionalString,
+  /** Resend (EMAIL_PROVIDER=resend): API key from https://resend.com/api-keys. */
+  RESEND_API_KEY: optionalString,
+  /** Abuse limits — in-memory per instance (reset on cold start; see README). */
+  EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY: z.coerce.number().int().min(1).default(3),
+  EMAIL_RATE_LIMIT_PER_IP_PER_DAY: z.coerce.number().int().min(1).default(10),
+  /** Instance-wide sends per UTC day; 0 disables the cap. */
+  EMAIL_DAILY_CAP: z.coerce.number().int().min(0).default(80),
+  /** Attach the full events.csv when true. */
+  EMAIL_ATTACH_CSV: boolEnv().default(true),
+  /** Dev-only target for `npm run email:test` — never read by the API route. */
+  EMAIL_TEST_RECIPIENT: optionalString,
+  /** Optional Cloudflare Turnstile anti-abuse (blank = disabled). */
+  TURNSTILE_SITE_KEY: optionalString,
+  TURNSTILE_SECRET_KEY: optionalString,
+  /** Canonical site origin for email deep links; required to actually send. */
+  NEXT_PUBLIC_SITE_URL: z.string().trim().url().optional(),
 });
 
 /** Strict shape used when NEXT_PUBLIC_DATA_SOURCE=cdse — credentials are mandatory. */
@@ -78,6 +120,53 @@ export interface ServerEnv {
   AI_SUMMARY_RATE_LIMIT_PER_MIN: number;
   GEMINI_API_KEY?: string;
   GEMINI_MODEL: string;
+  EMAIL_PROVIDER: "console" | "smtp" | "resend";
+  EMAIL_FROM?: string;
+  SMTP_HOST?: string;
+  SMTP_PORT: number;
+  SMTP_SECURE: boolean;
+  SMTP_USER?: string;
+  SMTP_PASS?: string;
+  RESEND_API_KEY?: string;
+  EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY: number;
+  EMAIL_RATE_LIMIT_PER_IP_PER_DAY: number;
+  EMAIL_DAILY_CAP: number;
+  EMAIL_ATTACH_CSV: boolean;
+  EMAIL_TEST_RECIPIENT?: string;
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET_KEY?: string;
+  NEXT_PUBLIC_SITE_URL?: string;
+}
+
+/**
+ * Provider-specific email requirements, applied after the static parse:
+ * everything stays optional while EMAIL_PROVIDER=console (the default) and
+ * only becomes mandatory once real delivery is selected — so a half-filled
+ * .env.local still boots the app for local development.
+ * Throws the same "Invalid environment configuration" contract the CDSE
+ * checks use (errorResponse() maps it to CDSE_CONFIG without secrets).
+ */
+function validateEmailSettings(env: ServerEnv): void {
+  const problems: string[] = [];
+  const bareFrom = (env.EMAIL_FROM ?? "").match(/<([^<>]+)>/)?.[1] ?? env.EMAIL_FROM ?? "";
+  if (env.EMAIL_FROM && !/^[^\s@,;:<>"[\]\\]+@[^\s@,;:<>"[\]\\]+\.[^\s@,;:<>"[\]\\]+$/.test(bareFrom.trim())) {
+    problems.push("EMAIL_FROM: expected `Display Name <address@example.org>` or a bare address.");
+  }
+  if (env.EMAIL_PROVIDER === "smtp") {
+    if (!env.SMTP_HOST) problems.push("SMTP_HOST is required when EMAIL_PROVIDER=smtp.");
+    if (!env.EMAIL_FROM) problems.push("EMAIL_FROM is required when EMAIL_PROVIDER=smtp.");
+  }
+  if (env.EMAIL_PROVIDER === "resend") {
+    if (!env.RESEND_API_KEY) problems.push("RESEND_API_KEY is required when EMAIL_PROVIDER=resend.");
+    if (!env.EMAIL_FROM) problems.push("EMAIL_FROM is required when EMAIL_PROVIDER=resend.");
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `Invalid environment configuration (EMAIL_PROVIDER=${env.EMAIL_PROVIDER}):\n${problems
+        .map((line) => `- ${line}`)
+        .join("\n")}`,
+    );
+  }
 }
 
 /**
@@ -108,6 +197,7 @@ export function getServerEnv(): ServerEnv {
     );
   }
 
+  validateEmailSettings(parsed.data);
   envHolder.cached = parsed.data;
   return envHolder.cached;
 }

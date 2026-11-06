@@ -26,6 +26,9 @@
 /.tile-cache/
 *.tsbuildinfo
 
+# email-report previews (EMAIL_PROVIDER=console) — never commit generated mail
+/.email-preview/
+
 # misc
 .DS_Store
 *.pem

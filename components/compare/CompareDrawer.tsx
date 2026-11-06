@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { BarChart3, Crosshair, Download, Flame, Layers3, Loader2, MoveHorizontal, Sparkles, X } from "lucide-react";
+import { BarChart3, Crosshair, Download, Flame, Layers3, Loader2, Mail, MoveHorizontal, Sparkles, X } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
 import Slider from "@/components/ui/Slider";
@@ -20,6 +20,7 @@ import {
 import { useIsDesktop } from "@/lib/hooks/useMediaQuery";
 import CompareStatsTab from "./CompareStatsTab";
 import CompareSummaryTab from "./CompareSummaryTab";
+import EmailReport from "./EmailReport";
 import { formatShortDate } from "./CompareBar";
 
 const TAB_OPTIONS: Array<{ value: CompareTab; label: string; icon: LucideIcon }> = [
@@ -110,6 +111,7 @@ function DrawerHeader({
   metadata: { areaName: string; dateA: string; dateB: string; gapDays: number };
 }) {
   const setDrawerOpen = useCompareStore((s) => s.setDrawerOpen);
+  const shareOpened = useCompareStore((s) => s.shareOpened);
   return (
     <header className="flex shrink-0 flex-col gap-1 border-b border-border px-3 pt-2">
       <div className="flex items-center gap-2">
@@ -119,6 +121,7 @@ function DrawerHeader({
         >
           Change detection · {metadata.areaName}
         </p>
+        <EmailReport />
         <button
           type="button"
           aria-label="Close change detection results"
@@ -128,6 +131,12 @@ function DrawerHeader({
           <X size={14} />
         </button>
       </div>
+      {shareOpened && (
+        <p className="flex items-center gap-1.5 rounded border border-border bg-surface-2 px-2 py-1 text-[11px] text-muted">
+          <Mail size={12} className="shrink-0" aria-hidden />
+          Opened from an emailed report
+        </p>
+      )}
       <p className="mono-nums text-[11px] text-muted">
         {formatShortDate(metadata.dateA)} → {formatShortDate(metadata.dateB)}
       </p>
