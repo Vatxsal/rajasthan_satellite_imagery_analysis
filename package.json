@@ -37,6 +37,7 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@tailwindcss/container-queries": "^0.1.1",
     "@types/node": "^20",
     "@types/nodemailer": "^8.0.2",
     "@types/pngjs": "^6.0.5",

@@ -1,17 +1,33 @@
 "use client";
 
 /**
- * "Email report" button in the results header + the dialog that POSTs
+ * "Send report to mail" button in the results header + the dialog that POSTs
  * /api/compare/email. Capability comes from the public config endpoint
  * (same assertEmailReady as the route): a console provider in production or
  * any incomplete setup hides the button instead of offering a submit that
- * would 503. Params are rebuilt from the displayed result's metadata — the
- * exact field set every cache-backed compare route derives keys from — so
- * the emailed analysis always matches what the user is looking at.
+ * would 503.
+ *
+ * Two dialog shapes:
+ *   fixed (EMAIL_FIXED_RECIPIENT) — confirm-only: "This comparison will be
+ *     emailed to {recipientHint}." with language/options/captcha; no email
+ *     input, and the request body never carries an `email` field.
+ *   open — the classic dialog with a typed address.
+ * Params are rebuilt from the displayed result's metadata — the exact field
+ * set every cache-backed compare route derives keys from — so the emailed
+ * analysis always matches what the user is looking at.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { CheckCircle2, Image as ImageIcon, Languages, Loader2, Mail, Sparkles, X } from "lucide-react";
+import {
+  CheckCircle2,
+  Clock,
+  Image as ImageIcon,
+  Languages,
+  Loader2,
+  Mail,
+  Sparkles,
+  X,
+} from "lucide-react";
 import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
 import TurnstileWidget from "@/components/ui/TurnstileWidget";
@@ -23,6 +39,12 @@ import { useCompareStore } from "@/store/useCompareStore";
 
 interface EmailConfig {
   enabled: boolean;
+  mode: "fixed" | "open";
+  /** Masked recipient (m***@gmail.com) in fixed mode; null in open mode. */
+  recipientHint: string | null;
+  summaryAvailable: boolean;
+  captchaRequired: boolean;
+  dailyCapReached: boolean;
   provider: "console" | "smtp" | "resend";
   turnstileSiteKey: string | null;
 }
@@ -42,6 +64,12 @@ async function loadEmailConfig(): Promise<EmailConfig | null> {
         if (typeof payload.enabled === "boolean") {
           const config: EmailConfig = {
             enabled: payload.enabled,
+            mode: payload.mode === "fixed" ? "fixed" : "open",
+            recipientHint:
+              typeof payload.recipientHint === "string" ? payload.recipientHint : null,
+            summaryAvailable: payload.summaryAvailable === true,
+            captchaRequired: payload.captchaRequired === true,
+            dailyCapReached: payload.dailyCapReached === true,
             provider:
               payload.provider === "smtp" || payload.provider === "resend"
                 ? payload.provider
@@ -78,10 +106,17 @@ function messageFor(code: string | null, serverMessage: string | null): string {
   return "Sending the report failed. Try again.";
 }
 
+/** Client-side cooldown after any send (fresh or duplicate) — ms. */
+const SEND_COOLDOWN_MS = 30_000;
+
+type DialogStatus = "idle" | "sending" | "success" | "alreadySent" | "error";
+
 export default function EmailReport() {
   const running = useCompareStore((s) => s.running);
   const [config, setConfig] = useState<EmailConfig | null>(configCache);
   const [open, setOpen] = useState(false);
+  // Cooldown lives here (not in the dialog) so it survives close/reopen.
+  const [cooldownUntil, setCooldownUntil] = useState(0);
   const handleClose = useCallback(() => setOpen(false), []);
 
   useEffect(() => {
@@ -104,22 +139,43 @@ export default function EmailReport() {
     <>
       <button
         type="button"
-        aria-label="Email report"
-        title={running ? "Wait for the analysis to finish" : "Email report"}
+        aria-label="Send report to mail"
+        title={running ? "Wait for the analysis to finish" : "Send report to mail"}
         disabled={running}
         onClick={() => setOpen(true)}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex h-7 shrink-0 items-center gap-1.5 rounded px-2 text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Mail size={14} aria-hidden />
+        {/* Icon-only below the @sm container width — the title stays as tooltip. */}
+        <span className="hidden @sm:block">Send report to mail</span>
       </button>
-      {open && <EmailDialog config={config} onClose={handleClose} />}
+      {open && (
+        <EmailDialog
+          config={config}
+          cooldownUntil={cooldownUntil}
+          onSent={() => setCooldownUntil(Date.now() + SEND_COOLDOWN_MS)}
+          onClose={handleClose}
+        />
+      )}
     </>
   );
 }
 
-function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => void }) {
+function EmailDialog({
+  config,
+  cooldownUntil,
+  onSent,
+  onClose,
+}: {
+  config: EmailConfig;
+  cooldownUntil: number;
+  onSent: () => void;
+  onClose: () => void;
+}) {
   const result = useCompareStore((s) => s.result);
   const defaultLanguage = useCompareStore((s) => s.summaryLanguage);
+  const fixed = config.mode === "fixed";
+  const recipientHint = config.recipientHint ?? "the configured address";
 
   const [email, setEmail] = useState("");
   const [language, setLanguage] = useState<SummaryLanguage>(defaultLanguage);
@@ -127,10 +183,11 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
   const [includeImage, setIncludeImage] = useState(true);
   const [website, setWebsite] = useState(""); // honeypot — bots fill it, humans can't see it
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const [status, setStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
+  const [status, setStatus] = useState<DialogStatus>("idle");
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [serverMessage, setServerMessage] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState("");
+  const [now, setNow] = useState(() => Date.now());
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -142,10 +199,23 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
     onClose();
   }, [onClose]);
 
+  // 30-second client-side cooldown after a send; ticks once a second while on.
+  useEffect(() => {
+    if (cooldownUntil <= Date.now()) return;
+    const id = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= cooldownUntil) window.clearInterval(id);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [cooldownUntil]);
+  const cooldownRemaining = Math.max(0, Math.ceil((cooldownUntil - now) / 1000));
+
   // Focus trap, Esc-to-close, focus restored to the header button on exit.
   useEffect(() => {
     const returnFocus = document.activeElement as HTMLElement | null;
-    inputRef.current?.focus();
+    if (inputRef.current) inputRef.current.focus();
+    else dialogRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (statusRef.current === "sending") return;
@@ -187,13 +257,16 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
 
   const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    if (status === "sending") return;
-    const recipient = email.trim();
-    if (!isValidEmail(recipient)) {
-      setStatus("error");
-      setErrorCode("EMAIL_INVALID");
-      setServerMessage(null);
-      return;
+    if (status === "sending" || cooldownRemaining > 0) return;
+    let recipient = "";
+    if (!fixed) {
+      recipient = email.trim();
+      if (!isValidEmail(recipient)) {
+        setStatus("error");
+        setErrorCode("EMAIL_INVALID");
+        setServerMessage(null);
+        return;
+      }
     }
     setStatus("sending");
     setErrorCode(null);
@@ -203,7 +276,8 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: recipient,
+          // Fixed mode must never carry an email field — the server rejects it.
+          ...(fixed ? {} : { email: recipient }),
           params: analysisParamsFromMetadata(metadata),
           language,
           includeSummary,
@@ -214,12 +288,15 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
       });
       const payload = (await response.json().catch(() => null)) as {
         ok?: boolean;
+        alreadySent?: boolean;
         code?: string;
         message?: string;
       } | null;
       if (response.ok && payload?.ok) {
-        setStatus("success");
-        setSentTo(recipient);
+        setStatus(payload.alreadySent ? "alreadySent" : "success");
+        if (!fixed) setSentTo(recipient);
+        onSent();
+        setNow(Date.now());
         return;
       }
       setStatus("error");
@@ -232,6 +309,8 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
     }
   };
 
+  const terminal = status === "success" || status === "alreadySent";
+
   return (
     <div
       className="fixed inset-0 z-[95] grid place-items-center bg-black/40 p-4"
@@ -243,12 +322,13 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
         role="dialog"
         aria-modal="true"
         aria-labelledby="email-report-title"
-        className="flex max-h-[90vh] w-full max-w-sm flex-col overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-float"
+        tabIndex={-1}
+        className="flex max-h-[90vh] w-full max-w-sm flex-col overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-float focus:outline-none"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start gap-2">
           <h2 id="email-report-title" className="min-w-0 flex-1 text-sm font-semibold text-text">
-            Email report
+            {fixed ? "Send report to mail" : "Email report"}
           </h2>
           <button
             type="button"
@@ -269,28 +349,35 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
         )}
 
         <form onSubmit={submit} noValidate className="mt-3 flex flex-col gap-3">
-          <div>
-            <label htmlFor="email-report-recipient" className="mb-1 block text-[11px] text-muted">
-              Email address
-            </label>
-            <input
-              ref={inputRef}
-              id="email-report-recipient"
-              type="email"
-              inputMode="email"
-              autoComplete="email"
-              spellCheck={false}
-              maxLength={254}
-              required
-              value={email}
-              onChange={(event) => {
-                setEmail(event.target.value);
-                if (status === "error" || status === "success") setStatus("idle");
-              }}
-              placeholder="you@example.org"
-              className="w-full rounded border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-text placeholder:text-muted focus:border-accent focus:outline-none"
-            />
-          </div>
+          {fixed ? (
+            <p className="text-xs leading-relaxed text-text">
+              This comparison will be emailed to{" "}
+              <span className="mono-nums font-medium">{recipientHint}</span>.
+            </p>
+          ) : (
+            <div>
+              <label htmlFor="email-report-recipient" className="mb-1 block text-[11px] text-muted">
+                Email address
+              </label>
+              <input
+                ref={inputRef}
+                id="email-report-recipient"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                spellCheck={false}
+                maxLength={254}
+                required
+                value={email}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  if (status === "error" || status === "success") setStatus("idle");
+                }}
+                placeholder="you@example.org"
+                className="w-full rounded border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-text placeholder:text-muted focus:border-accent focus:outline-none"
+              />
+            </div>
+          )}
 
           <input
             type="text"
@@ -348,9 +435,11 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
             </p>
           )}
 
-          <p className="text-[11px] leading-relaxed text-muted">
-            Used only to send you this report — no marketing, no tracking.
-          </p>
+          {!fixed && (
+            <p className="text-[11px] leading-relaxed text-muted">
+              Used only to send you this report — no marketing, no tracking.
+            </p>
+          )}
 
           {config.turnstileSiteKey && (
             <div className="flex flex-col gap-1.5">
@@ -372,10 +461,26 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
               <p className="flex flex-wrap items-center gap-1.5 text-xs text-text">
                 <CheckCircle2 size={14} className="shrink-0 text-accent" aria-hidden />
                 <span>
-                  Report sent to{" "}
-                  <span className="mono-nums font-medium">{maskEmail(sentTo)}</span> — it may take
-                  a minute to arrive.
+                  {fixed ? (
+                    <>
+                      Report sent to{" "}
+                      <span className="mono-nums font-medium">{recipientHint}</span>. It can take
+                      a minute; check spam.
+                    </>
+                  ) : (
+                    <>
+                      Report sent to{" "}
+                      <span className="mono-nums font-medium">{maskEmail(sentTo)}</span> — it may
+                      take a minute to arrive.
+                    </>
+                  )}
                 </span>
+              </p>
+            )}
+            {status === "alreadySent" && (
+              <p className="flex flex-wrap items-center gap-1.5 text-xs text-text">
+                <Clock size={14} className="shrink-0 text-accent" aria-hidden />
+                <span>This report was already sent a few minutes ago.</span>
               </p>
             )}
             {status === "error" && (
@@ -388,17 +493,22 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
                 )}
               </p>
             )}
+            {status === "idle" && cooldownRemaining > 0 && (
+              <p className="text-xs text-muted">
+                You can send another report in {cooldownRemaining}s.
+              </p>
+            )}
           </div>
 
           <div className="flex justify-end gap-2">
-            {status === "success" ? (
+            {terminal ? (
               <>
                 <Button
                   variant="ghost"
                   type="button"
                   onClick={() => {
                     setStatus("idle");
-                    setEmail("");
+                    if (!fixed) setEmail("");
                   }}
                 >
                   Send another
@@ -415,8 +525,14 @@ function EmailDialog({ config, onClose }: { config: EmailConfig; onClose: () => 
                 <Button
                   variant="primary"
                   type="submit"
-                  disabled={status === "sending" || !captchaReady}
-                  title={!captchaReady ? "Complete the captcha verification first." : undefined}
+                  disabled={status === "sending" || !captchaReady || cooldownRemaining > 0}
+                  title={
+                    cooldownRemaining > 0
+                      ? `Wait ${cooldownRemaining}s before sending another report.`
+                      : !captchaReady
+                        ? "Complete the captcha verification first."
+                        : undefined
+                  }
                 >
                   {status === "sending" ? (
                     <>

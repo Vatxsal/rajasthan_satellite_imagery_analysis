@@ -137,7 +137,7 @@ async function clickButton(page, label) {
     await page.waitForTimeout(2000);
 
     // ── Open the dialog ───────────────────────────────────────────────────
-    const mailButton = page.locator('button[aria-label="Email report"]');
+    const mailButton = page.locator('button[aria-label="Send report to mail"]');
     let buttonReady = false;
     for (let attempt = 0; attempt < 45; attempt += 1) {
       if (await mailButton.isVisible().catch(() => false)) {
@@ -157,7 +157,7 @@ async function clickButton(page, label) {
       });
       throw new Error(`mail button missing; config diag=${JSON.stringify(diag)}`);
     }
-    await clickButton(page, "Email report");
+    await clickButton(page, "Send report to mail");
     const dialog = page.locator('[role="dialog"][aria-labelledby="email-report-title"]');
     await dialog.waitFor({ state: "visible", timeout: 10000 });
 
@@ -243,7 +243,7 @@ async function clickButton(page, label) {
     const theme = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
     if (theme !== "dark") throw new Error(`theme toggle failed (data-theme=${theme})`);
 
-    await clickButton(page, "Email report");
+    await clickButton(page, "Send report to mail");
     await dialog.waitFor({ state: "visible", timeout: 10000 });
     // Let the widget re-verify so the dark shot shows a ready state.
     for (let attempt = 0; attempt < 15; attempt += 1) {

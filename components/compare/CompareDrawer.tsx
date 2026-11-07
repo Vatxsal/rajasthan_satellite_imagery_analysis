@@ -177,7 +177,7 @@ function CompareTabs() {
             )}
           >
             <Icon size={13} className="shrink-0" aria-hidden />
-            <span className="truncate @max-sm:hidden">{label}</span>
+            <span className="hidden truncate @sm:block">{label}</span>
           </button>
         );
       })}
