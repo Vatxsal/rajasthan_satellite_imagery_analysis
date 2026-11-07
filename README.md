@@ -300,19 +300,32 @@ The **Email report** button in the comparison panel sends one self-contained ema
    | `resend` | Resend HTTP API (free tier). Verify a sending domain, set `RESEND_API_KEY`. |
 
 3. `EMAIL_FROM="Rajasthan Imagery Explorer <reports@example.org>"` — must match a verified sender (required for `smtp`/`resend`).
-4. Optional anti-abuse: Cloudflare Turnstile — set `TURNSTILE_SITE_KEY` **and** `TURNSTILE_SECRET_KEY` together (a secret without a key hides the button). Optional quotas: `EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY` (3), `EMAIL_RATE_LIMIT_PER_IP_PER_DAY` (10), `EMAIL_DAILY_CAP` (80) — UTC-day windows, in-memory per instance.
+4. Optional anti-abuse: Cloudflare Turnstile — set `TURNSTILE_SITE_KEY` **and** `TURNSTILE_SECRET_KEY` together (a secret without a key hides the button). Optional quotas: `EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY` (3), `EMAIL_RATE_LIMIT_PER_IP_PER_DAY` (10), `EMAIL_DAILY_CAP` (80) — UTC-day windows, in-memory per instance. In fixed-recipient mode the per-address limit is raised to `EMAIL_DAILY_CAP` (every send targets the same mailbox), so the per-IP limit and the deployment cap are the real binders.
 5. Optional dev target: `EMAIL_TEST_RECIPIENT` for `npm run email:test`.
+6. Optional [fixed-recipient mode](#fixed-recipient-mode): `EMAIL_FIXED_RECIPIENT` pins every report to one server-side address and turns the dialog into a confirm-only flow.
 
 **Limits & privacy:**
 
 - HTML is capped at **100 KB** (the change-map JPEG is downscaled to fit the remaining budget); `events.csv` at 1 MB; the subject line at 90 chars with no CR/LF.
-- Guard order: same-origin → per-minute rate limits → honeypot → Turnstile (if configured, fail-closed) → daily quotas → configuration check → analysis. Failures return `{code, message}` with `EMAIL_*` codes; a rate-limit response carries `Retry-After`.
+- Guard order: same-origin → per-minute rate limits → honeypot → recipient mode (fixed env address, or typed address + production policy) → Turnstile (if configured, fail-closed) → duplicate suppression (10-minute window, no quota) → daily quotas (`429` + `Retry-After`; the message states the 05:30 IST reset) → configuration check → analysis. Failures return `{code, message}` with `EMAIL_*` codes.
 - The recipient address is never logged (only a SHA-256 prefix), never appears in the HTML, and is only used to send that one report — no marketing, no tracking.
 - The AI summary is optional (shared cache with the Summary tab); if it fails the send continues without it.
 
-**Template tooling:** `npm run email:preview` renders all fixtures to `.email-preview/`; `npm run email:test` sends one through the configured provider. Automated coverage: `scripts/email-{route,rate,providers,template}.test.ts` (part of `npm test`). Manual QA log: [`docs/email-qa.md`](docs/email-qa.md).
+**Template tooling:** `npm run email:preview` renders all fixtures to `.email-preview/`; `npm run email:test` sends one through the configured provider. Automated coverage: `scripts/email-{route,rate,providers,template,dedupe}.test.ts` (part of `npm test`). Manual QA log: [`docs/email-qa.md`](docs/email-qa.md).
 
 > **Vercel:** add `NEXT_PUBLIC_SITE_URL`, `EMAIL_PROVIDER`, `EMAIL_FROM`, plus `SMTP_*` or `RESEND_API_KEY`; mark `SMTP_PASS` / `RESEND_API_KEY` / `TURNSTILE_SECRET_KEY` as 🔒 Sensitive. Cloudflare's always-pass **test** keys (site `1x00000000000000000000AA`, secret `1x0000000000000000000000000000000AA`) are for local smoke only — create real keys for production. The CSP already allows `challenges.cloudflare.com` in `script-src`, `connect-src` and `frame-src`.
+
+### Fixed recipient mode
+
+Set `EMAIL_FIXED_RECIPIENT=alerts@your-domain` (🔒 Sensitive on Vercel) and every report goes to that ONE server-side address:
+
+- The dialog becomes confirm-only — "This comparison will be emailed to a***@your-domain." — with no email input, and the request body never carries an `email` field (the API rejects one with `400 EMAIL_INVALID`).
+- The recipient comes only from the env var. The UI shows a masked hint (`a***@your-domain`); logs and API payloads only ever carry a SHA-256 prefix of the address — the full value never appears in responses or logs.
+- Duplicate protection: the same report (params + language + content flags + recipient) sent twice within 10 minutes answers `202 {"ok":true,"alreadySent":true}` and consumes no quota.
+- Quota 429s state the local reset time: `Daily limit reached; try again after 05:30 IST.` (UTC midnight).
+- **Production policy:** typed-address mode is refused with `503 EMAIL_DISABLED` unless `EMAIL_ALLOW_ANY_RECIPIENT=true`. Leave that unset — fixed mode is the recommended production shape, so a deployment can never accidentally become an open relay.
+
+**Abuse trade-off:** because clients can never choose a recipient, the remaining abuse surface is limited to burning the alert mailbox's daily quota or sending unsolicited mail to that one inbox. Turnstile (when configured), the per-IP daily limit, `EMAIL_DAILY_CAP`, and the 10-minute duplicate suppression bound it. Quotas are in-memory per serverless instance (cold starts reset them); if a deployment needs limits that survive instance rotation, the documented upgrade path is a durable store (Upstash / Vercel KV).
 
 ---
 
@@ -360,6 +373,8 @@ The **Email report** button in the comparison panel sends one self-contained ema
 | `RESEND_API_KEY` | only when `EMAIL_PROVIDER=resend` | 🔒 Sensitive |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | optional CAPTCHA pair (see [Email Report](#-email-report)) | server / 🔒 Sensitive |
 | `EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY` / `EMAIL_RATE_LIMIT_PER_IP_PER_DAY` / `EMAIL_DAILY_CAP` | optional (defaults `3` / `10` / `80`) | server |
+| `EMAIL_FIXED_RECIPIENT` | optional single address — enables fixed-recipient mode (see [Fixed recipient mode](#fixed-recipient-mode)) | 🔒 Sensitive |
+| `EMAIL_ALLOW_ANY_RECIPIENT` | `false` (default) — `true` re-enables typed-address mode in production | server |
 
    Leave `TILE_CACHE_DIR` and `CDSE_WMTS_INSTANCE_ID` unset. Serverless disks are ephemeral, and the app disables the disk cache automatically when `process.env.VERCEL` is set. `.env.example` is the source of truth.
 3. **Region**: `vercel.json` pins the function region to **`fra1`** (Frankfurt) to keep the server ↔ Copernicus round-trip short.

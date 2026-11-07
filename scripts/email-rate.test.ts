@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { emailDailyGuard } from "../lib/email/rate";
+import { dailyLimitMessage, emailDailyGuard } from "../lib/email/rate";
 
 /** Daily email quotas (per-address → per-IP → deployment cap). The state is
  *  a globalThis Map and getServerEnv() caches, so each case resets both and
@@ -31,6 +31,7 @@ function cleanEnv(): void {
   delete process.env.EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY;
   delete process.env.EMAIL_RATE_LIMIT_PER_IP_PER_DAY;
   delete process.env.EMAIL_DAILY_CAP;
+  delete process.env.EMAIL_FIXED_RECIPIENT;
   resetEnvCache();
 }
 
@@ -106,4 +107,31 @@ test("a blocked attempt does not consume budget", () => {
   assert.equal(emailDailyGuard(input).ok, true);
   assert.equal(emailDailyGuard(input).ok, true);
   assert.equal(emailDailyGuard(input).ok, false, "count reached the limit of 3");
+});
+
+test("fixed-recipient mode raises the per-address limit to the deployment cap", () => {
+  // One mailbox receives every report: without the raise, the per-address
+  // limit of 1 would block the second send before the cap ever mattered.
+  process.env.EMAIL_FIXED_RECIPIENT = "chief@example.org";
+  setLimits(1, 10, 3);
+  const input = { ip: "203.0.113.11", addressHash: "m".repeat(32) };
+  assert.equal(emailDailyGuard(input).ok, true);
+  assert.equal(emailDailyGuard(input).ok, true, "per-address limit lifted to the cap");
+  assert.equal(emailDailyGuard(input).ok, true, "third send still inside the cap");
+  const blocked = emailDailyGuard(input);
+  assert.equal(blocked.ok, false, "deployment cap is now the binder");
+  assert.ok(blocked.retryAfterSeconds >= 1, "retryAfter until UTC midnight");
+});
+
+test("dailyLimitMessage states the 05:30 IST reset", () => {
+  setLimits(1, 10, 10);
+  const input = { ip: "203.0.113.12", addressHash: "n".repeat(32) };
+  assert.equal(emailDailyGuard(input).ok, true, "first send consumes the budget");
+  const blocked = emailDailyGuard(input);
+  assert.equal(blocked.ok, false);
+  assert.equal(
+    dailyLimitMessage(blocked.retryAfterSeconds),
+    "Daily limit reached; try again after 05:30 IST.",
+    "UTC midnight is a fixed 05:30 in IST (no DST)",
+  );
 });

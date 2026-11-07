@@ -58,6 +58,8 @@ function envFixture(overrides: Partial<ServerEnv> = {}): ServerEnv {
     EMAIL_RATE_LIMIT_PER_IP_PER_DAY: 10,
     EMAIL_DAILY_CAP: 80,
     EMAIL_ATTACH_CSV: true,
+    EMAIL_FIXED_RECIPIENT: undefined,
+    EMAIL_ALLOW_ANY_RECIPIENT: false,
     EMAIL_TEST_RECIPIENT: undefined,
     TURNSTILE_SITE_KEY: undefined,
     TURNSTILE_SECRET_KEY: undefined,
@@ -347,6 +349,50 @@ test("getServerEnv enforces provider-specific email settings", () => {
         return true;
       },
     );
+  } finally {
+    process.env = previous;
+    resetEnvCache();
+  }
+});
+
+test("getServerEnv validates EMAIL_FIXED_RECIPIENT as a single mailbox", () => {
+  const previous = { ...process.env };
+  const resetEnvCache = () => {
+    const holder = (globalThis as { [key: string]: unknown })["rse.serverEnv"] as
+      | { cached: unknown }
+      | undefined;
+    if (holder) holder.cached = null;
+  };
+  try {
+    // Unset or blank → typed-address (open) mode.
+    delete process.env.EMAIL_FIXED_RECIPIENT;
+    resetEnvCache();
+    assert.equal(getServerEnv().EMAIL_FIXED_RECIPIENT, undefined);
+
+    process.env.EMAIL_FIXED_RECIPIENT = "   ";
+    resetEnvCache();
+    assert.equal(getServerEnv().EMAIL_FIXED_RECIPIENT, undefined);
+
+    // A valid address is trimmed and kept as-is (masking happens at read).
+    process.env.EMAIL_FIXED_RECIPIENT = " Chief@Example.org ";
+    resetEnvCache();
+    assert.equal(getServerEnv().EMAIL_FIXED_RECIPIENT, "Chief@Example.org");
+
+    // Anything that is not exactly one mailbox fails closed.
+    for (const bad of ["not-an-email", "a@b.c, d@e.f", "two@@ats.example.org"]) {
+      process.env.EMAIL_FIXED_RECIPIENT = bad;
+      resetEnvCache();
+      assert.throws(
+        () => getServerEnv(),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(error.message, /EMAIL_FIXED_RECIPIENT/);
+          assert.match(error.message, /must be a single valid email address/);
+          return true;
+        },
+        bad,
+      );
+    }
   } finally {
     process.env = previous;
     resetEnvCache();

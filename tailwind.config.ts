@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import containerQueries from "@tailwindcss/container-queries";
 
 const config: Config = {
   darkMode: ["class", '[data-theme="dark"]'],
@@ -49,6 +50,9 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  // Enables @container / @sm:… container-query variants (the drawer tab
+  // labels and the Send-report label hide below the @sm = 384px container
+  // width via "hidden @sm:block").
+  plugins: [containerQueries],
 };
 export default config;

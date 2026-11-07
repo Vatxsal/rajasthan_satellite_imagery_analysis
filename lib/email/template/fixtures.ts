@@ -144,6 +144,8 @@ const SUMMARY_HI: SummaryData = {
 function baseInput(overrides: Partial<ReportSourceInput>): ReportSourceInput {
   return {
     language: "en",
+    mode: "open",
+    requestedAt: "2026-11-06T10:00:00.000Z",
     areaName: "Bassi",
     areaLevel: "tehsil",
     dateA: "2026-10-10",
@@ -237,6 +239,20 @@ export function buildFixtures(): ReportFixture[] {
       name: "no-image",
       input: baseInput({
         image: null,
+      }),
+    },
+    {
+      name: "fixed-mode",
+      input: baseInput({
+        mode: "fixed",
+      }),
+    },
+    {
+      name: "fixed-mode-hindi",
+      input: baseInput({
+        mode: "fixed",
+        language: "hi",
+        summary: SUMMARY_HI,
       }),
     },
   ];

@@ -123,6 +123,49 @@ test("the no-summary fixture shows the fallback line, not a blank section", asyn
   assert.ok(rendered.text.includes("The AI summary could not be generated for this report."));
 });
 
+test("fixed mode carries the alert-recipient footer and the IST request line", async () => {
+  const rendered = await renderReportEmail(buildReportEmailData(fixtureInput("fixed-mode")));
+  // The plain-text part is hard-wrapped — flatten before matching phrases.
+  const parts = [rendered.html, rendered.text].map((part) => part.replace(/\s+/g, " "));
+  for (const part of parts) {
+    assert.ok(
+      part.includes("You received this because a report was requested on"),
+      "fixed consent footer",
+    );
+    assert.ok(part.includes("This mailbox is configured as the alert recipient"), "fixed wording");
+    assert.match(part, /Requested: \d{1,2} \w{3} \d{4}, \d{2}:\d{2} IST/, "IST timestamp");
+    assert.ok(
+      !part.includes("you requested a report for this address"),
+      "open-mode consent must not appear",
+    );
+  }
+});
+
+test("open mode keeps the typed-address consent footer", async () => {
+  const rendered = await renderReportEmail(buildReportEmailData(fixtureInput("all-events")));
+  const parts = [rendered.html, rendered.text].map((part) => part.replace(/\s+/g, " "));
+  for (const part of parts) {
+    assert.ok(part.includes("you requested a report for this address"), "open consent footer");
+    assert.ok(
+      !part.includes("configured as the alert recipient"),
+      "fixed wording must not appear",
+    );
+    assert.ok(!part.includes("Requested:"), "no request line in open mode");
+  }
+});
+
+test("the Hindi fixed fixture renders the Devanagari footer and request line", async () => {
+  const rendered = await renderReportEmail(
+    buildReportEmailData(fixtureInput("fixed-mode-hindi")),
+  );
+  const parts = [rendered.html, rendered.text].map((part) => part.replace(/\s+/g, " "));
+  for (const part of parts) {
+    assert.ok(part.includes("अनुरोध:"), "Hindi request line");
+    assert.ok(part.includes("अलर्ट प्राप्तकर्ता"), "Hindi fixed footer");
+    assert.ok(!part.includes("अनुरोधित रिपोर्ट के कारण"), "Hindi open consent must not appear");
+  }
+});
+
 test("events.csv is RFC-4180 escaped, CRLF, capped at 1 MB", () => {
   const hostile: GeoJSON.Feature = {
     type: "Feature",

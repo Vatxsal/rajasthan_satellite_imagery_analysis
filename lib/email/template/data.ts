@@ -51,6 +51,11 @@ export interface ReportImage {
 /** Everything the template renders — composed by the route from the analysis. */
 export interface ReportEmailData {
   language: SummaryLanguage;
+  /** Recipient mode: fixed footers name the alert mailbox; open keeps the
+   *  "you requested a report for this address" wording. */
+  mode: "fixed" | "open";
+  /** IST request timestamp ("6 Nov 2026, 14:30 IST") — fixed mode only. */
+  requestedAtIst: string | null;
   areaName: string;
   areaLevel: "district" | "tehsil" | "ilr";
   dateA: string;
@@ -128,6 +133,25 @@ export function formatEmailDate(iso: string): string {
   if (!match) return iso;
   const month = MONTHS[Number(match[2]) - 1] ?? match[2];
   return `${Number(match[3])} ${month} ${match[1]}`;
+}
+
+/** ISO instant → "6 Nov 2026, 14:30 IST" (the fixed-mode Requested line). */
+export function formatIstDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const day = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+  return `${day}, ${time} IST`;
 }
 
 export function escapeHtml(value: string): string {
@@ -242,6 +266,9 @@ export function topTehsils(
 
 export interface ReportSourceInput {
   language: SummaryLanguage;
+  mode: "fixed" | "open";
+  /** ISO instant of the send request — formatted to IST for fixed mode. */
+  requestedAt: string;
   areaName: string;
   areaLevel: "district" | "tehsil" | "ilr";
   dateA: string;
@@ -269,6 +296,8 @@ export function buildReportEmailData(input: ReportSourceInput): ReportEmailData 
     stats.validHa > 0 ? (stats.changedHa / stats.validHa) * 100 : 0;
   return {
     language: input.language,
+    mode: input.mode,
+    requestedAtIst: input.mode === "fixed" ? formatIstDateTime(input.requestedAt) : null,
     areaName: input.areaName,
     areaLevel: input.areaLevel,
     dateA: input.dateA,
