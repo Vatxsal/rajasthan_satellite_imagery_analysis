@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidEmail } from "./email/addressCore";
 import { dataSource } from "./dataSource";
 import { sharedInstance } from "./singleton";
 
@@ -80,6 +81,27 @@ const baseSchema = z.object({
   EMAIL_DAILY_CAP: z.coerce.number().int().min(0).default(80),
   /** Attach the full events.csv when true. */
   EMAIL_ATTACH_CSV: boolEnv().default(true),
+  /**
+   * Fixed-recipient mode: when set, every report goes to this ONE server-side
+   * address and the API rejects any request that carries an `email` field.
+   * Blank/unset = typed-address ("open") mode.
+   */
+  EMAIL_FIXED_RECIPIENT: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z
+      .string()
+      .trim()
+      .refine((value) => isValidEmail(value), {
+        message: "must be a single valid email address",
+      })
+      .optional(),
+  ),
+  /**
+   * Open (typed-address) mode escape hatch. In production the typed mode is
+   * refused with EMAIL_DISABLED unless this is exactly "true" — so a
+   * production deployment can never accidentally become an open relay.
+   */
+  EMAIL_ALLOW_ANY_RECIPIENT: boolEnv().default(false),
   /** Dev-only target for `npm run email:test` — never read by the API route. */
   EMAIL_TEST_RECIPIENT: optionalString,
   /** Optional Cloudflare Turnstile anti-abuse (blank = disabled). */
@@ -132,6 +154,8 @@ export interface ServerEnv {
   EMAIL_RATE_LIMIT_PER_IP_PER_DAY: number;
   EMAIL_DAILY_CAP: number;
   EMAIL_ATTACH_CSV: boolean;
+  EMAIL_FIXED_RECIPIENT?: string;
+  EMAIL_ALLOW_ANY_RECIPIENT: boolean;
   EMAIL_TEST_RECIPIENT?: string;
   TURNSTILE_SITE_KEY?: string;
   TURNSTILE_SECRET_KEY?: string;

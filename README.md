@@ -360,6 +360,8 @@ The **Email report** button in the comparison panel sends one self-contained ema
 | `RESEND_API_KEY` | only when `EMAIL_PROVIDER=resend` | 🔒 Sensitive |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | optional CAPTCHA pair (see [Email Report](#-email-report)) | server / 🔒 Sensitive |
 | `EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY` / `EMAIL_RATE_LIMIT_PER_IP_PER_DAY` / `EMAIL_DAILY_CAP` | optional (defaults `3` / `10` / `80`) | server |
+| `EMAIL_FIXED_RECIPIENT` | optional single address — enables fixed-recipient mode (see [Fixed recipient mode](#fixed-recipient-mode)) | 🔒 Sensitive |
+| `EMAIL_ALLOW_ANY_RECIPIENT` | `false` (default) — `true` re-enables typed-address mode in production | server |
 
    Leave `TILE_CACHE_DIR` and `CDSE_WMTS_INSTANCE_ID` unset. Serverless disks are ephemeral, and the app disables the disk cache automatically when `process.env.VERCEL` is set. `.env.example` is the source of truth.
 3. **Region**: `vercel.json` pins the function region to **`fra1`** (Frankfurt) to keep the server ↔ Copernicus round-trip short.

@@ -58,6 +58,8 @@ function envFixture(overrides: Partial<ServerEnv> = {}): ServerEnv {
     EMAIL_RATE_LIMIT_PER_IP_PER_DAY: 10,
     EMAIL_DAILY_CAP: 80,
     EMAIL_ATTACH_CSV: true,
+    EMAIL_FIXED_RECIPIENT: undefined,
+    EMAIL_ALLOW_ANY_RECIPIENT: false,
     EMAIL_TEST_RECIPIENT: undefined,
     TURNSTILE_SITE_KEY: undefined,
     TURNSTILE_SECRET_KEY: undefined,

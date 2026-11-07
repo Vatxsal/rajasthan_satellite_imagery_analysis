@@ -31,6 +31,7 @@ const validParams = {
 interface EnvHolder {
   "rse.serverEnv"?: { cached: unknown };
   "rse.emailDaily"?: Map<string, unknown>;
+  "rse.emailSentLog"?: Map<string, number>;
   "rse.rateBuckets"?: Record<string, Map<string, unknown>>;
 }
 
@@ -49,11 +50,14 @@ function resetState(): void {
   delete process.env.EMAIL_DAILY_CAP;
   delete process.env.EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY;
   delete process.env.EMAIL_RATE_LIMIT_PER_IP_PER_DAY;
+  delete process.env.EMAIL_FIXED_RECIPIENT;
+  delete process.env.EMAIL_ALLOW_ANY_RECIPIENT;
   setNodeEnv(ORIGINAL_NODE_ENV);
 
   const holder = globalThis as unknown as EnvHolder;
   if (holder["rse.serverEnv"]) holder["rse.serverEnv"].cached = null;
   holder["rse.emailDaily"]?.clear();
+  holder["rse.emailSentLog"]?.clear();
   const buckets = holder["rse.rateBuckets"];
   if (buckets) for (const map of Object.values(buckets)) map.clear();
 }
@@ -254,13 +258,23 @@ test("config endpoint reports capabilities without leaking secrets", async () =>
   assert.equal(response.headers.get("cache-control"), "public, max-age=300");
   const body = (await response.json()) as Record<string, unknown>;
   assert.deepEqual(Object.keys(body).sort(), [
+    "captchaRequired",
+    "dailyCapReached",
     "enabled",
+    "mode",
     "provider",
     "reason",
+    "recipientHint",
+    "summaryAvailable",
     "turnstileSiteKey",
   ]);
   assert.equal(body.enabled, true);
   assert.equal(body.provider, "console");
+  assert.equal(body.mode, "open");
+  assert.equal(body.recipientHint, null);
+  assert.equal(body.captchaRequired, false);
+  assert.equal(body.dailyCapReached, false);
+  assert.equal(body.summaryAvailable, false);
   assert.equal(body.turnstileSiteKey, null);
   assert.equal(body.reason, null);
   const raw = JSON.stringify(body);

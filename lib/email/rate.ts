@@ -58,12 +58,19 @@ function peek(map: EmailDailyState, key: string, day: string): number {
  * Order: deployment cap → per-IP → per-address — so a spammer cannot burn
  * the global budget through many addresses from one host, and one address
  * cannot exhaust a host's budget either.
+ *
+ * Fixed-recipient mode (EMAIL_FIXED_RECIPIENT): every send targets the same
+ * mailbox, so the per-address limit is raised to the deployment cap — the
+ * per-IP limit and the global cap stay the real binders.
  */
 export function emailDailyGuard(input: { ip: string; addressHash: string }): EmailDailyGuardResult {
   const env = getServerEnv();
   const now = Date.now();
   const day = utcDay(now);
   const retryAfterSeconds = secondsUntilUtcMidnight(now);
+  const perAddressLimit = env.EMAIL_FIXED_RECIPIENT
+    ? env.EMAIL_DAILY_CAP
+    : env.EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY;
 
   if (peek(state, "global", day) >= env.EMAIL_DAILY_CAP) {
     return { ok: false, retryAfterSeconds };
@@ -71,7 +78,7 @@ export function emailDailyGuard(input: { ip: string; addressHash: string }): Ema
   if (peek(state, `ip:${input.ip}`, day) >= env.EMAIL_RATE_LIMIT_PER_IP_PER_DAY) {
     return { ok: false, retryAfterSeconds };
   }
-  if (peek(state, `addr:${input.addressHash}`, day) >= env.EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY) {
+  if (peek(state, `addr:${input.addressHash}`, day) >= perAddressLimit) {
     return { ok: false, retryAfterSeconds };
   }
 
@@ -79,4 +86,26 @@ export function emailDailyGuard(input: { ip: string; addressHash: string }): Ema
   bump(state, `ip:${input.ip}`, now);
   bump(state, `addr:${input.addressHash}`, now);
   return { ok: true, retryAfterSeconds: 0 };
+}
+
+/** True when today's deployment-wide EMAIL_DAILY_CAP is already exhausted. */
+export function emailDailyCapReached(): boolean {
+  const env = getServerEnv();
+  return peek(state, "global", utcDay(Date.now())) >= env.EMAIL_DAILY_CAP;
+}
+
+/**
+ * User-facing 429 message: the next quota reset is UTC midnight, which is
+ * 05:30 IST — computed from the rollover instant so the clock time always
+ * matches the window even if the window logic ever changes.
+ */
+export function dailyLimitMessage(retryAfterSeconds: number): string {
+  const resetAt = new Date(Date.now() + retryAfterSeconds * 1000);
+  const istTime = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(resetAt);
+  return `Daily limit reached; try again after ${istTime} IST.`;
 }

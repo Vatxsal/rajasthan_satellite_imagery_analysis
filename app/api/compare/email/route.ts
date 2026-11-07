@@ -23,7 +23,8 @@ import {
   EmailSendError,
   type EmailInlineImage,
 } from "@/lib/email";
-import { emailDailyGuard } from "@/lib/email/rate";
+import { emailMarkSent, emailSendKey, emailWasRecentlySent } from "@/lib/email/dedupe";
+import { dailyLimitMessage, emailDailyGuard } from "@/lib/email/rate";
 import {
   buildEventsCsv,
   buildReportEmailData,
@@ -71,13 +72,21 @@ const IMAGE_LABELS = [
 /**
  * POST /api/compare/email
  *
- * Body: { email, params, language?, includeSummary?, includeImage?,
+ * Two recipient modes:
+ *   fixed (EMAIL_FIXED_RECIPIENT set) — the body must NOT carry an `email`
+ *     field (400 EMAIL_INVALID if it does); the recipient comes only from
+ *     the server-side env var, so a client can never choose a recipient.
+ *   open — the body carries `email`, but production refuses typed-address
+ *     sending (503 EMAIL_DISABLED) unless EMAIL_ALLOW_ANY_RECIPIENT=true.
+ *
+ * Body: { email?, params, language?, includeSummary?, includeImage?,
  *         turnstileToken?, website? }. `params` carries only the analysis
  * inputs — every number in the report is recomputed server-side through the
  * same cache/stateless path as /api/compare/analyze (never trusted from the
  * client). Guards: same-origin, per-minute api+compare buckets, honeypot,
- * optional Turnstile, then daily per-IP/per-address/deployment quotas.
- * Responds 202 { ok: true }; failures carry EMAIL_* codes.
+ * optional Turnstile, duplicate-send suppression (10 min window, no quota),
+ * then daily per-IP/per-address/deployment quotas.
+ * Responds 202 { ok: true[, alreadySent: true] }; failures carry EMAIL_* codes.
  */
 export async function POST(request: Request): Promise<Response> {
   const originGuard = sameOriginGuard(request);
@@ -90,6 +99,7 @@ export async function POST(request: Request): Promise<Response> {
   const started = Date.now();
   try {
     const env = getServerEnv();
+    const fixedRecipient = env.EMAIL_FIXED_RECIPIENT?.trim() || null;
 
     const body = await readJsonBody(
       request,
@@ -104,9 +114,31 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ ok: true }, { status: 202 });
     }
 
-    const recipient = normalizeEmail(body.email);
-    if (!isValidEmail(recipient)) {
-      throw new EmailSendError("EMAIL_INVALID", "Enter a valid email address.", 400);
+    // Recipient: fixed mode takes it ONLY from the env var (a client-supplied
+    // email field is rejected outright); open mode validates the typed address
+    // and production refuses typed mode unless explicitly allowed.
+    let recipient: string;
+    if (fixedRecipient) {
+      if (body.email !== undefined) {
+        throw new EmailSendError(
+          "EMAIL_INVALID",
+          "This deployment sends reports to a configured address — do not include an email in the request.",
+          400,
+        );
+      }
+      recipient = normalizeEmail(fixedRecipient);
+    } else {
+      if (process.env.NODE_ENV === "production" && !env.EMAIL_ALLOW_ANY_RECIPIENT) {
+        throw new EmailSendError(
+          "EMAIL_DISABLED",
+          "Typed-address sending is disabled on this deployment. Set EMAIL_FIXED_RECIPIENT or EMAIL_ALLOW_ANY_RECIPIENT=true.",
+          503,
+        );
+      }
+      recipient = normalizeEmail(body.email ?? "");
+      if (!isValidEmail(recipient)) {
+        throw new EmailSendError("EMAIL_INVALID", "Enter a valid email address.", 400);
+      }
     }
 
     if (turnstileEnabled()) {
@@ -120,6 +152,24 @@ export async function POST(request: Request): Promise<Response> {
       }
     }
 
+    // Duplicate suppression BEFORE any quota: the same report that already
+    // went out in the last 10 minutes answers success with alreadySent=true
+    // and consumes nothing.
+    const sendKey = emailSendKey({
+      params: body.params,
+      language: body.language,
+      includeSummary: body.includeSummary,
+      includeImage: body.includeImage,
+      engine: env.CHANGE_ENGINE,
+      recipientHash: emailHash(recipient),
+    });
+    if (emailWasRecentlySent(sendKey)) {
+      console.log(
+        `[compare:email] status=already-sent key=${sendKey.slice(0, 12)} durationMs=${Date.now() - started}`,
+      );
+      return NextResponse.json({ ok: true, alreadySent: true }, { status: 202 });
+    }
+
     const daily = emailDailyGuard({
       ip: getClientIp(request),
       addressHash: emailHash(recipient),
@@ -127,7 +177,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!daily.ok) {
       throw new EmailSendError(
         "EMAIL_RATE_LIMITED",
-        "The daily report limit has been reached. Try again tomorrow.",
+        dailyLimitMessage(daily.retryAfterSeconds),
         429,
         daily.retryAfterSeconds,
       );
@@ -311,6 +361,7 @@ export async function POST(request: Request): Promise<Response> {
           `image=${image ? "yes" : "no"} csv=${attachments ? "yes" : "no"} ` +
           `durationMs=${Date.now() - started}`,
       );
+      emailMarkSent(sendKey);
       return NextResponse.json({ ok: true }, { status: 202 });
     } catch (error) {
       if (error instanceof EmailSendError) throw error;
@@ -338,7 +389,8 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 const emailBodySchema = z.object({
-  email: z.string().trim().max(254),
+  /** Open mode only — fixed mode rejects any body that carries this field. */
+  email: z.string().trim().max(254).optional(),
   params: compareParamsSchema,
   language: z.enum(["en", "hi"]).default("en"),
   includeSummary: z.boolean().default(true),
