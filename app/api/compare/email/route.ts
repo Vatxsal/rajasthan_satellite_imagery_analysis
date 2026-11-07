@@ -265,6 +265,8 @@ export async function POST(request: Request): Promise<Response> {
     const metadata = entry.stats.metadata;
     const dataWithoutImage = buildReportEmailData({
       language: body.language,
+      mode: fixedRecipient ? "fixed" : "open",
+      requestedAt: new Date().toISOString(),
       areaName: metadata.areaName,
       areaLevel: metadata.areaLevel,
       dateA: metadata.dateA,

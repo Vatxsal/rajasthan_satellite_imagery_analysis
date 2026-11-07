@@ -63,6 +63,10 @@ export interface ReportCopy {
   howToRead: string;
   attribution: string;
   consentFooter: string;
+  /** Fixed-recipient mode: names the site and the mailbox's alert role. */
+  consentFooterFixed: (site: string) => string;
+  /** Fixed-recipient mode: request time (IST) — no IP or visitor details. */
+  requestedLine: (dateTime: string) => string;
   generatedOn: (date: string) => string;
 }
 
@@ -127,6 +131,9 @@ const EN: ReportCopy = {
   attribution: "Imagery © Copernicus Sentinel data · Place labels © OpenStreetMap contributors",
   consentFooter:
     "You received this because you requested a report for this address. The email contains no tracking.",
+  consentFooterFixed: (site) =>
+    `You received this because a report was requested on ${site}. This mailbox is configured as the alert recipient for the Rajasthan Imagery Explorer.`,
+  requestedLine: (dateTime) => `Requested: ${dateTime}`,
   generatedOn: (date) => `Generated ${date}`,
 };
 
@@ -190,6 +197,9 @@ const HI: ReportCopy = {
   attribution: "इमेजरी © कोपरनिकस सेंटिनल डेटा · स्थान नाम © OpenStreetMap योगदानकर्ता",
   consentFooter:
     "आपको यह ईमेल इस पते पर अनुरोधित रिपोर्ट के कारण मिला है। इसमें कोई ट्रैकिंग नहीं है।",
+  consentFooterFixed: (site) =>
+    `आपको यह ईमेल इसलिए मिला है क्योंकि ${site} पर एक रिपोर्ट का अनुरोध किया गया था। यह मेलबॉक्स राजस्थान इमेजरी एक्सप्लोरर के लिए अलर्ट प्राप्तकर्ता के रूप में कॉन्फ़िगर है।`,
+  requestedLine: (dateTime) => `अनुरोध: ${dateTime}`,
   generatedOn: (date) => `${date} को उत्पन्न`,
 };
 
