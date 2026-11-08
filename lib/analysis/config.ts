@@ -178,10 +178,18 @@ export const SUB = {
   vegGainRecovery: 12,
   waterGainNew: 40,
   waterGainPonding: 41,
+  /** Phase 3 fused: monsoon-window water gain — likely seasonal ponding. */
+  waterGainSeasonal: 42,
   waterLossReceded: 50,
   waterLossDrawdown: 51,
   bareBuiltConstruction: 30,
   bareBuiltBare: 31,
+  /** Phase 3 fused: strong evidence (3/3 votes + persistent + brightening). */
+  bareBuiltPossible: 32,
+  /** Phase 3 fused: bare-soil increase without construction markers. */
+  bareBuiltSurface: 33,
+  /** Phase 3 fused: bare-soil change on known cropland (harvest/tillage). */
+  bareBuiltAgriculture: 34,
 } as const;
 
 export type SubCode = (typeof SUB)[keyof typeof SUB];
@@ -194,10 +202,14 @@ const SUB_LABELS: Record<number, string> = {
   [SUB.vegGainRecovery]: "Vegetation recovery",
   [SUB.waterGainNew]: "New open water",
   [SUB.waterGainPonding]: "Temporary ponding",
+  [SUB.waterGainSeasonal]: "Seasonal water likely (monsoon)",
   [SUB.waterLossReceded]: "Water body receded",
   [SUB.waterLossDrawdown]: "Water drawdown",
   [SUB.bareBuiltConstruction]: "Built-up / construction signal",
   [SUB.bareBuiltBare]: "Bare soil increase",
+  [SUB.bareBuiltPossible]: "Possible built-up",
+  [SUB.bareBuiltSurface]: "Bare surface increase",
+  [SUB.bareBuiltAgriculture]: "Bare soil on cropland (likely harvest / tillage)",
 };
 
 export function subLabel(subCode: number): string | null {
@@ -258,6 +270,38 @@ export const VOTE = {
   /** Recent-orbit Δ must reach this fraction of the threshold to be persistent. */
   persistFactor: 0.5,
 } as const;
+
+// ── Phase 3 — fused rules (CHANGE_RULES=fused) ─────────────────────────────
+
+/**
+ * Fused classifier tuning (documented heuristics, tunable in one place):
+ * confidence 0-100 = clamp(40 + 10·score, 0, 100) where score is the v2
+ * point system plus the evidence points below. Tier cut-points (75 / 55)
+ * reproduce the v2 score cut-points (≥4 high, ≥2 medium) exactly when no
+ * evidence is present, so legacy and fused tiers stay comparable.
+ */
+export const FUSED = {
+  /** SAR VH rise (dB) corroborating a roughening/construction surface. */
+  sarBuiltDvhDb: 1.0,
+  /** Confidence points: SAR water-mask transition agrees with the optical vote. */
+  sarWaterAgree: 1,
+  /** Confidence points penalty: SAR dry while optical says water (or vice versa). */
+  sarWaterDisagree: -1,
+  /** Confidence points penalty: prior cropland (harvest/tillage, not construction). */
+  priorCropPenalty: -2,
+  /** Confidence points penalty: SAR sees standing water at date B over bare/built. */
+  sarFloodedPenalty: -2,
+  /** Tier cut-points derived from the confidence mapping (see above). */
+  confHigh: 75,
+  confMedium: 55,
+  /** Patch-shape evidence (bare/built only): isoperimetric quotient Q=4πA/P². */
+  shapeCompactHigh: 0.55,
+  shapeCompactLow: 0.25,
+  shapeDelta: 10,
+} as const;
+
+/** Change-rule mode: legacy = the v1/v2 classifiers as shipped; fused = Phase 3. */
+export type CompareRules = "legacy" | "fused";
 
 // ── Phase 3 — denoise & vector output ──────────────────────────────────────
 

@@ -71,6 +71,8 @@ export interface Hotspot {
   polygon: GeoJSON.MultiPolygon | null;
   /** v2 only: majority confidence tier of the patch pixels. */
   confidence?: ConfidenceTier;
+  /** Phase 3 fused only: patch-mean confidence 0-100 (tier is derived from it). */
+  confidencePct?: number;
   /** v2 only: majority sub-label text (e.g. "Likely harvest / crop cycle"). */
   subLabel?: string | null;
   /** v2 only: patch tags — "transient" | "crop-cycle" | "short-gap". */
@@ -97,6 +99,22 @@ export interface EngineStats {
 export type CompareEngine = "v1" | "v2";
 /** Input mode actually used: v1 always "single"; v2 defaults to "composite". */
 export type CompareInputMode = "single" | "composite";
+/** Change-rule mode that produced the result (CHANGE_RULES; legacy = shipped rules). */
+export type CompareRulesMode = "legacy" | "fused";
+
+/** Which optional evidence the fused rules actually had (method card, Phase 5). */
+export interface EvidenceMeta {
+  /** S1 outcome: orbit used, or the skip reason (never mixed orbits). */
+  s1: { orbit: string } | { skipped: string } | null;
+  /** ±days window of the S1 temporal median when SAR was used. */
+  s1WindowDays: number | null;
+  /** ESA WorldCover 2021 prior was read for this run. */
+  worldCover: boolean;
+  /** Copernicus DEM terrain (slope/hillshade/shadow) was computed. */
+  terrain: boolean;
+  /** DEM instance actually rendered (COPERNICUS_30 or _90); null when off. */
+  demInstance: string | null;
+}
 
 export interface CompareMetadata {
   areaName: string;
@@ -119,6 +137,10 @@ export interface CompareMetadata {
   minPatchHa: number;
   /** Engine that produced this result (CHANGE_ENGINE). */
   engine: CompareEngine;
+  /** Rule mode that produced this result (CHANGE_RULES; omitted pre-Phase 3). */
+  rules?: CompareRulesMode;
+  /** Fused evidence actually available (CHANGE_RULES=fused only). */
+  evidence?: EvidenceMeta;
   /** Input mode used for both sides ("single" = v1-style one-day fetch). */
   inputMode: CompareInputMode;
   /** ±days composite window per side; 0 when inputMode is "single". */

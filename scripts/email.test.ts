@@ -42,6 +42,7 @@ function envFixture(overrides: Partial<ServerEnv> = {}): ServerEnv {
     COMPARE_MAX_PX: 1500,
     PER_ANALYSIS_PU_LIMIT: 700,
     CHANGE_ENGINE: "v1",
+    CHANGE_RULES: "fused",
     S1_ENABLED: true,
     S1_WINDOW_DAYS: 6,
     WORLDCOVER_ENABLED: true,

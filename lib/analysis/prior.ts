@@ -33,7 +33,7 @@
  *   simply OFF for that run (method card shows "WorldCover: off"), never an
  *   error. Attribution must accompany any map that shows prior-derived tags.
  */
-import { sharedInstance } from "@/lib/singleton";
+import { sharedInstance } from "../singleton";
 import type { BBox } from "@/lib/data";
 
 /** Official S3 prefix (AWS Open Data Registry: esa-worldcover, eu-central-1). */

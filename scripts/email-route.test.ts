@@ -54,6 +54,7 @@ function resetState(): void {
   delete process.env.EMAIL_RATE_LIMIT_PER_IP_PER_DAY;
   delete process.env.EMAIL_FIXED_RECIPIENT;
   delete process.env.EMAIL_ALLOW_ANY_RECIPIENT;
+  delete process.env.CHANGE_RULES; // schema default "fused" → route resolves engine v2
   setNodeEnv(ORIGINAL_NODE_ENV);
 
   const holder = globalThis as unknown as EnvHolder;
@@ -343,7 +344,8 @@ test("config endpoint masks the fixed recipient and never leaks the address", as
 test("an identical recent send answers alreadySent and consumes no quota", async () => {
   process.env.EMAIL_FIXED_RECIPIENT = "chief@example.org";
   // Seed exactly the key the route computes for this request (defaults:
-  // language=en, includeSummary/includeImage=true, engine v1 → single-date).
+  // language=en, includeSummary/includeImage=true, CHANGE_RULES=fused →
+  // engine v2 → composite inputs, window 7 from compareParamsSchema).
   // Matching proves the route resolved the recipient from the env var.
   const seedKey = emailSendKey({
     params: {
@@ -351,12 +353,12 @@ test("an identical recent send answers alreadySent and consumes no quota", async
       sensitivity: "medium",
       minPatchHa: 0.2,
       inputMode: "composite",
-      compositeWindowDays: 0,
+      compositeWindowDays: 7,
     },
     language: "en",
     includeSummary: true,
     includeImage: true,
-    engine: "v1",
+    engine: "v2",
     recipientHash: emailHash("chief@example.org"),
   });
   emailMarkSent(seedKey);

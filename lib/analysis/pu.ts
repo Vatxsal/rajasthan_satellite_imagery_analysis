@@ -18,6 +18,10 @@
 /** Input bands counted by the formula (dataMask is not counted). */
 export const V1_INPUT_BANDS = 5; // B03 B04 B08 B11 SCL (evalscript.ts:18)
 export const V2_INPUT_BANDS = 9; // B02 B03 B04 B05 B08 B11 B12 SCL CLD (evalscript.ts:65)
+/** Phase 3: S1 GRD dual-pol render = VV + VH (dataMask not counted). */
+export const S1_INPUT_BANDS = 2;
+/** Phase 3: DEM render = the DEM band (dataMask not counted). */
+export const DEM_INPUT_BANDS = 1;
 
 const TILE_PX = 512;
 const MIN_SIZE_FACTOR = 0.01;
@@ -47,6 +51,14 @@ export function estimateRenderPu(r: RenderPuInput): number {
 /** An analysis is two Process renders (side A + side B). */
 export function estimateAnalysisPu(r: RenderPuInput): number {
   return estimateRenderPu(r) * 2;
+}
+
+/**
+ * ORBIT samples per pixel for a ±windowDays S1 temporal median: Sentinel-1
+ * IW revisit ≈ 6 days, so ≈ 2·window/6 observations per side (window 6 → 2).
+ */
+export function s1Samples(windowDays: number): number {
+  return Math.max(1, Math.round((windowDays * 2) / 6));
 }
 
 /**
