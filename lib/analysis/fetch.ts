@@ -21,15 +21,25 @@ export interface CompareRasterSize {
   height: number;
 }
 
+/** One entry of Process API `input.data` (dataset-specific filters). */
+export interface ProcessDataInput {
+  type: string;
+  id?: string;
+  dataFilter?: Record<string, unknown>;
+  processing?: Record<string, unknown>;
+}
+
 interface ProcessOptions {
   geometry: ClipGeometry;
   evalscript: string;
-  timeRange: { from: string; to: string };
   size: CompareRasterSize;
+  /** Dataset entries — sentinel-2-l2a by default, sentinel-1-grd for SAR.
+   *  Each entry carries its own dataFilter.timeRange. */
+  data: ProcessDataInput[];
 }
 
-async function fetchAnalysisRaster(options: ProcessOptions): Promise<Buffer> {
-  const { geometry, evalscript, timeRange, size } = options;
+export async function fetchAnalysisRaster(options: ProcessOptions): Promise<Buffer> {
+  const { geometry, evalscript, size, data } = options;
   const env = getServerEnv();
   const token = await getAccessToken();
   consumeRenderBudget(); // once per user-facing fetch, retries don't bill twice
@@ -50,16 +60,7 @@ async function fetchAnalysisRaster(options: ProcessOptions): Promise<Buffer> {
               properties: { crs: "http://www.opengis.net/def/crs/EPSG/0/4326" },
               geometry,
             },
-            data: [
-              {
-                type: "sentinel-2-l2a",
-                dataFilter: {
-                  timeRange,
-                  mosaickingOrder: "mostRecent",
-                },
-                processing: { upsampling: "BILINEAR", downsampling: "BILINEAR" },
-              },
-            ],
+            data,
           },
           output: {
             width: size.width,
@@ -104,11 +105,18 @@ export async function fetchCompareRaster(
   bbox: BBox,
   size: CompareRasterSize,
 ): Promise<Buffer> {
+  const timeRange = { from: `${date}T00:00:00Z`, to: `${date}T23:59:59Z` };
   return fetchAnalysisRaster({
     geometry,
     evalscript: COMPARE_EVALSCRIPT,
-    timeRange: { from: `${date}T00:00:00Z`, to: `${date}T23:59:59Z` },
     size,
+    data: [
+      {
+        type: "sentinel-2-l2a",
+        dataFilter: { timeRange, mosaickingOrder: "mostRecent" },
+        processing: { upsampling: "BILINEAR", downsampling: "BILINEAR" },
+      },
+    ],
   });
 }
 
@@ -122,10 +130,17 @@ export async function fetchCompareCompositeRaster(
   windowDays: number,
   otherDate: string,
 ): Promise<Buffer> {
+  const timeRange = compositeTimeRange(date, windowDays, otherDate);
   return fetchAnalysisRaster({
     geometry,
     evalscript: COMPARE_EVALSCRIPT_COMPOSITE,
-    timeRange: compositeTimeRange(date, windowDays, otherDate),
     size,
+    data: [
+      {
+        type: "sentinel-2-l2a",
+        dataFilter: { timeRange, mosaickingOrder: "mostRecent" },
+        processing: { upsampling: "BILINEAR", downsampling: "BILINEAR" },
+      },
+    ],
   });
 }

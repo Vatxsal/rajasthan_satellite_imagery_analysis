@@ -113,3 +113,41 @@ function evaluatePixel(samples) {
     ndviOf(recent), mndwiOf(recent), ndbiOf(recent),
   ];
 }`;
+
+/**
+ * Sentinel-1 GRD input (Phase 1): per-pixel temporal median of every valid
+ * acquisition in the ±S1_WINDOW_DAYS range, one orbit direction per side.
+ * Bands: 1 median VV (linear power) · 2 median VH · 3 valid-observation count.
+ *
+ * Speckle reduction = temporal median here + built-in LEE 5×5 in the request
+ * processing options (lib/analysis/s1.ts). dB conversion happens client-side
+ * after the median (dB is monotonic, so dB(median(linear)) is the median of
+ * the dB series up to even-sample averaging).
+ *
+ * Nodata conventions: dataMask=0 or VV/VH ≤ 0 (nodata renders as 0) → sample
+ * skipped; count 0 = invalid pixel (mirrors the optical composite).
+ */
+export const S1_EVALSCRIPT = `${HEADER}function setup() {
+  return {
+    input: [{ bands: ["VV", "VH", "dataMask"] }],
+    mosaicking: "ORBIT",
+    output: { bands: 3, sampleType: "FLOAT32" },
+  };
+}
+function median(values) {
+  values.sort(function (a, b) { return a - b; });
+  var mid = values.length >> 1;
+  return values.length % 2 ? values[mid] : (values[mid - 1] + values[mid]) / 2;
+}
+function evaluatePixel(samples) {
+  var vv = [], vh = [];
+  for (var i = 0; i < samples.length; i++) {
+    var s = samples[i];
+    if (s.dataMask !== 1) continue;
+    if (!(s.VV > 0) || !(s.VH > 0)) continue; // 0 = nodata
+    vv.push(s.VV);
+    vh.push(s.VH);
+  }
+  if (vv.length === 0) return [0, 0, 0];
+  return [median(vv), median(vh), vv.length];
+}`;

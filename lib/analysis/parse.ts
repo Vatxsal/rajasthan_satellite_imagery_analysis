@@ -114,3 +114,55 @@ export async function parseCompositeRaster(buffer: Buffer): Promise<ParsedCompos
     recentNdbi: bands[11],
   };
 }
+
+export interface ParsedS1Side {
+  width: number;
+  height: number;
+  /** Median VV backscatter in dB (NaN where invalid). */
+  vvDb: Float32Array;
+  /** Median VH backscatter in dB (NaN where invalid). */
+  vhDb: Float32Array;
+  /** Valid acquisitions contributing to the median (0 = nodata). */
+  count: Float32Array;
+  /** 1 where count ≥ 1. */
+  valid: Uint8Array;
+}
+
+/** Parses the 3-band FLOAT32 S1 raster (median VV/VH linear power + count)
+ *  and converts backscatter to dB. dB is monotonic, so dB(median(linear)) is
+ *  the median of the dB series (up to even-sample averaging). */
+export async function parseS1Side(buffer: Buffer): Promise<ParsedS1Side> {
+  const ab = buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength,
+  ) as ArrayBuffer;
+  const tiff = await fromArrayBuffer(ab);
+  const image = await tiff.getImage();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const bands = (await image.readRasters({
+    width,
+    height,
+    samples: [0, 1, 2],
+  })) as Float32Array[];
+
+  const vvLinear = bands[0];
+  const vhLinear = bands[1];
+  const count = bands[2];
+  const n = width * height;
+  const vvDb = new Float32Array(n);
+  const vhDb = new Float32Array(n);
+  const valid = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (count[i] >= 1 && vvLinear[i] > 0 && vhLinear[i] > 0) {
+      valid[i] = 1;
+      vvDb[i] = (10 * Math.log(vvLinear[i])) / Math.LN10;
+      vhDb[i] = (10 * Math.log(vhLinear[i])) / Math.LN10;
+    } else {
+      valid[i] = 0;
+      vvDb[i] = NaN;
+      vhDb[i] = NaN;
+    }
+  }
+  return { width, height, vvDb, vhDb, count, valid };
+}
