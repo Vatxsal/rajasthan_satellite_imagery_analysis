@@ -2,7 +2,8 @@
  * npm run validate — reference vs engine output validation harness.
  *
  * Usage:
- *   npm run validate                       # all cases in validation/cases.json
+ *   npm run validate                       # all TUNE cases in validation/cases.json
+ *   npm run validate -- --holdout          # hold-out cases only (never used for tuning)
  *   npm run validate -- --case circle-partial
  *   npm run validate -- --engine v1 --px 512 --out validation/reports/custom.md
  *   npm run validate -- --scenarios --engine v2
@@ -35,6 +36,8 @@ interface CaseEntry {
   dateA?: string;
   dateB?: string;
   engine?: string;
+  /** "tune" (default) | "holdout" — hold-out cases never run unless --holdout. */
+  split?: "tune" | "holdout";
 }
 
 function argValue(args: string[], flag: string): string | undefined {
@@ -58,10 +61,11 @@ function main(): void {
   const targetPx = Number(argValue(args, "--px") ?? "400");
   const only = argValue(args, "--case");
   const scenarios = args.includes("--scenarios");
+  const holdout = args.includes("--holdout");
   const outPath = path.resolve(
     root,
     argValue(args, "--out") ??
-      `validation/reports/${engine === "v1" ? "v1-baseline" : engine}${scenarios ? "-scenarios" : ""}.md`,
+      `validation/reports/${engine === "v1" ? "v1-baseline" : engine}${scenarios ? "-scenarios" : ""}${holdout ? "-holdout" : ""}.md`,
   );
 
   let entries: CaseEntry[] = [];
@@ -71,9 +75,22 @@ function main(): void {
       process.exit(1);
     }
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { cases: CaseEntry[] };
-    entries = manifest.cases.filter((c) => !only || c.name === only);
+    // Split gate: default run = tune cases only; --holdout = hold-out only.
+    // Hold-out cases are NEVER part of the default run (used for final scoring).
+    entries = manifest.cases.filter((c) => {
+      const isHoldout = c.split === "holdout";
+      if (holdout) return isHoldout;
+      return !isHoldout;
+    });
+    entries = entries.filter((c) => !only || c.name === only);
     if (entries.length === 0) {
-      console.error(only ? `no case named "${only}" in ${manifestPath}` : "no cases in manifest");
+      console.error(
+        only
+          ? `no case named "${only}" in ${manifestPath}${holdout ? " (holdout split)" : ""}`
+          : holdout
+            ? `no holdout cases in ${manifestPath} — add { "split": "holdout" } entries`
+            : "no cases in manifest",
+      );
       process.exit(1);
     }
   }
@@ -117,7 +134,9 @@ function main(): void {
   fs.writeFileSync(outPath, `${markdown}\n`, "utf8");
 
   // Console summary: one line per case + aggregate headline.
-  console.log(`engine=${engine}${scenarios ? " (scenarios)" : ""} cases=${reports.length} grid=${targetPx}px in ${elapsed}ms`);
+  console.log(
+    `engine=${engine}${scenarios ? " (scenarios)" : ""} split=${holdout ? "holdout" : "tune"} cases=${reports.length} grid=${targetPx}px in ${elapsed}ms`,
+  );
   for (const r of reports) {
     console.log(
       `  ${r.name.padEnd(20)} acc=${(r.overallAccuracy * 100).toFixed(1)}% macroF1=${

@@ -42,12 +42,12 @@ for (const engine of ENGINES) {
     }
   });
 
-  test(`scenarios (${engine}): classes case keeps builtup_gain F1 ≥ 0.90`, () => {
+  test(`scenarios (${engine}): classes case keeps builtup_increase F1 ≥ 0.90`, () => {
     const cases = buildScenarios(engine, "scenario-classes");
     assert.equal(cases.length, 1, "classes scenario found");
     const r = validateCase(cases[0]);
-    const f1 = f1Of(r, "builtup_gain");
-    assert.ok(f1 !== null && f1 >= 0.9, `${cases[0].name}: builtup_gain F1 ${f1} < 0.9`);
+    const f1 = f1Of(r, "builtup_increase");
+    assert.ok(f1 !== null && f1 >= 0.9, `${cases[0].name}: builtup_increase F1 ${f1} < 0.9`);
   });
 
   test(`scenarios (${engine}): speckle case change precision ≥ 0.95`, () => {

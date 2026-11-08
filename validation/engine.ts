@@ -6,12 +6,17 @@
  * precision / recall / F1 / IoU, a confusion matrix and per-class area error.
  *
  * Reference vocabulary (properties.cls on reference features):
- *   water_gain | water_loss | veg_gain | veg_loss | builtup_gain | no_change
+ *   water_gain | water_loss | veg_gain | veg_loss | builtup_increase |
+ *   bare_agri | no_change
  *
  * Prediction features are read from properties in this order:
- *   1. properties.cls  (string, snake_case; aliases accepted)
+ *   1. properties.cls  (string, snake_case; aliases accepted — builtup_gain,
+ *      bare_built … all map to builtup_increase)
  *   2. properties.classCode (engine codes: 0..5, 6/255 ignored)
  *   3. properties.classLabel (human label, matched case-insensitively)
+ * A bare/built prediction carrying sub-label bare_agri (harvest/tillage on
+ * cropland) scores as its own class, so the fused engine's sub-labels can be
+ * validated per class.
  * Pixels with no prediction polygon count as `no_change` (the engine emits
  * change objects only).
  *
@@ -24,7 +29,8 @@ export type RefClass =
   | "water_loss"
   | "veg_gain"
   | "veg_loss"
-  | "builtup_gain"
+  | "builtup_increase"
+  | "bare_agri"
   | "no_change";
 
 export const REF_CLASSES: RefClass[] = [
@@ -32,7 +38,8 @@ export const REF_CLASSES: RefClass[] = [
   "water_loss",
   "veg_gain",
   "veg_loss",
-  "builtup_gain",
+  "builtup_increase",
+  "bare_agri",
   "no_change",
 ];
 
@@ -117,11 +124,16 @@ const ALIASES: Record<string, RefClass> = {
   vegloss: "veg_loss",
   veg_loss: "veg_loss",
   vegetation_loss: "veg_loss",
-  builtup_gain: "builtup_gain",
-  builtup: "builtup_gain",
-  builtup_bare_increase: "builtup_gain",
-  bare_built: "builtup_gain",
-  barebuilt: "builtup_gain",
+  builtup_increase: "builtup_increase",
+  builtup_gain: "builtup_increase",
+  builtup: "builtup_increase",
+  builtup_bare_increase: "builtup_increase",
+  bare_built: "builtup_increase",
+  barebuilt: "builtup_increase",
+  bare_agri: "bare_agri",
+  bareagri: "bare_agri",
+  bare_agriculture: "bare_agri",
+  agri_bare: "bare_agri",
   no_change: "no_change",
   nochang: "no_change",
   nochchange: "no_change",
@@ -131,30 +143,44 @@ const CLASS_CODE_MAP: Record<number, RefClass> = {
   0: "no_change",
   1: "veg_gain",
   2: "veg_loss",
-  3: "builtup_gain",
+  3: "builtup_increase",
   4: "water_gain",
   5: "water_loss",
 };
+
+/** Bare/built patch tagged as agri-bare (harvest/tillage on cropland). */
+function subIsBareAgri(props: Record<string, unknown>): boolean {
+  const raw =
+    typeof props.sub_label === "string"
+      ? props.sub_label
+      : typeof props.subLabel === "string"
+        ? props.subLabel
+        : typeof props.sub === "string"
+          ? props.sub
+          : null;
+  if (!raw) return false;
+  return raw.trim().toLowerCase().replace(/[^a-z]/g, "") === "bareagri";
+}
 
 /** Returns the reference class for a feature, or null when not mappable (masked/outside). */
 export function featureClass(feature: GeoJsonFeature): RefClass | null {
   const props = feature.properties ?? {};
   const cls = typeof props.cls === "string" ? props.cls.trim().toLowerCase() : null;
+  let base: RefClass | null = null;
   if (cls) {
-    const direct = ALIASES[cls];
-    if (direct) return direct;
-    if (cls === "masked" || cls === "outside" || cls === "unknown") return null;
+    base = ALIASES[cls] ?? null;
+    if (!base && (cls === "masked" || cls === "outside" || cls === "unknown")) return null;
   }
-  if (typeof props.classCode === "number") {
-    const mapped = CLASS_CODE_MAP[props.classCode];
-    return mapped ?? null;
+  if (!base && typeof props.classCode === "number") {
+    base = CLASS_CODE_MAP[props.classCode] ?? null;
   }
-  if (typeof props.classLabel === "string") {
+  if (!base && typeof props.classLabel === "string") {
     const key = props.classLabel.trim().toLowerCase().replace(/[^a-z_]/g, "");
-    const mapped = ALIASES[key];
-    if (mapped) return mapped;
+    base = ALIASES[key] ?? null;
   }
-  return null;
+  if (!base) return null;
+  if (base === "builtup_increase" && subIsBareAgri(props)) return "bare_agri";
+  return base;
 }
 
 export function classIndex(cls: RefClass): number {

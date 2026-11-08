@@ -57,7 +57,7 @@ const CLASS_TO_REF: RefClass[] = [
   "no_change",
   "veg_gain",
   "veg_loss",
-  "builtup_gain",
+  "builtup_increase",
   "water_gain",
   "water_loss",
 ];
@@ -105,7 +105,7 @@ interface ScenarioSpec {
 const CLASS_SHAPES: Shape[] = [
   { cls: "veg_loss", rect: [74.006, 26.028, 74.014, 26.036], a: "veg", b: "bare" },
   { cls: "water_gain", rect: [74.018, 26.028, 74.025, 26.034], a: "bare", b: "water" },
-  { cls: "builtup_gain", rect: [74.028, 26.027, 74.036, 26.033], a: "bare", b: "built" },
+  { cls: "builtup_increase", rect: [74.028, 26.027, 74.036, 26.033], a: "bare", b: "built" },
   { cls: "water_loss", rect: [74.006, 26.007, 74.013, 26.013], a: "water", b: "bare" },
   { cls: "veg_gain", rect: [74.018, 26.007, 74.026, 26.014], a: "bare", b: "veg" },
 ];
