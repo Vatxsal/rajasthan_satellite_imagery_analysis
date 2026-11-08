@@ -54,6 +54,8 @@ const baseSchema = z.object({
   S1_ENABLED: boolEnv().default(true),
   /** ±days around each date for the S1 temporal median (one orbit per side). */
   S1_WINDOW_DAYS: z.coerce.number().int().min(0).max(15).default(6),
+  /** ESA WorldCover land-cover prior (2021 v200 COG windows; graceful off). */
+  WORLDCOVER_ENABLED: boolEnv().default(true),
   /** Per-IP budget for /api/compare/analyze (each run costs 2 Process renders). */
   COMPARE_RATE_LIMIT_PER_MIN: z.coerce.number().positive().default(6),
   /** Per-IP budget for /api/compare/summary (Gemini). */
@@ -144,6 +146,7 @@ export interface ServerEnv {
   CHANGE_ENGINE: "v1" | "v2";
   S1_ENABLED: boolean;
   S1_WINDOW_DAYS: number;
+  WORLDCOVER_ENABLED: boolean;
   COMPARE_RATE_LIMIT_PER_MIN: number;
   AI_SUMMARY_RATE_LIMIT_PER_MIN: number;
   GEMINI_API_KEY?: string;

@@ -166,3 +166,24 @@ export async function parseS1Side(buffer: Buffer): Promise<ParsedS1Side> {
   }
   return { width, height, vvDb, vhDb, count, valid };
 }
+
+/** Parses the single-band FLOAT32 elevation render (metres) from the DEM
+ *  dataset (lib/analysis/terrain.ts). */
+export async function parseElevationRaster(
+  buffer: Buffer,
+): Promise<{ width: number; height: number; elevation: Float32Array }> {
+  const ab = buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength,
+  ) as ArrayBuffer;
+  const tiff = await fromArrayBuffer(ab);
+  const image = await tiff.getImage();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const bands = (await image.readRasters({
+    width,
+    height,
+    samples: [0],
+  })) as Float32Array[];
+  return { width, height, elevation: bands[0] };
+}
