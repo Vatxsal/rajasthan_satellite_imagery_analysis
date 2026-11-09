@@ -69,7 +69,8 @@ interface CompareState {
   minPatchHa: number;
   /** Engine v2 inputs: ±window composite or each scene's single day. */
   inputMode: CompareInputMode;
-  /** Minimum confidence tier for the events list (null = all events). */
+  /** Minimum confidence tier for the events list (null = all events).
+   *  Default Medium+ for v2 results (Phase 5); v1 runs reset to null. */
   confidenceFilter: ConfidenceTier | null;
   /** Loaded change events, raw and unfiltered (inline from analyze + server pages).
    *  List rows and map markers both derive from this via lib/compare/eventList. */
@@ -183,7 +184,7 @@ const RESULT_BOUND_RESET = {
   hoveredHotspot: null as number | null,
   selectedHotspot: null as number | null,
   tehsilHighlight: null as { id: string; name: string } | null,
-  confidenceFilter: null as ConfidenceTier | null,
+  confidenceFilter: "medium" as ConfidenceTier | null,
   eventsItems: [] as GeoJSON.Feature[],
   eventsTotal: 0,
   eventsFilteredTotal: null as number | null,
@@ -219,7 +220,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   sensitivity: "medium",
   minPatchHa: 0.2,
   inputMode: "composite",
-  confidenceFilter: null,
+  confidenceFilter: "medium",
   eventsItems: [],
   eventsTotal: 0,
   eventsFilteredTotal: null,
@@ -360,7 +361,9 @@ export const useCompareStore = create<CompareState>((set, get) => ({
         hoveredHotspot: null,
         selectedHotspot: null,
         tehsilHighlight: null,
-        confidenceFilter: null,
+        // v2 results open at Medium+ (Phase 5 default); v1 events carry no
+        // confidence tiers, so a tier filter would hide every v1 row.
+        confidenceFilter: result.stats.metadata.engine === "v2" ? "medium" : null,
         // Single source: the list + map markers start from the inline events —
         // no follow-up fetch, no "expired" on a cold server cache.
         eventsItems: result.events,
@@ -372,6 +375,8 @@ export const useCompareStore = create<CompareState>((set, get) => ({
         shareOpened: false,
         ...summaryIdle(),
       });
+      // Exact filtered total for the header (v2 opens with Medium+ active).
+      if (get().confidenceFilter) void get().probeEventsTotal();
       // Free map space on desktop: results now live in the right-hand panel.
       useAppStore.getState().setSidebarCollapsed(true);
     } catch (error) {

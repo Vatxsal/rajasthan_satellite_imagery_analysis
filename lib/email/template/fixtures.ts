@@ -154,6 +154,7 @@ function baseInput(overrides: Partial<ReportSourceInput>): ReportSourceInput {
     sensitivity: "medium",
     minPatchHa: 0.2,
     inputMode: "composite",
+    rules: "legacy",
     stats: normalStats(),
     events: Array.from({ length: 10 }, (_, index) =>
       makeFeature(index, index % 3 === 0 ? "Bassi" : "Amber"),
@@ -253,6 +254,19 @@ export function buildFixtures(): ReportFixture[] {
         mode: "fixed",
         language: "hi",
         summary: SUMMARY_HI,
+      }),
+    },
+    {
+      name: "fused-evidence",
+      input: baseInput({
+        rules: "fused",
+        evidence: {
+          s1: { orbit: "ASC" },
+          s1WindowDays: 6,
+          worldCover: true,
+          terrain: true,
+          demInstance: "COPERNICUS_30",
+        },
       }),
     },
   ];

@@ -24,7 +24,7 @@ Output rules:
 - keyChanges: 2-5 short bullet strings using only the exact class labels and areas (hectares) provided. Do not convert units or round beyond the given values.
 - whereChangesOccurred: 2-5 short bullet strings naming tehsils/hotspot/change-event patches from the input; if none were given, state where change was detected in general terms from the provided bbox context only.
 - visualObservations: 2-5 short bullet strings based ONLY on the supplied images (texture, colour contrasts, patch shapes, clouds). If no images were supplied, return exactly one item: "No imagery was supplied for this request."
-- reliabilityAndCaveats: 1-4 short bullet strings; mention valid-data percentage when it is below 70 and that clouds or partial coverage reduce confidence; always note that thresholds and minimum patch size filter what is shown.
+- reliabilityAndCaveats: 1-4 short bullet strings; mention valid-data percentage when it is below 70 and that clouds or partial coverage reduce confidence; always note that thresholds and minimum patch size filter what is shown; when the input lists a rules mode or evidence (SAR/prior/terrain), state which evidence was missing and that missing evidence lowers confidence in the affected classes; treat patches whose sub-label marks a likely artefact (e.g. harvest, seasonal loss) as lower confidence and say so.
 - suggestedNextChecks: 1-4 short bullet strings of practical follow-ups (re-check with another date pair, raise/lower sensitivity, open the hotspot in a GIS, compare with field reports).
 - Every list must contain at least one item. Neutral factual tone: no alarm, no praise, no policy advice, no causes you were not given. No markdown, no code, no emoji in the string values.
 
@@ -93,6 +93,22 @@ export function buildSummaryPrompt(stats: CompareStats, events?: GeoJSON.Feature
   lines.push(
     `Sensitivity: ${m.sensitivity} (thresholds: |dNDVI| >= ${Math.abs(m.thresholds.vegGainDNdvi).toFixed(2)}, |dMNDWI| >= ${Math.abs(m.thresholds.waterGainDMndwi).toFixed(2)}, dNDBI >= ${m.thresholds.bareBuiltDNdbi.toFixed(2)}, minimum patch ${m.minPatchHa} ha)`,
   );
+  if (m.rules) {
+    lines.push(`Rules: ${m.rules} (engine ${m.engine})`);
+  }
+  if (m.evidence) {
+    const ev = m.evidence;
+    const sar = !ev.s1
+      ? "off"
+      : "orbit" in ev.s1
+        ? `Sentinel-1 ${ev.s1.orbit}${ev.s1WindowDays !== null ? ` ±${ev.s1WindowDays} d` : ""}`
+        : `unavailable (${ev.s1.skipped})`;
+    lines.push(
+      `Evidence: SAR ${sar}; WorldCover land-cover prior ${ev.worldCover ? "on" : "off"}; terrain shadow mask ${
+        ev.terrain && ev.demInstance ? `on (${ev.demInstance})` : "off"
+      }`,
+    );
+  }
 
   lines.push("", "Change classes (area and share of analysable area):");
   for (const cls of stats.classes) {
@@ -129,9 +145,19 @@ export function buildSummaryPrompt(stats: CompareStats, events?: GeoJSON.Feature
       const label = String(props.classLabel ?? "Change");
       const areaHa = Number(props.areaHa ?? 0);
       const centroid = (props.centroid as number[] | undefined) ?? [0, 0];
-      const confidence = props.confidence ? `; confidence ${String(props.confidence)}` : "";
+      const confidence = props.confidence
+        ? `; confidence ${String(props.confidence)}${
+            typeof props.confidencePct === "number" && Number.isFinite(props.confidencePct)
+              ? ` (${Math.round(props.confidencePct)}%)`
+              : ""
+          }`
+        : "";
+      const subLabel =
+        typeof props.subLabel === "string" && props.subLabel
+          ? `; sub-label: ${props.subLabel}`
+          : "";
       lines.push(
-        `- ${label}: ${areaHa.toFixed(1)} ha${confidence} at ${centroid[1].toFixed(4)}N ${centroid[0].toFixed(4)}E`,
+        `- ${label}: ${areaHa.toFixed(1)} ha${confidence}${subLabel} at ${centroid[1].toFixed(4)}N ${centroid[0].toFixed(4)}E`,
       );
     }
   } else if (stats.hotspots.length > 0) {

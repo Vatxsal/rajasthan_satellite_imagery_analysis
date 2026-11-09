@@ -20,6 +20,24 @@ export interface ReportCopy {
   minPatchLabel: string;
   inputModeLabel: string;
   inputMode: Record<"single" | "composite", string>;
+  /** Method & evidence one-liner (method-card parity, Phase 5). */
+  methodLine: (parts: { rules: string; sar: string; prior: string; terrain: string }) => string;
+  methodRules: Record<"legacy" | "fused" | "ml", string>;
+  methodSar: (orbit: string, windowDays: number | null) => string;
+  methodSarSkipped: (reason: string) => string;
+  methodSarOff: string;
+  methodPrior: string;
+  methodPriorOff: string;
+  methodTerrain: (instance: string) => string;
+  methodTerrainOff: string;
+  caveatHeading: string;
+  caveats: {
+    legacy: string;
+    sarSkipped: (reason: string) => string;
+    noPrior: string;
+    noTerrain: string;
+    confidenceNote: string;
+  };
   glanceHeading: string;
   changedArea: string;
   shareOfValid: string;
@@ -85,6 +103,31 @@ const EN: ReportCopy = {
   minPatchLabel: "Minimum patch",
   inputModeLabel: "Input mode",
   inputMode: { single: "Single date", composite: "Composite window" },
+  methodLine: (p) =>
+    `Method: ${p.rules} · SAR: ${p.sar} · Land-cover prior: ${p.prior} · Terrain: ${p.terrain}`,
+  methodRules: {
+    legacy: "legacy thresholds",
+    fused: "fused evidence rules",
+    ml: "ML model (v2 features)",
+  },
+  methodSar: (orbit, windowDays) =>
+    `Sentinel-1 ${orbit}${windowDays !== null ? ` · ±${windowDays} d median` : ""}`,
+  methodSarSkipped: (reason) => `Sentinel-1 unavailable (${reason})`,
+  methodSarOff: "off",
+  methodPrior: "WorldCover 2021",
+  methodPriorOff: "off",
+  methodTerrain: (instance) => `${instance} shadow mask`,
+  methodTerrainOff: "off",
+  caveatHeading: "Reliability & caveats",
+  caveats: {
+    legacy: "Legacy thresholds only — no SAR, land-cover or terrain evidence was applied.",
+    sarSkipped: (reason) =>
+      `Sentinel-1 was unavailable for this pair (${reason}); water and bare/built confidence relies on optical indices alone.`,
+    noPrior: "No land-cover prior was read — the new built-up and water gates were skipped.",
+    noTerrain: "No terrain shadow mask — shaded slopes may appear as water gain.",
+    confidenceNote:
+      "Confidence tiers are relative to this run's thresholds and evidence; verify each patch on the map.",
+  },
   glanceHeading: "At a glance",
   changedArea: "Changed area",
   shareOfValid: "Share of valid area",
@@ -152,6 +195,31 @@ const HI: ReportCopy = {
   minPatchLabel: "न्यूनतम पैच",
   inputModeLabel: "इनपुट मोड",
   inputMode: { single: "एकल तिथि", composite: "कंपोज़िट विंडो" },
+  methodLine: (p) =>
+    `विधि: ${p.rules} · SAR: ${p.sar} · भू-आवरण: ${p.prior} · भूभाग: ${p.terrain}`,
+  methodRules: {
+    legacy: "पुराने नियम (legacy)",
+    fused: "साक्ष्य-आधारित नियम (fused)",
+    ml: "एमएल मॉडल (v2 फ़ीचर)",
+  },
+  methodSar: (orbit, windowDays) =>
+    `Sentinel-1 ${orbit}${windowDays !== null ? ` · ±${windowDays} दिन माध्य` : ""}`,
+  methodSarSkipped: (reason) => `Sentinel-1 उपलब्ध नहीं (${reason})`,
+  methodSarOff: "बंद",
+  methodPrior: "WorldCover 2021",
+  methodPriorOff: "बंद",
+  methodTerrain: (instance) => `${instance} छाया मास्क`,
+  methodTerrainOff: "बंद",
+  caveatHeading: "विश्वसनीयता व चेतावनियाँ",
+  caveats: {
+    legacy: "केवल पुराने नियम — कोई SAR, भू-आवरण या भूभाग साक्ष्य लागू नहीं हुआ।",
+    sarSkipped: (reason) =>
+      `इस तिथि जोड़ी के लिए Sentinel-1 उपलब्ध नहीं था (${reason}); जल और नंगा/निर्माण का विश्वास केवल ऑप्टिकल सूचकांकों पर निर्भर है।`,
+    noPrior: "भू-आवरण पूर्व-ज्ञान नहीं पढ़ा गया — नए निर्माण और जल गेट छोड़ दिए गए।",
+    noTerrain: "भूभाग छाया मास्क नहीं — छायादार ढलान जल-वृद्धि दिख सकती हैं।",
+    confidenceNote:
+      "विश्वास स्तर इस रन की सीमाओं और साक्ष्यों के सापेक्ष हैं; हर पैच की नक्शे पर जाँच करें।",
+  },
   glanceHeading: "एक नज़र में",
   changedArea: "बदला क्षेत्रफल",
   shareOfValid: "मान्य क्षेत्र का हिस्सा",

@@ -291,6 +291,8 @@ export async function POST(request: Request): Promise<Response> {
       deepLink,
       siteUrl: origin,
       generatedAt: metadata.generatedAt,
+      rules: metadata.rules ?? null,
+      evidence: metadata.evidence ?? null,
     });
 
     // Two-pass image budget: measure the markup first, then ask the JPEG
