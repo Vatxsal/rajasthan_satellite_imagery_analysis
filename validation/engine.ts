@@ -79,7 +79,7 @@ export interface ValidationCase {
   reference: GeoJsonFeatureCollection;
   prediction: GeoJsonFeatureCollection;
   /** Optional provenance for the report. */
-  meta?: { dateA?: string; dateB?: string; engine?: string };
+  meta?: { dateA?: string; dateB?: string; engine?: string; rules?: string };
 }
 
 export interface ClassMetrics {
@@ -130,6 +130,8 @@ const ALIASES: Record<string, RefClass> = {
   builtup_bare_increase: "builtup_increase",
   bare_built: "builtup_increase",
   barebuilt: "builtup_increase",
+  /** Engine classLabel for code 3: "Bare / built-up increase". */
+  barebuiltincrease: "builtup_increase",
   bare_agri: "bare_agri",
   bareagri: "bare_agri",
   bare_agriculture: "bare_agri",
@@ -138,6 +140,12 @@ const ALIASES: Record<string, RefClass> = {
   nochang: "no_change",
   nochchange: "no_change",
 };
+
+/** Alias keys with underscores removed — for human classLabel matching
+ *  ("Built-up increase" → "builtupincrease"). */
+const ALIASES_NORM: Record<string, RefClass> = Object.fromEntries(
+  Object.entries(ALIASES).map(([k, v]) => [k.replace(/_/g, ""), v]),
+);
 
 const CLASS_CODE_MAP: Record<number, RefClass> = {
   0: "no_change",
@@ -159,7 +167,17 @@ function subIsBareAgri(props: Record<string, unknown>): boolean {
           ? props.sub
           : null;
   if (!raw) return false;
-  return raw.trim().toLowerCase().replace(/[^a-z]/g, "") === "bareagri";
+  const norm = raw.trim().toLowerCase().replace(/[^a-z]/g, "");
+  // Alias vocabulary ("bare_agri", "agri_bare") or the engine's full sub-label
+  // text (SUB_LABELS[bareBuiltAgriculture] = "Bare soil on cropland (likely
+  // harvest / tillage)"). Only ever called for builtup_increase predictions,
+  // so matching "cropland"/"tillage"/"harvest" cannot collide with the veg
+  // sub-labels (those sit on veg_gain/veg_loss classes, never checked here).
+  if (norm.includes("bareagri") || norm.includes("agribare")) return true;
+  return (
+    norm.includes("bare") &&
+    (norm.includes("cropland") || norm.includes("tillage") || norm.includes("harvest"))
+  );
 }
 
 /** Returns the reference class for a feature, or null when not mappable (masked/outside). */
@@ -175,8 +193,8 @@ export function featureClass(feature: GeoJsonFeature): RefClass | null {
     base = CLASS_CODE_MAP[props.classCode] ?? null;
   }
   if (!base && typeof props.classLabel === "string") {
-    const key = props.classLabel.trim().toLowerCase().replace(/[^a-z_]/g, "");
-    base = ALIASES[key] ?? null;
+    const key = props.classLabel.trim().toLowerCase().replace(/[^a-z]/g, "");
+    base = ALIASES_NORM[key] ?? null;
   }
   if (!base) return null;
   if (base === "builtup_increase" && subIsBareAgri(props)) return "bare_agri";

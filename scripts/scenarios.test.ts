@@ -58,3 +58,42 @@ for (const engine of ENGINES) {
     assert.ok(prec !== null && prec >= 0.95, `${cases[0].name}: change precision ${prec} < 0.95`);
   });
 }
+
+/**
+ * Phase 6: fused rules with synthetic truth-derived evidence must score the
+ * same as legacy on class assignment (gates preserve truth by construction)
+ * — any regression here means a gate is suppressing or reclassifying truth.
+ */
+test("scenarios (fused): macroF1 ≥ 0.95, changeF1 ≥ 0.90 on every case", () => {
+  const cases = buildScenarios("v2", undefined, "fused");
+  assert.equal(cases.length, 3, "three scenarios per fused run");
+  for (const c of cases) {
+    assert.equal(c.meta?.rules, "fused", `${c.name}: meta.rules=fused`);
+    assert.equal(c.meta?.engine, "v2", `${c.name}: fused forces the v2 engine`);
+    const r = validateCase(c);
+    assert.ok(
+      r.macroF1 !== null && r.macroF1 >= 0.95,
+      `${c.name}: macroF1 ${r.macroF1} < 0.95`,
+    );
+    assert.ok(
+      r.changeF1 !== null && r.changeF1 >= 0.9,
+      `${c.name}: changeF1 ${r.changeF1} < 0.9`,
+    );
+  }
+});
+
+test("scenarios (fused): classes case keeps builtup_increase F1 ≥ 0.90", () => {
+  const cases = buildScenarios("v2", "scenario-classes", "fused");
+  assert.equal(cases.length, 1, "classes scenario found");
+  assert.equal(cases[0].name, "scenario-classes-v2-fused");
+  const r = validateCase(cases[0]);
+  const f1 = f1Of(r, "builtup_increase");
+  assert.ok(f1 !== null && f1 >= 0.9, `${cases[0].name}: builtup_increase F1 ${f1} < 0.9`);
+});
+
+test("scenarios (fused): legacy rules mode keeps legacy names and no evidence", () => {
+  const cases = buildScenarios("v2", "scenario-classes", "legacy");
+  assert.equal(cases.length, 1, "classes scenario found");
+  assert.equal(cases[0].name, "scenario-classes-v2-legacy");
+  assert.equal(cases[0].meta?.rules, "legacy");
+});
