@@ -133,6 +133,51 @@ test("summary prompt only carries whitelisted stats text", () => {
   assert.doesNotMatch(prompt, /base64/i);
 });
 
+test("summary prompt carries rules, evidence and event sub-labels (Phase 5)", () => {
+  const stats = sampleStats();
+  stats.metadata = {
+    ...stats.metadata,
+    engine: "v2",
+    rules: "fused",
+    evidence: {
+      s1: { orbit: "DESC" },
+      s1WindowDays: 6,
+      worldCover: false,
+      terrain: true,
+      demInstance: "COPERNICUS_90",
+    },
+  };
+  const prompt = buildSummaryPrompt(stats);
+  assert.match(prompt, /Rules: fused \(engine v2\)/);
+  assert.match(
+    prompt,
+    /Evidence: SAR Sentinel-1 DESC ±6 d; WorldCover land-cover prior off; terrain shadow mask on \(COPERNICUS_90\)/,
+  );
+
+  const events: GeoJSON.FeatureCollection = {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        id: "ev_phase5a",
+        geometry: { type: "Point", coordinates: [75.7, 26.8] },
+        properties: {
+          id: "ev_phase5a",
+          classLabel: "Vegetation loss",
+          areaHa: 12.3,
+          centroid: [75.7, 26.8],
+          confidence: "medium",
+          confidencePct: 64,
+          subLabel: "likely harvest",
+        },
+      },
+    ],
+  };
+  const eventPrompt = buildSummaryPrompt(stats, events);
+  assert.match(eventPrompt, /confidence medium \(64%\)/);
+  assert.match(eventPrompt, /sub-label: likely harvest/);
+});
+
 test("system prompt + language + images note contract", () => {
   assert.match(SUMMARY_SYSTEM_PROMPT, /AI-generated summary - verify against the maps\./);
   assert.match(SUMMARY_SYSTEM_PROMPT, /Devanagari/);

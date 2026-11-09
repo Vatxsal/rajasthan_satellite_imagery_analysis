@@ -310,6 +310,11 @@ export function ReportEmail(data: ReportEmailData): ReactNode {
                             {copy.inputModeLabel}:{" "}
                             <strong>{copy.inputMode[data.inputMode]}</strong>
                           </Text>
+                          {data.method && (
+                            <Text style={{ ...mutedStyle(11), marginTop: "6px" }}>
+                              {copy.methodLine(data.method)}
+                            </Text>
+                          )}
                         </td>
                       </tr>
                     </tbody>
@@ -512,6 +517,18 @@ export function ReportEmail(data: ReportEmailData): ReactNode {
                             </td>
                             <td style={tdStyle()}>
                               {swatch(event.classLabel, event.hex)}
+                              {event.subLabel ? (
+                                <div
+                                  style={{
+                                    fontSize: "10px",
+                                    color: C.muted,
+                                    marginTop: "2px",
+                                    marginLeft: "16px",
+                                  }}
+                                >
+                                  {event.subLabel}
+                                </div>
+                              ) : null}
                             </td>
                             <td style={tdStyle({ fontSize: "11px" })}>
                               {event.confidence
@@ -618,6 +635,48 @@ export function ReportEmail(data: ReportEmailData): ReactNode {
                             </td>
                           </tr>
                         ))}
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
+              )}
+
+              {/* Reliability & caveats (method evidence, Phase 5) */}
+              {data.caveats.length > 0 && (
+                <tr>
+                  <td style={{ padding: "16px 24px 0 24px" }}>
+                    <Text style={headingStyle()}>{copy.caveatHeading}</Text>
+                    <table
+                      role="presentation"
+                      cellPadding={0}
+                      cellSpacing={0}
+                      border={0}
+                      style={{
+                        width: "100%",
+                        borderCollapse: "collapse",
+                        border: `1px solid ${C.border}`,
+                        borderLeft: `3px solid ${C.accent}`,
+                        borderRadius: "6px",
+                        backgroundColor: C.subtle,
+                      }}
+                    >
+                      <tbody>
+                        <tr>
+                          <td style={{ padding: "12px 14px" }}>
+                            {data.caveats.map((caveat, index) => (
+                              <Text
+                                key={index}
+                                style={{
+                                  ...mutedStyle(12),
+                                  marginTop: index > 0 ? "6px" : 0,
+                                  whiteSpace: "pre-wrap",
+                                }}
+                              >
+                                {caveat}
+                              </Text>
+                            ))}
+                          </td>
+                        </tr>
                       </tbody>
                     </table>
                   </td>

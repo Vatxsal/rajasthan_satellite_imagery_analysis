@@ -27,21 +27,31 @@ import {
   V2_SHORT_GAP_DAYS,
   scaledThresholds,
   seasonalTag,
+  type CompareRules,
   type ScaledThresholds,
   type Sensitivity,
 } from "./config";
 import { combineValidity, classifyChange, dilateInvalid } from "./classify";
+import { applyShapeEvidence, classifyFused } from "./fused";
+import { classifyModel, loadMlModel } from "./model";
 import { fillSmallHoles, labelPatches, majorityFilter, minPatchPixels } from "./filter";
 import { makeAnalysisGrid, nativeLongSidePx } from "./grid";
 import { rasterizeAreaMask, rasterizeZones } from "./mask";
 import { classToRgba, encodePng } from "./png";
 import type { ParsedCompositeRaster } from "./parse";
 import {
+  DEM_INPUT_BANDS,
+  S1_INPUT_BANDS,
   V1_INPUT_BANDS,
   V2_INPUT_BANDS,
   compositeSamples,
   estimateAnalysisPu,
+  estimateRenderPu,
+  s1Samples,
 } from "./pu";
+import type { SarFeatures } from "./s1";
+import type { WorldCoverPrior } from "./prior";
+import type { TerrainGrids } from "./terrain";
 import { buildPatchVectors, computeStats, type ZoneMeta } from "./stats";
 import {
   adaptiveThresholds,
@@ -57,9 +67,10 @@ import type {
   CompareStats,
   DateSceneMeta,
   EngineStats,
+  EvidenceMeta,
   IndexRasters,
 } from "./types";
-import type { RecentIndices, V2Indices } from "./v2";
+import type { ClassifyV2Output, RecentIndices, V2Indices } from "./v2";
 
 export type CompareStage = "fetch-a" | "fetch-b" | "analyze";
 
@@ -92,6 +103,24 @@ export interface RunCompareInput {
   inputMode?: CompareInputMode;
   /** v2 ±composite window in days (0-15). */
   compositeWindowDays?: number;
+  /** Change-rule mode (CHANGE_RULES); default "legacy" keeps shipped rules. */
+  rules?: CompareRules;
+  /** PU budget for the fused evidence renders (S1 pair + DEM); null = off. */
+  evidencePlan?: { s1WindowDays: number | null; terrain: boolean } | null;
+}
+
+/**
+ * Phase 3 fused evidence injected into processCompare (fetched live in
+ * analyze.ts, or synthetic in tests). Every stream degrades to null/off.
+ */
+export interface EvidenceInputs {
+  sar?: SarFeatures | null;
+  /** S1 outcome for the method card: orbit used, or the skip reason. */
+  s1?: { orbit: string } | { skipped: string } | null;
+  s1WindowDays?: number | null;
+  prior?: WorldCoverPrior | null;
+  terrain?: TerrainGrids | null;
+  demInstance?: string | null;
 }
 
 export interface CompareArtifact {
@@ -152,6 +181,18 @@ function dayGap(dateA: string, dateB: string): number {
   return Math.round((Date.parse(dateB) - Date.parse(dateA)) / 86_400_000);
 }
 
+/** Method-card evidence summary actually available to this run (Phase 3). */
+function evidenceMeta(e: EvidenceInputs): EvidenceMeta {
+  const s1 = e.s1 ?? null;
+  return {
+    s1,
+    s1WindowDays: s1 && "orbit" in s1 ? (e.s1WindowDays ?? null) : null,
+    worldCover: Boolean(e.prior),
+    terrain: Boolean(e.terrain),
+    demInstance: e.demInstance ?? null,
+  };
+}
+
 /**
  * Pure setup: grid geometry, thresholds, engine/input-mode normalisation and
  * the composite window. Shared by the fetching path and processCompare (runs
@@ -189,10 +230,29 @@ export function prepareCompare(input: RunCompareInput, options: PrepareOptions =
   const inputBands = engine === "v2" ? V2_INPUT_BANDS : V1_INPUT_BANDS;
   const samples =
     engine === "v2" && inputMode === "composite" ? compositeSamples(windowDays) : 1;
-  const estimatedPu =
+  let estimatedPu =
     Math.round(
       estimateAnalysisPu({ width, height, inputBands, float: true, samples }) * 100,
     ) / 100;
+  // Phase 3: fused evidence = two S1 renders (one per side; a DESC fallback
+  // probe is the rare extra) + one DEM render. WorldCover is a free COG read.
+  const plan = input.evidencePlan;
+  if (plan) {
+    const s1Pu =
+      plan.s1WindowDays != null
+        ? estimateRenderPu({
+            width,
+            height,
+            inputBands: S1_INPUT_BANDS,
+            float: true,
+            samples: s1Samples(plan.s1WindowDays),
+          }) * 2
+        : 0;
+    const demPu = plan.terrain
+      ? estimateRenderPu({ width, height, inputBands: DEM_INPUT_BANDS, float: true, samples: 1 })
+      : 0;
+    estimatedPu = Math.round((estimatedPu + s1Pu + demPu) * 100) / 100;
+  }
   const puLimit = options.puLimit ?? 0;
   if (puLimit > 0 && estimatedPu > puLimit) {
     throw Object.assign(
@@ -222,13 +282,19 @@ export function prepareCompare(input: RunCompareInput, options: PrepareOptions =
 /**
  * Runs classify → denoise → MMU → stats → overlay on already-parsed inputs.
  * Size checks guarantee the rasters match the prepared analysis grid.
+ * `evidence` feeds the fused rules only (legacy ignores it entirely).
  */
 export function processCompare(
   input: RunCompareInput,
   inputs: RasterInputs,
+  evidence: EvidenceInputs = {},
 ): CompareArtifact {
   const prep = prepareCompare(input);
   const { bbox, grid, width, height, baseThresholds, windowDays, gapDays, minPatchHa, engine, inputMode, estimatedPu } = prep;
+  // Fused and ML rules exist on the v2 composite machinery only — a request
+  // against v1 inputs degrades to legacy (recorded honestly in metadata).
+  const rules: CompareRules =
+    input.rules && input.rules !== "legacy" && engine === "v2" ? input.rules : "legacy";
   // Consume the inputs object up front (it is a throwaway for every caller):
   // raw bands are released as soon as their index stacks are derived, exactly
   // like the original fetch path, so peak memory stays one side at a time.
@@ -266,6 +332,7 @@ export function processCompare(
   let tiers: Uint8Array | null = null;
   let subs: Uint8Array | null = null;
   let persist: Uint8Array | null = null;
+  let conf: Uint8Array | null = null;
   let shortGap = false;
   let engineStats: EngineStats | undefined;
 
@@ -311,7 +378,7 @@ export function processCompare(
     const seasonalGainTag = seasonalTag(input.dateB, "gain");
     shortGap = gapDays >= 0 && gapDays < V2_SHORT_GAP_DAYS;
 
-    const out = classifyV2({
+    const base = {
       a: aIdx,
       b: bIdx,
       aRecent,
@@ -323,7 +390,37 @@ export function processCompare(
       seasonalLossTag,
       seasonalGainTag,
       shortGap,
-    });
+    };
+    let out: ClassifyV2Output;
+    if (rules === "fused") {
+      const fusedOut = classifyFused({
+        ...base,
+        evidence: {
+          sar: evidence.sar ?? null,
+          prior: evidence.prior ?? null,
+          shadow: evidence.terrain?.shadow ?? null,
+        },
+      });
+      conf = fusedOut.confGrid;
+      out = fusedOut;
+    } else if (rules === "ml") {
+      // Phase 4: trained softmax model (CDSE_ML_MODEL_MISSING if untrained).
+      const mlOut = classifyModel(
+        {
+          ...base,
+          evidence: {
+            sar: evidence.sar ?? null,
+            prior: evidence.prior ?? null,
+            shadow: evidence.terrain?.shadow ?? null,
+          },
+        },
+        loadMlModel(),
+      );
+      conf = mlOut.confGrid;
+      out = mlOut;
+    } else {
+      out = classifyV2(base);
+    }
     classGrid = out.classGrid;
     tiers = out.tierGrid;
     subs = out.subGrid;
@@ -359,6 +456,10 @@ export function processCompare(
   const minPixels = minPatchPixels(minPatchHa, grid.metersX, grid.metersY);
   fillSmallHoles(classGrid, valid, width, height, minPixels);
   const { labels } = labelPatches(classGrid, width, height, minPixels, tiers);
+  if ((rules === "fused" || rules === "ml") && conf && tiers) {
+    // Shape evidence runs on the KEPT patches (post-denoise, post-MMU).
+    applyShapeEvidence({ classGrid, labels, confGrid: conf, tierGrid: tiers, width, height });
+  }
 
   let zones: Int16Array | null = null;
   let zoneMeta: ZoneMeta[] | null = null;
@@ -379,6 +480,7 @@ export function processCompare(
     tiers,
     subs,
     persist,
+    conf,
     shortGap,
   });
   // Phase 5 (#13): full-coverage vector layer for events/exports — kept off
@@ -388,7 +490,7 @@ export function processCompare(
     labels,
     grid,
     (grid.metersX * grid.metersY) / M2_PER_HA,
-    { tiers, subs, persist, shortGap },
+    { tiers, subs, persist, conf, shortGap },
     undefined,
     zones,
     zoneMeta,
@@ -411,6 +513,8 @@ export function processCompare(
       sensitivity: input.sensitivity,
       minPatchHa,
       engine,
+      rules,
+      ...(rules === "fused" || rules === "ml" ? { evidence: evidenceMeta(evidence) } : {}),
       inputMode,
       compositeWindowDays: windowDays,
       estimatedPu,

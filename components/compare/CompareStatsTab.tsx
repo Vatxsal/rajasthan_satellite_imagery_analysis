@@ -279,7 +279,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
         {v2 && (
           <div>
             <p className="mb-1 text-[11px] text-muted">
-              Minimum confidence — high = strongest multi-evidence patches only
+              Minimum confidence — defaults to Medium+; High = strongest multi-evidence patches only
             </p>
             <Segmented
               ariaLabel="Minimum event confidence"
@@ -347,6 +347,12 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
             const classLabel = String(props.classLabel ?? "Change");
             const areaHa = Number(props.areaHa ?? 0);
             const confidence = props.confidence as ConfidenceTier | undefined;
+            const confidencePct =
+              typeof props.confidencePct === "number" && Number.isFinite(props.confidencePct)
+                ? Math.round(props.confidencePct)
+                : null;
+            const subLabel =
+              typeof props.subLabel === "string" && props.subLabel ? props.subLabel : null;
             const centroid = (props.centroid as number[] | undefined) ?? [0, 0];
             const bboxProps = props.bbox as number[] | undefined;
             const lon = centroid[0];
@@ -394,7 +400,12 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                       style={{ background: rgb(color) }}
                       aria-hidden
                     />
-                    <span className="min-w-0 flex-1 truncate text-xs text-text">{classLabel}</span>
+                    <span className="min-w-0 flex-1 text-xs text-text">
+                      <span className="block truncate">{classLabel}</span>
+                      {subLabel && (
+                        <span className="block truncate text-[10px] text-muted">{subLabel}</span>
+                      )}
+                    </span>
                     <span className="mono-nums ml-auto shrink-0 whitespace-nowrap text-[11px] text-text">
                       {areaHa.toLocaleString("en", { maximumFractionDigits: 1 })} ha
                     </span>
@@ -413,6 +424,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                         title="Majority confidence tier of this patch's pixels"
                       >
                         {confidence}
+                        {confidencePct !== null ? ` · ${confidencePct}%` : ""}
                       </span>
                     )}
                     <span className="mono-nums ml-auto shrink-0 whitespace-nowrap">{coords}</span>
@@ -668,6 +680,51 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
             <MethodRow label="Confidence" title="Share of changed pixels per confidence tier.">
               {confidenceShares(stats.confidence)}
             </MethodRow>
+          )}
+          {metadata.rules && (
+            <MethodRow label="Rules" title="Change-rule mode (CHANGE_RULES) that produced this result.">
+              {metadata.rules === "fused"
+                ? "fused · evidence-scored"
+                : metadata.rules === "ml"
+                  ? "ml · trained model"
+                  : "legacy · shipped thresholds"}
+            </MethodRow>
+          )}
+          {metadata.evidence && (
+            <>
+              <MethodRow
+                label="SAR"
+                title={
+                  metadata.evidence.s1 && "orbit" in metadata.evidence.s1 && metadata.evidence.s1WindowDays
+                    ? `Sentinel-1 GRD temporal median within ±${metadata.evidence.s1WindowDays} days of ${metadata.dateA} and ${metadata.dateB} (one orbit direction per side).`
+                    : "Sentinel-1 GRD evidence (one orbit direction per side)."
+                }
+              >
+                {!metadata.evidence.s1
+                  ? "off"
+                  : "orbit" in metadata.evidence.s1
+                    ? `Sentinel-1 ${metadata.evidence.s1.orbit}${
+                        metadata.evidence.s1WindowDays
+                          ? ` · ±${metadata.evidence.s1WindowDays} d median`
+                          : ""
+                      }`
+                    : `unavailable (${metadata.evidence.s1.skipped})`}
+              </MethodRow>
+              <MethodRow
+                label="Prior"
+                title="ESA WorldCover 2021 land-cover before date A gates new built-up/water."
+              >
+                {metadata.evidence.worldCover ? "WorldCover 2021" : "off"}
+              </MethodRow>
+              <MethodRow
+                label="Terrain"
+                title="Copernicus DEM hillshade-shadow mask suppresses false water."
+              >
+                {metadata.evidence.terrain && metadata.evidence.demInstance
+                  ? `${metadata.evidence.demInstance} shadow mask`
+                  : "off"}
+              </MethodRow>
+            </>
           )}
         </dl>
         {pairChanged && !running && (

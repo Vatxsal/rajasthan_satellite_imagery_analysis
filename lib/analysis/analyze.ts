@@ -18,22 +18,27 @@
 import { getServerEnv } from "@/lib/env";
 import type { BBox } from "@/lib/data";
 import { fetchCompareCompositeRaster, fetchCompareRaster } from "./fetch";
-import { parseCompareRaster, parseCompositeRaster, toIndexRasters, type ParsedCompositeRaster } from "./parse";
+import { parseCompareRaster, parseCompositeRaster, parseElevationRaster, toIndexRasters, type ParsedCompositeRaster } from "./parse";
 import {
   prepareCompare,
   processCompare,
   type CompareArtifact,
   type CompareStage,
   type CompareSide,
+  type EvidenceInputs,
   type RasterInputs,
   type RunCompareInput,
 } from "./process";
+import { defaultS1Deps, fetchS1Pair, sarFeatures } from "./s1";
+import { defaultWorldCoverDeps, fetchWorldCoverPrior } from "./prior";
+import { computeTerrain, fetchElevationRaster } from "./terrain";
 
 export type {
   CompareArtifact,
   CompareStage,
   CompareZone,
   CompareSide,
+  EvidenceInputs,
   RasterInputs,
   RunCompareInput,
 } from "./process";
@@ -43,12 +48,81 @@ export { prepareCompare, processCompare } from "./process";
  *  other side is still being awaited (the rejection is rethrown on await). */
 const swallow = (): void => undefined;
 
+/**
+ * Phase 3 — fused evidence fetch: S1 pair, WorldCover prior and DEM terrain
+ * in parallel, each failing gracefully to "off" (null). Started BEFORE the
+ * optical fetches so the extra renders/COG reads overlap them; awaited after
+ * both sides are in.
+ */
+async function fetchFusedEvidence(
+  input: RunCompareInput,
+  prep: ReturnType<typeof prepareCompare>,
+): Promise<EvidenceInputs> {
+  const env = getServerEnv();
+  const { bbox, grid, width, height } = prep;
+  const size = { width, height };
+  const plan = input.evidencePlan;
+  const s1WindowDays = plan?.s1WindowDays ?? null;
+
+  const s1Task =
+    s1WindowDays != null && s1WindowDays > 0
+      ? fetchS1Pair(
+          { dateA: input.dateA, dateB: input.dateB },
+          defaultS1Deps(input.geometry, s1WindowDays, size),
+        ).catch((error: unknown) => ({
+          ok: false as const,
+          reason: "fetch-failed" as const,
+          detail: String(error),
+        }))
+      : Promise.resolve(null);
+  const priorTask = env.WORLDCOVER_ENABLED
+    ? defaultWorldCoverDeps()
+        .then((deps) =>
+          fetchWorldCoverPrior(
+            { bbox, width, height, pxLon: grid.pxLon, pxLat: grid.pxLat },
+            deps,
+          ),
+        )
+        .catch(() => null)
+    : Promise.resolve(null);
+  const terrainTask = plan?.terrain
+    ? (async () => {
+        const render = await fetchElevationRaster(input.geometry, size);
+        if (!render) return null;
+        const { elevation } = await parseElevationRaster(render.buffer);
+        return { grids: computeTerrain(elevation, grid), demInstance: render.demInstance };
+      })().catch(() => null)
+    : Promise.resolve(null);
+
+  const [s1, prior, terrain] = await Promise.all([s1Task, priorTask, terrainTask]);
+  const out: EvidenceInputs = {};
+  if (s1 && s1.ok) {
+    out.sar = sarFeatures(s1.a, s1.b);
+    out.s1 = { orbit: s1.orbit };
+    out.s1WindowDays = s1WindowDays;
+  } else {
+    out.s1 = { skipped: s1 ? s1.reason : "disabled" };
+  }
+  if (prior) out.prior = prior;
+  if (terrain) {
+    out.terrain = terrain.grids;
+    out.demInstance = terrain.demInstance;
+  }
+  return out;
+}
+
 export async function runCompare(
   input: RunCompareInput,
   onStage?: (stage: CompareStage) => void,
 ): Promise<CompareArtifact> {
   const prep = prepareCompare(input, { puLimit: getServerEnv().PER_ANALYSIS_PU_LIMIT });
   const { bbox, width, height, windowDays, engine } = prep;
+  // Fused and ML rules both consume the Phase 3 evidence streams.
+  const evidenceOn = (input.rules === "fused" || input.rules === "ml") && engine === "v2";
+  // Kick off before the optical renders so evidence latency hides underneath.
+  const evidenceTask = evidenceOn
+    ? fetchFusedEvidence(input, prep)
+    : Promise.resolve<EvidenceInputs>({});
 
   async function fetchCompositeSide(
     date: string,
@@ -99,5 +173,6 @@ export async function runCompare(
   }
 
   onStage?.("analyze");
-  return processCompare(input, inputs);
+  const evidence = await evidenceTask;
+  return processCompare(input, inputs, evidence);
 }

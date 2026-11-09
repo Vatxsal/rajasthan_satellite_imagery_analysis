@@ -50,6 +50,16 @@ const baseSchema = z.object({
   PER_ANALYSIS_PU_LIMIT: z.coerce.number().int().min(0).default(700),
   /** Change engine: v1 = single-date inputs (stable), v2 = composite inputs. */
   CHANGE_ENGINE: z.enum(["v1", "v2"]).default("v1"),
+  /** Change-rule mode: legacy = shipped classifiers; fused = Phase 3 rules
+   *  (SAR + WorldCover + terrain evidence); ml = Phase 4 model (needs a
+   *  trained model file). Both fused and ml run the v2 engine. */
+  CHANGE_RULES: z.enum(["legacy", "fused", "ml"]).default("fused"),
+  /** Sentinel-1 SAR evidence for the fused rules (each side = 1 extra render). */
+  S1_ENABLED: boolEnv().default(true),
+  /** ±days around each date for the S1 temporal median (one orbit per side). */
+  S1_WINDOW_DAYS: z.coerce.number().int().min(0).max(15).default(6),
+  /** ESA WorldCover land-cover prior (2021 v200 COG windows; graceful off). */
+  WORLDCOVER_ENABLED: boolEnv().default(true),
   /** Per-IP budget for /api/compare/analyze (each run costs 2 Process renders). */
   COMPARE_RATE_LIMIT_PER_MIN: z.coerce.number().positive().default(6),
   /** Per-IP budget for /api/compare/summary (Gemini). */
@@ -138,6 +148,10 @@ export interface ServerEnv {
   COMPARE_MAX_PX: number;
   PER_ANALYSIS_PU_LIMIT: number;
   CHANGE_ENGINE: "v1" | "v2";
+  CHANGE_RULES: "legacy" | "fused" | "ml";
+  S1_ENABLED: boolean;
+  S1_WINDOW_DAYS: number;
+  WORLDCOVER_ENABLED: boolean;
   COMPARE_RATE_LIMIT_PER_MIN: number;
   AI_SUMMARY_RATE_LIMIT_PER_MIN: number;
   GEMINI_API_KEY?: string;
@@ -224,4 +238,18 @@ export function getServerEnv(): ServerEnv {
   validateEmailSettings(parsed.data);
   envHolder.cached = parsed.data;
   return envHolder.cached;
+}
+
+/**
+ * CHANGE_RULES selects the classifier; the fused rules (Phase 3) and the ML
+ * model (Phase 4) both run on the v2 composite machinery, so "fused"/"ml"
+ * resolve the engine to "v2" regardless of CHANGE_ENGINE. `legacy` honours
+ * CHANGE_ENGINE as before.
+ */
+export function resolveChangeRules(env: Pick<ServerEnv, "CHANGE_RULES" | "CHANGE_ENGINE">): {
+  rules: "legacy" | "fused" | "ml";
+  engine: "v1" | "v2";
+} {
+  const rules = env.CHANGE_RULES;
+  return { rules, engine: rules === "legacy" ? env.CHANGE_ENGINE : "v2" };
 }

@@ -570,7 +570,9 @@ function hotspotPopupHtml(
       ? `<div class="hs-pop-row"><span class="k">Tehsil</span><span class="v">${escapeHtml(tehsil)}</span></div>`
       : "") +
     (hotspot?.confidence
-      ? `<div class="hs-pop-row"><span class="k">Confidence</span><span class="v">${escapeHtml(hotspot.confidence)}</span></div>`
+      ? `<div class="hs-pop-row"><span class="k">Confidence</span><span class="v">${escapeHtml(hotspot.confidence)}${
+          typeof hotspot.confidencePct === "number" ? ` · ${hotspot.confidencePct}%` : ""
+        }</span></div>`
       : "") +
     (hotspot?.subLabel
       ? `<div class="hs-pop-row"><span class="k">Note</span><span class="v">${escapeHtml(hotspot.subLabel)}</span></div>`
@@ -611,6 +613,9 @@ function featureToHotspot(feature: GeoJSON.Feature): Hotspot | null {
     polygon: geometry && geometry.type === "MultiPolygon" ? geometry : null,
     ...(typeof props.confidence === "string"
       ? { confidence: props.confidence as Hotspot["confidence"] }
+      : {}),
+    ...(typeof props.confidencePct === "number" && Number.isFinite(props.confidencePct)
+      ? { confidencePct: Math.round(props.confidencePct) }
       : {}),
     ...(typeof props.subLabel === "string" ? { subLabel: props.subLabel } : {}),
     ...(Array.isArray(props.tags) ? { tags: props.tags as string[] } : {}),

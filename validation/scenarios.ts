@@ -18,16 +18,39 @@
  *   scenario-clouds   — A-side cloud blob on stable ground (no edge bleed)
  */
 import { deriveIndices, type CompositeBands } from "../lib/analysis/composite";
+import type { ClipGeometry } from "../lib/cdse/geometry";
+import {
+  COMPOSITE_ERODE_RADIUS,
+  scaledThresholds,
+  seasonalTag,
+  type CompareRules,
+} from "../lib/analysis/config";
+import { combineValidity, dilateInvalid } from "../lib/analysis/classify";
 import { makeAnalysisGrid } from "../lib/analysis/grid";
-import { patchToMultiPolygon } from "../lib/analysis/polygon";
+import { makeFeatureExtractor, ML_FEATURES } from "../lib/analysis/model";
+import { rasterizeAreaMask } from "../lib/analysis/mask";
 import {
   processCompare,
   type CompareSide,
+  type EvidenceInputs,
   type RasterInputs,
   type RunCompareInput,
 } from "../lib/analysis/process";
+import { WC, type WorldCoverPrior } from "../lib/analysis/prior";
+import type { SarFeatures } from "../lib/analysis/s1";
+import type { TerrainGrids } from "../lib/analysis/terrain";
 import type { ParsedCompositeRaster } from "../lib/analysis/parse";
 import type { CompareEngine } from "../lib/analysis/types";
+import {
+  adaptiveThresholds,
+  applyShift,
+  deriveV2Indices,
+  estimateShift,
+  normalizeBands,
+  type RecentIndices,
+  type V2Indices,
+} from "../lib/analysis/v2";
+import type { ClassifyFusedInput } from "../lib/analysis/fused";
 import type { GeoJsonFeature, GeoJsonFeatureCollection, RefClass, ValidationCase } from "./engine";
 
 /* ------------------------------------------------------------------ */
@@ -57,10 +80,15 @@ const CLASS_TO_REF: RefClass[] = [
   "no_change",
   "veg_gain",
   "veg_loss",
-  "builtup_gain",
+  "builtup_increase",
   "water_gain",
   "water_loss",
 ];
+
+/** RefClass → its index in CLASS_TO_REF (truth label grid). */
+const REF_INDEX: Record<string, number> = Object.fromEntries(
+  CLASS_TO_REF.map((cls, i) => [cls, i]),
+);
 
 /* ------------------------------------------------------------------ */
 /* deterministic noise                                                 */
@@ -105,7 +133,7 @@ interface ScenarioSpec {
 const CLASS_SHAPES: Shape[] = [
   { cls: "veg_loss", rect: [74.006, 26.028, 74.014, 26.036], a: "veg", b: "bare" },
   { cls: "water_gain", rect: [74.018, 26.028, 74.025, 26.034], a: "bare", b: "water" },
-  { cls: "builtup_gain", rect: [74.028, 26.027, 74.036, 26.033], a: "bare", b: "built" },
+  { cls: "builtup_increase", rect: [74.028, 26.027, 74.036, 26.033], a: "bare", b: "built" },
   { cls: "water_loss", rect: [74.006, 26.007, 74.013, 26.013], a: "water", b: "bare" },
   { cls: "veg_gain", rect: [74.018, 26.007, 74.026, 26.014], a: "bare", b: "veg" },
 ];
@@ -149,6 +177,8 @@ interface SynthGrid {
   /** Surface state per pixel per side (state → index 0-3). */
   aState: Uint8Array;
   bState: Uint8Array;
+  /** Ground-truth label per pixel (index into CLASS_TO_REF; 0 = no_change). */
+  label: Uint8Array;
   /** 1 where A-side is cloud/nodata. */
   aInvalid: Uint8Array;
   /** 1 where the pixel is part of an injected speckle false change. */
@@ -166,6 +196,7 @@ function buildTruth(spec: ScenarioSpec): SynthGrid {
   const n = width * height;
   const aState = new Uint8Array(n).fill(STATE_INDEX.veg);
   const bState = new Uint8Array(n).fill(STATE_INDEX.veg);
+  const label = new Uint8Array(n); // 0 = no_change
   const aInvalid = new Uint8Array(n);
   const speckle = new Uint8Array(n);
 
@@ -177,6 +208,7 @@ function buildTruth(spec: ScenarioSpec): SynthGrid {
         if (inRect(lon, lat, shape.rect)) {
           aState[i] = STATE_INDEX[shape.a];
           bState[i] = STATE_INDEX[shape.b];
+          label[i] = REF_INDEX[shape.cls];
         }
       }
       if (spec.cloud && inRect(lon, lat, spec.cloud)) aInvalid[i] = 1;
@@ -208,7 +240,7 @@ function buildTruth(spec: ScenarioSpec): SynthGrid {
       placed++;
     }
   }
-  return { width, height, aState, bState, aInvalid, speckle };
+  return { width, height, aState, bState, label, aInvalid, speckle };
 }
 
 /** Noisy band cube for one side: 7 Float32Arrays of length w×h. */
@@ -310,38 +342,107 @@ function referenceCollection(spec: ScenarioSpec): GeoJsonFeatureCollection {
   return { type: "FeatureCollection", features };
 }
 
-/** Vectors EVERY kept patch (not just the top-10 hotspots) for the harness. */
-function predictionCollection(
-  classGrid: Uint8Array,
-  labels: Int32Array,
-  width: number,
-  height: number,
-  bbox: [number, number, number, number],
-): GeoJsonFeatureCollection {
-  const grid = makeAnalysisGrid(bbox, width, height);
-  const buckets = new Map<number, number[]>();
-  for (let i = 0; i < labels.length; i++) {
-    const label = labels[i];
-    if (label === 0) continue;
-    let bucket = buckets.get(label);
-    if (!bucket) {
-      bucket = [];
-      buckets.set(label, bucket);
-    }
-    bucket.push(i);
-  }
+/**
+ * Vectors EVERY kept patch for the harness. Phase 6: we consume
+ * `artifact.patchVectors` directly — same kept patches, plus the majority
+ * sub-label/confidence properties the metrics harness needs to score
+ * bare_agri against real reference sets (featureClass reads subLabel).
+ * Polygon/MultiPolygon only (patch vectorization never emits collections).
+ */
+function toValidationPrediction(fc: GeoJSON.FeatureCollection): GeoJsonFeatureCollection {
   const features: GeoJsonFeature[] = [];
-  buckets.forEach((pixels) => {
-    const code = classGrid[pixels[0]];
-    const polygon = patchToMultiPolygon(pixels, width, grid);
-    if (!polygon) return;
+  for (const f of fc.features) {
+    const g = f.geometry;
+    if (!g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) continue;
     features.push({
       type: "Feature",
-      properties: { cls: CLASS_TO_REF[code] ?? "no_change", classCode: code },
-      geometry: polygon,
+      properties: f.properties ?? null,
+      geometry: g,
     });
-  });
+  }
   return { type: "FeatureCollection", features };
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 6 — synthetic fused evidence (truth-derived, by construction) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * EvidenceInputs derived from the truth grids so the fused gates run for
+ * real without any network: the prior is "what the land-cover map said
+ * BEFORE date A" (veg→cropland, bare→bare, water→water, built→built-up),
+ * SAR water masks mirror the truth transitions (S1 penetrates the optical
+ * cloud, so valid everywhere) with a +1.5 dB VH rise on bare→built, and
+ * terrain is a flat plain (shadow 0 — no suppression). Gates then preserve
+ * truth classes by construction: this measures gate correctness /
+ * no-regression and the PU/runtime cost, NOT real-world accuracy gains
+ * (those need human-drawn references — none exist yet).
+ */
+function buildSyntheticEvidence(truth: SynthGrid): EvidenceInputs {
+  const n = truth.width * truth.height;
+
+  const priorCls = new Uint8Array(n);
+  const priorValid = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const s = truth.aState[i];
+    priorCls[i] =
+      s === STATE_INDEX.veg
+        ? WC.cropland
+        : s === STATE_INDEX.bare
+          ? WC.bare
+          : s === STATE_INDEX.water
+            ? WC.water
+            : WC.builtup;
+    priorValid[i] = 1;
+  }
+  const prior: WorldCoverPrior = {
+    cls: priorCls,
+    valid: priorValid,
+    tiles: ["synthetic"],
+    year: 2021,
+  };
+
+  const waterMaskA = new Uint8Array(n);
+  const waterMaskB = new Uint8Array(n);
+  const dVV = new Float32Array(n);
+  const dVH = new Float32Array(n);
+  const dRatio = new Float32Array(n);
+  const sarValid = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    waterMaskA[i] = truth.aState[i] === STATE_INDEX.water ? 1 : 0;
+    waterMaskB[i] = truth.bState[i] === STATE_INDEX.water ? 1 : 0;
+    sarValid[i] = 1;
+    const roughening =
+      truth.aState[i] === STATE_INDEX.bare && truth.bState[i] === STATE_INDEX.built;
+    dVH[i] = roughening ? 1.5 : 0; // ≥ FUSED.sarBuiltDvhDb (1.0) on bare→built
+    dVV[i] = roughening ? 1.5 : 0.1;
+    dRatio[i] = dVV[i] - dVH[i];
+  }
+  const sar: SarFeatures = {
+    dVV,
+    dVH,
+    dRatio,
+    waterMaskA,
+    waterMaskB,
+    thresholdA: -17,
+    thresholdB: -17,
+    valid: sarValid,
+  };
+
+  const terrain: TerrainGrids = {
+    slopeDeg: new Float32Array(n),
+    hillshade: new Float32Array(n).fill(Math.SQRT1_2), // flat: sin(45°)
+    shadow: new Uint8Array(n), // no terrain-shadow suppression on the plain
+  };
+
+  return {
+    sar,
+    s1: { orbit: "ASC" },
+    s1WindowDays: 6,
+    prior,
+    terrain,
+    demInstance: "COPERNICUS_30",
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -351,8 +452,12 @@ function predictionCollection(
 const DATE_A = "2026-05-01";
 const DATE_B = "2026-05-20"; // gap 19 d, outside Rajasthan seasonal windows
 
-function runScenario(engine: CompareEngine, spec: ScenarioSpec): ValidationCase {
+function runScenario(engine: CompareEngine, spec: ScenarioSpec, rules?: CompareRules): ValidationCase {
   const truth = buildTruth(spec);
+  // Fused (and ML) rules exist on the v2 composite machinery only — a fused
+  // request against v1 inputs resolves to v2 (mirrors resolveChangeRules).
+  const effectiveEngine: CompareEngine =
+    rules === "fused" || rules === "ml" ? "v2" : engine;
   const input: RunCompareInput = {
     geometry: {
       type: "Polygon",
@@ -365,12 +470,16 @@ function runScenario(engine: CompareEngine, spec: ScenarioSpec): ValidationCase 
     areaId: `scenario-${spec.name.toLowerCase().replace(/\s+/g, "-")}`,
     sensitivity: "medium",
     maxPx: WIDTH_PX,
-    engine,
-    inputMode: engine === "v2" ? "composite" : undefined,
-    compositeWindowDays: engine === "v2" ? 7 : undefined,
+    engine: effectiveEngine,
+    inputMode: effectiveEngine === "v2" ? "composite" : undefined,
+    compositeWindowDays: effectiveEngine === "v2" ? 7 : undefined,
+    ...(rules ? { rules } : {}),
+    ...(rules === "fused"
+      ? { evidencePlan: { s1WindowDays: 6, terrain: true } as const }
+      : {}),
   };
   const inputs: RasterInputs =
-    engine === "v2"
+    effectiveEngine === "v2"
       ? {
           parsedA: buildCompositeSide(truth, "a", 1001, 1002),
           parsedB: buildCompositeSide(truth, "b", 2001, 2002),
@@ -379,25 +488,114 @@ function runScenario(engine: CompareEngine, spec: ScenarioSpec): ValidationCase 
           sideA: buildSingleSide(truth, "a", 1001),
           sideB: buildSingleSide(truth, "b", 2001),
         };
-  const artifact = processCompare(input, inputs);
-  const prediction = predictionCollection(
-    artifact.classGrid,
-    artifact.labels,
-    artifact.width,
-    artifact.height,
-    artifact.bbox,
-  );
+  const evidence: EvidenceInputs =
+    rules === "fused" ? buildSyntheticEvidence(truth) : {};
+  const artifact = processCompare(input, inputs, evidence);
   return {
-    name: `${spec.name}-${engine}`,
+    name: `${spec.name}-${effectiveEngine}${rules === "legacy" ? "-legacy" : rules === "fused" ? "-fused" : ""}`,
     reference: referenceCollection(spec),
-    prediction,
-    meta: { dateA: DATE_A, dateB: DATE_B, engine },
+    prediction: toValidationPrediction(artifact.patchVectors),
+    meta: {
+      dateA: DATE_A,
+      dateB: DATE_B,
+      engine: effectiveEngine,
+      ...(rules ? { rules } : {}),
+    },
   };
 }
 
-/** The scenario set for one engine (optionally a single scenario by name). */
-export function buildScenarios(engine: CompareEngine, only?: string): ValidationCase[] {
-  return SPECS.filter((s) => !only || s.name === only || `${s.name}-${engine}` === only).map(
-    (spec) => runScenario(engine, spec),
-  );
+/**
+ * The scenario set for one engine (optionally a single scenario by base or
+ * full name). `rules` selects the rule mode: undefined = engine default
+ * (legacy), "legacy" = explicit legacy rules, "fused" = Phase 3 rules with
+ * synthetic truth-derived evidence (forces the v2 engine).
+ */
+export function buildScenarios(
+  engine: CompareEngine,
+  only?: string,
+  rules?: CompareRules,
+): ValidationCase[] {
+  const all = SPECS.map((spec) => runScenario(engine, spec, rules));
+  if (!only) return all;
+  return all.filter((c) => c.name === only || c.name.startsWith(`${only}-`));
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 4 — per-pixel feature rows for /ml/train.py                   */
+/* ------------------------------------------------------------------ */
+
+export interface FeatureRow {
+  scenario: string;
+  /** Ground truth (CLASS_TO_REF vocabulary). */
+  label: RefClass;
+  /** Raw feature values in ML_FEATURES order. */
+  features: Float32Array;
+}
+
+/**
+ * Streams per-pixel training rows for every scenario: the production
+ * pre-classification pipeline (co-registration → normalisation → index
+ * stacks → adaptive thresholds) plus the truth label from construction.
+ * Cloud/invalid pixels are skipped. Consumed by `npm run features`.
+ */
+export function* featureRows(only?: string): Generator<FeatureRow> {
+  for (const spec of SPECS) {
+    if (only && spec.name !== only) continue;
+    const truth = buildTruth(spec);
+    const { width, height, label } = truth;
+    const n = width * height;
+
+    const pa = buildCompositeSide(truth, "a", 1001, 1002);
+    const pb = buildCompositeSide(truth, "b", 2001, 2002);
+    const grid = makeAnalysisGrid(BBOX, width, height);
+    const geometry: ClipGeometry = { type: "Polygon", coordinates: [rectRing(BBOX)] };
+    const inside = rasterizeAreaMask(geometry, grid);
+
+    // Same radiometric pipeline processCompare runs before classification.
+    const preMask = combineValidity(pa.valid, pb.valid, inside);
+    const co = estimateShift(pa, pb, preMask, width, height);
+    if (co.applied) applyShift(pa, pa.valid, co.dx, co.dy, width, height);
+    const normMask = co.applied ? combineValidity(pa.valid, pb.valid, inside) : preMask;
+    normalizeBands(pa, pb, normMask);
+    const a: V2Indices = deriveV2Indices(pa);
+    const b: V2Indices = deriveV2Indices(pb);
+    const aRecent: RecentIndices = {
+      ndvi: pa.recentNdvi,
+      mndwi: pa.recentMndwi,
+      ndbi: pa.recentNdbi,
+    };
+    const bRecent: RecentIndices = {
+      ndvi: pb.recentNdvi,
+      mndwi: pb.recentMndwi,
+      ndbi: pb.recentNdbi,
+    };
+    const valid = dilateInvalid(
+      combineValidity(pa.valid, pb.valid, inside),
+      width,
+      height,
+      COMPOSITE_ERODE_RADIUS,
+    );
+    const adaptive = adaptiveThresholds(a, b, valid, scaledThresholds("medium"));
+
+    const input: ClassifyFusedInput = {
+      a,
+      b,
+      aRecent,
+      bRecent,
+      valid,
+      inside,
+      t: adaptive.t,
+      scales: adaptive.scales,
+      seasonalLossTag: seasonalTag(DATE_B, "loss"),
+      seasonalGainTag: seasonalTag(DATE_B, "gain"),
+      shortGap: false,
+    };
+    const extract = makeFeatureExtractor(input);
+    const buf = new Float32Array(ML_FEATURES.length);
+    for (let i = 0; i < n; i++) {
+      if (inside[i] !== 1 || valid[i] !== 1) continue;
+      extract(i, buf);
+      yield { scenario: spec.name, label: CLASS_TO_REF[label[i]] ?? "no_change", features: buf.slice() };
+    }
+  }
 }

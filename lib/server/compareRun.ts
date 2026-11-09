@@ -26,7 +26,7 @@ import type {
 import { compareCacheKey, compareResultCache, type CompareArtifactEntry } from "@/lib/cache";
 import { paramsToQuery } from "@/lib/compare/params";
 import { ensureCached } from "@/lib/compare/ensureArtifact";
-import { dataSource, getServerEnv } from "@/lib/env";
+import { dataSource, getServerEnv, resolveChangeRules } from "@/lib/env";
 import { tehsilsFc } from "@/lib/data/boundaries";
 import { apiError } from "@/lib/server/api";
 import { resolveArea, type ResolvedArea } from "@/lib/server/areas";
@@ -86,6 +86,8 @@ export interface ResolvedCompareParams {
   sensitivity: Sensitivity;
   minPatchHa: number;
   engine: CompareEngine;
+  /** CHANGE_RULES (fused/ml force the v2 engine — resolveChangeRules). */
+  rules: "legacy" | "fused" | "ml";
   inputMode: CompareInputMode;
   compositeWindowDays: number;
   maxPx: number;
@@ -140,9 +142,14 @@ export function resolveCompareParams(rawBody: unknown): ResolvedCompareParams {
     body.dateA < body.dateB ? [body.dateA, body.dateB] : [body.dateB, body.dateA];
 
   // Engine v1 always runs single-date inputs; v2 honours the request mode.
-  const engine = env.CHANGE_ENGINE;
+  // CHANGE_RULES=fused forces the v2 composite engine (resolveChangeRules).
+  const { rules, engine } = resolveChangeRules(env);
   const inputMode = engine === "v2" ? body.inputMode : "single";
   const compositeWindowDays = inputMode === "composite" ? body.compositeWindowDays : 0;
+  const evidencePlan =
+    rules !== "legacy"
+      ? { s1WindowDays: env.S1_ENABLED ? env.S1_WINDOW_DAYS : null, terrain: true }
+      : null;
 
   const area = resolveArea(body.level, body.areaId);
   if (!area) {
@@ -168,6 +175,9 @@ export function resolveCompareParams(rawBody: unknown): ResolvedCompareParams {
     engine,
     inputMode,
     compositeWindowDays,
+    rules,
+    s1WindowDays: evidencePlan?.s1WindowDays ?? 0,
+    worldCover: rules !== "legacy" && env.WORLDCOVER_ENABLED ? 1 : 0,
   });
 
   return {
@@ -179,6 +189,7 @@ export function resolveCompareParams(rawBody: unknown): ResolvedCompareParams {
     sensitivity: body.sensitivity,
     minPatchHa: body.minPatchHa,
     engine,
+    rules,
     inputMode,
     compositeWindowDays,
     maxPx: env.COMPARE_MAX_PX,
@@ -279,6 +290,7 @@ export async function ensureCompare(
     resolved.key,
     async (): Promise<CompareArtifactEntry> => {
       const hits = options.sceneHits ?? (await validateScenes(resolved));
+      const env = getServerEnv();
       const artifact = await runCompare(
         {
           geometry: resolved.area.geometry,
@@ -296,6 +308,14 @@ export async function ensureCompare(
           engine: resolved.engine,
           inputMode: resolved.inputMode,
           compositeWindowDays: resolved.compositeWindowDays,
+          rules: resolved.rules,
+          evidencePlan:
+            resolved.rules !== "legacy"
+              ? {
+                  s1WindowDays: env.S1_ENABLED ? env.S1_WINDOW_DAYS : null,
+                  terrain: true,
+                }
+              : null,
         },
         options.onStage,
       );

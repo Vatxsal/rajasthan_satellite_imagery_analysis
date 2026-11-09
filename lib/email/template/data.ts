@@ -1,11 +1,13 @@
 import type {
   ClassStat,
+  CompareRulesMode,
   ConfidenceTier,
+  EvidenceMeta,
   SummaryData,
   SummaryLanguage,
   TehsilZonalStat,
 } from "../../analysis/types";
-import { getCopy } from "./copy";
+import { getCopy, type ReportCopy } from "./copy";
 
 /** Hard cap from the email spec: rendered HTML above this never sends. */
 export const MAX_HTML_BYTES = 100_000;
@@ -28,6 +30,8 @@ export interface ReportEventRow {
   classLabel: string;
   hex: string;
   confidence: ConfidenceTier | null;
+  /** Evidence sub-label (e.g. "likely harvest", seasonal loss) — Phase 5. */
+  subLabel?: string | null;
   areaHa: number;
   place: string;
   lat: number;
@@ -80,6 +84,10 @@ export interface ReportEmailData {
   deepLink: string;
   siteUrl: string;
   generatedAt: string;
+  /** Method & evidence parts for the Overview line (null = nothing known). */
+  method: { rules: string; sar: string; prior: string; terrain: string } | null;
+  /** Evidence caveats for the Reliability box (always ≥1 item). */
+  caveats: string[];
 }
 
 /** Stats slice the composer needs (route passes these straight from the result). */
@@ -206,6 +214,7 @@ interface EventFeatureProperties {
   areaHa?: number;
   centroid?: [number, number];
   confidence?: ConfidenceTier;
+  subLabel?: string;
   tehsilName?: string | null;
 }
 
@@ -227,6 +236,8 @@ export function topEvents(
         classLabel: String(props.classLabel ?? ""),
         hex: rgbToHex([128, 128, 128]),
         confidence: props.confidence ?? null,
+        subLabel:
+          typeof props.subLabel === "string" && props.subLabel ? props.subLabel : null,
         areaHa: Number(props.areaHa ?? 0),
         place: String(props.tehsilName ?? ""),
         lat: Number(centroid[1]),
@@ -286,12 +297,64 @@ export interface ReportSourceInput {
   deepLink: string;
   siteUrl: string;
   generatedAt: string;
+  /** Rule mode that produced the result (Phase 5 method line/caveats). */
+  rules?: CompareRulesMode | null;
+  /** Evidence actually available (Phase 5 method line/caveats). */
+  evidence?: EvidenceMeta | null;
+}
+
+/** Method & evidence parts for the Overview line (null = pre-Phase-3, unknown). */
+function buildMethodParts(
+  copy: ReportCopy,
+  rules: CompareRulesMode | null,
+  evidence: EvidenceMeta | null,
+): ReportEmailData["method"] {
+  if (!rules && !evidence) return null;
+  const sar = !evidence?.s1
+    ? copy.methodSarOff
+    : "orbit" in evidence.s1
+      ? copy.methodSar(evidence.s1.orbit, evidence.s1WindowDays)
+      : copy.methodSarSkipped(evidence.s1.skipped);
+  const prior = evidence?.worldCover ? copy.methodPrior : copy.methodPriorOff;
+  const terrain =
+    evidence?.terrain && evidence.demInstance
+      ? copy.methodTerrain(evidence.demInstance)
+      : copy.methodTerrainOff;
+  return {
+    rules: copy.methodRules[rules ?? "legacy"],
+    sar,
+    prior,
+    terrain,
+  };
+}
+
+/** Evidence caveats for the Reliability box (always at least the tiers note). */
+function buildCaveats(
+  copy: ReportCopy,
+  rules: CompareRulesMode | null,
+  evidence: EvidenceMeta | null,
+): string[] {
+  const out: string[] = [];
+  const effective = rules ?? "legacy";
+  if (effective === "legacy") out.push(copy.caveats.legacy);
+  if (evidence) {
+    if (evidence.s1 && "skipped" in evidence.s1) {
+      out.push(copy.caveats.sarSkipped(evidence.s1.skipped));
+    }
+    if (effective !== "legacy" && !evidence.worldCover) out.push(copy.caveats.noPrior);
+    if (effective !== "legacy" && !evidence.terrain) out.push(copy.caveats.noTerrain);
+  }
+  out.push(copy.caveats.confidenceNote);
+  return out;
 }
 
 export function buildReportEmailData(input: ReportSourceInput): ReportEmailData {
   const { stats } = input;
+  const copy = getCopy(input.language);
   const classes = classRows(stats);
   const events = withClassColors(topEvents(input.events), classes);
+  const rules = input.rules ?? null;
+  const evidence = input.evidence ?? null;
   const changedPct =
     stats.validHa > 0 ? (stats.changedHa / stats.validHa) * 100 : 0;
   return {
@@ -320,6 +383,8 @@ export function buildReportEmailData(input: ReportSourceInput): ReportEmailData 
     deepLink: input.deepLink,
     siteUrl: input.siteUrl,
     generatedAt: input.generatedAt,
+    method: buildMethodParts(copy, rules, evidence),
+    caveats: buildCaveats(copy, rules, evidence),
   };
 }
 

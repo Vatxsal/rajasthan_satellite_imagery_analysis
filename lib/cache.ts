@@ -165,7 +165,8 @@ export function tileCacheKey(input: {
   return createHash("sha256").update(payload).digest("hex");
 }
 
-/** Cache key for one comparison run (area × dates × sensitivity × MMU × engine × input). */
+/** Cache key for one comparison run (area × dates × sensitivity × MMU × engine × input
+ *  × rules × evidence flags — Phase 3 fused runs must never hit a legacy entry). */
 export function compareCacheKey(input: {
   areaId: string;
   level: string;
@@ -176,6 +177,12 @@ export function compareCacheKey(input: {
   engine: string;
   inputMode: string;
   compositeWindowDays: number;
+  /** CHANGE_RULES ("legacy" | "fused"). */
+  rules?: string;
+  /** S1 window in days (0 = SAR off) — affects fused results. */
+  s1WindowDays?: number;
+  /** WorldCover prior on/off — affects fused results. */
+  worldCover?: number;
 }): string {
   const payload = JSON.stringify([
     COMPARE_VERSION,
@@ -188,6 +195,9 @@ export function compareCacheKey(input: {
     input.engine,
     input.inputMode,
     input.compositeWindowDays,
+    input.rules ?? "legacy",
+    input.s1WindowDays ?? 0,
+    input.worldCover ?? 0,
   ]);
   return createHash("sha256").update(payload).digest("hex");
 }

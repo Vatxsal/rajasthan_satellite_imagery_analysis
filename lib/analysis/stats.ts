@@ -40,6 +40,8 @@ export interface ComputeStatsArgs {
   subs?: Uint8Array | null;
   /** v2 PERSIST codes per pixel; null for v1. */
   persist?: Uint8Array | null;
+  /** Phase 3 fused: 0-100 confidence per pixel; null otherwise. */
+  conf?: Uint8Array | null;
   /** v2 short-gap flag for vegetation confidence tags (§2.6). */
   shortGap?: boolean;
 }
@@ -51,10 +53,14 @@ const TIER_TEXT: Record<number, ConfidenceTier> = {
 };
 
 /** SUB codes that mark a seasonal crop cycle (patch tag "crop-cycle"). */
-const CROP_SUBS = new Set<number>([SUB.vegLossHarvest, SUB.vegGainSeasonal]);
+const CROP_SUBS = new Set<number>([
+  SUB.vegLossHarvest,
+  SUB.vegGainSeasonal,
+  SUB.bareBuiltAgriculture,
+]);
 
 export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
-  const { classGrid, labels, grid, zones, zoneMeta, tiers, subs, persist, shortGap } = args;
+  const { classGrid, labels, grid, zones, zoneMeta, tiers, subs, persist, conf, shortGap } = args;
   const pxAreaHa = (grid.metersX * grid.metersY) / M2_PER_HA;
   const counts = new Uint32Array(256);
   const tierCounts = { high: 0, medium: 0, low: 0 };
@@ -164,6 +170,7 @@ export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
     tiers: tiers ?? null,
     subs: subs ?? null,
     persist: persist ?? null,
+    conf: conf ?? null,
     shortGap: shortGap ?? false,
   });
   return stats;
@@ -184,12 +191,17 @@ interface PatchAcc {
   subCounts: Map<number, number>;
   /** v2 persistence counts [yes, transient]. */
   persistCounts: [number, number];
+  /** Phase 3 fused: sum + n of 0-100 confidences over the patch pixels. */
+  confSum: number;
+  confN: number;
 }
 
 export interface AuxGrids {
   tiers: Uint8Array | null;
   subs: Uint8Array | null;
   persist: Uint8Array | null;
+  /** Phase 3 fused: 0-100 confidence per pixel; absent for legacy runs. */
+  conf?: Uint8Array | null;
   shortGap: boolean;
 }
 
@@ -250,6 +262,7 @@ function patchTags(input: {
     tags.push("transient");
   }
   if (input.subBest !== 0 && CROP_SUBS.has(input.subBest)) tags.push("crop-cycle");
+  if (input.subBest === SUB.waterGainSeasonal) tags.push("seasonal-water");
   if (input.shortGap && (input.classCode === CLASS.vegLoss || input.classCode === CLASS.vegGain)) {
     tags.push("short-gap");
   }
@@ -287,6 +300,8 @@ function computeHotspots(
         tierCounts: [0, 0, 0],
         subCounts: new Map(),
         persistCounts: [0, 0],
+        confSum: 0,
+        confN: 0,
       };
       patches.set(label, acc);
     }
@@ -302,6 +317,10 @@ function computeHotspots(
     if (aux.persist) {
       if (aux.persist[i] === PERSIST.yes) acc.persistCounts[0] += 1;
       else if (aux.persist[i] === PERSIST.transient) acc.persistCounts[1] += 1;
+    }
+    if (aux.conf) {
+      acc.confSum += aux.conf[i];
+      acc.confN += 1;
     }
     if (col < acc.minCol) acc.minCol = col;
     if (col > acc.maxCol) acc.maxCol = col;
@@ -342,6 +361,8 @@ function computeHotspots(
 
     const tehsilName = majorityZoneName(acc.zoneCounts, zoneMeta);
     const pixels = pixelsByLabel.get(acc.label) ?? [];
+    const confidencePct =
+      acc.confN > 0 ? Math.round(acc.confSum / acc.confN) : undefined;
 
     // v2 confidence/sub-label/tags: majorities over the patch pixels. Ties in
     // tier resolve to the conservative (lower) tier; sub ties to the lower code.
@@ -369,6 +390,7 @@ function computeHotspots(
       tehsilName,
       polygon: patchToMultiPolygon(pixels, width, grid),
       ...(confidence ? { confidence } : {}),
+      ...(confidencePct !== undefined ? { confidencePct } : {}),
       ...(subText !== undefined ? { subLabel: subText } : {}),
       ...(tags ? { tags } : {}),
     };
@@ -406,6 +428,8 @@ export function buildPatchVectors(
       zoneCounts: Map<number, number>;
       subCounts: Map<number, number>;
       persistCounts: [number, number];
+      confSum: number;
+      confN: number;
     }
   >();
   for (let i = 0; i < labels.length; i++) {
@@ -421,6 +445,8 @@ export function buildPatchVectors(
         zoneCounts: new Map(),
         subCounts: new Map(),
         persistCounts: [0, 0],
+        confSum: 0,
+        confN: 0,
       };
       patches.set(label, acc);
     }
@@ -436,6 +462,10 @@ export function buildPatchVectors(
     if (aux.persist) {
       if (aux.persist[i] === PERSIST.yes) acc.persistCounts[0] += 1;
       else if (aux.persist[i] === PERSIST.transient) acc.persistCounts[1] += 1;
+    }
+    if (aux.conf) {
+      acc.confSum += aux.conf[i];
+      acc.confN += 1;
     }
     if (zones) {
       const z = zones[i];
@@ -481,6 +511,8 @@ export function buildPatchVectors(
       if (row < minRow) minRow = row;
       if (row > maxRow) maxRow = row;
     }
+    const confidencePct =
+      acc.confN > 0 ? Math.round(acc.confSum / acc.confN) : undefined;
     // Same availability rule as computeHotspots: v2 evidence fields exist
     // whenever tier or sub grids are present, so hotspots and events agree.
     let confidence: ConfidenceTier | undefined;
@@ -525,6 +557,7 @@ export function buildPatchVectors(
         centroid,
         bbox,
         ...(confidence ? { confidence } : {}),
+        ...(confidencePct !== undefined ? { confidencePct } : {}),
         ...(subText !== undefined ? { subLabel: subText } : {}),
         ...(tags ? { tags } : {}),
         ...(tehsilName ? { tehsilName } : {}),

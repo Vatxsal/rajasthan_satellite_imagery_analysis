@@ -109,6 +109,11 @@ All Copernicus, Gemini and email calls are **server-side**; the browser never se
 | `DAILY_RENDER_BUDGET` | server | `3000` | Daily render cap per instance (`0` = off) |
 | `TILE_CACHE_DIR` | server | unset | Disk tile cache (auto-off on Vercel) |
 | `COMPARE_MAX_PX` / `COMPARE_RATE_LIMIT_PER_MIN` | server | `1500` / `6` | Analysis grid cap and analyze limit |
+| `PER_ANALYSIS_PU_LIMIT` | server | `700` | PU cap per analysis, estimated before fetching (`0` = off) |
+| `CHANGE_RULES` / `CHANGE_ENGINE` | server | `fused` / `v1` | Change-rule mode: `legacy`, `fused` or `ml`; `CHANGE_ENGINE` picks v1/v2 for `legacy` only |
+| `S1_ENABLED` / `S1_WINDOW_DAYS` | server | `true` / `6` | Sentinel-1 GRD evidence for fused/ml rules and its ±day temporal median |
+| `WORLDCOVER_ENABLED` | server | `true` | ESA WorldCover 2021 land-cover prior (free COG reads, no PU cost) |
+| `ML_MODEL_PATH` | server | `artifacts/ml/model.json` | Trained model for `CHANGE_RULES=ml` (missing → `CDSE_ML_MODEL_MISSING`) |
 | `GEMINI_API_KEY` | 🔒 | unset | Enables the Summary tab |
 | `GEMINI_MODEL` / `AI_SUMMARY_RATE_LIMIT_PER_MIN` | server | `gemini-2.5-flash` / `5` | Model (must be in the key's ListModels) and limit |
 | `EMAIL_PROVIDER` | server | `console` | `console` (dev only), `smtp` or `resend` |
@@ -144,8 +149,8 @@ Compare two Sentinel-2 dates over the selected district / tehsil / ILR. Every nu
 
 - **Swipe**: date A left, date B right on two synchronised maps.
 - **Changes**: classified overlay, per-class toggles, opacity, *Boost visibility* (display-only), *Zoom to changes*, PNG / GeoTIFF export.
-- **Stats**: totals, class table, per-tehsil table (click to highlight, optional shading), and a **Method & settings** card (resolution, valid data, scenes, sensitivity and minimum patch re-run, thresholds in collapsible sections), CSV export.
-- **Events**: surviving change patches, largest first, with numbered map markers and a themed popup; GeoJSON export.
+- **Stats**: totals, class table, per-tehsil table (click to highlight, optional shading), and a **Method & settings** card (resolution, valid data, scenes, sensitivity and minimum patch re-run, rules mode, SAR orbit/window, WorldCover prior, terrain mask, thresholds in collapsible sections), CSV export.
+- **Events**: surviving change patches, largest first, with sub-labels (e.g. *likely harvest*), confidence tiers (0–100 %, default **Medium+** filter), numbered map markers and a themed popup; GeoJSON export.
 - **Summary**: AI briefing (below).
 
 Results are cached; if the cache has expired the server **recomputes from the analysis parameters**, so the tabs and exports keep working.
@@ -161,6 +166,16 @@ Results are cached; if the cache has expired the server **recomputes from the an
 | ΔNDBI ≥ +0.10 and ΔNDVI ≤ −0.05 | Bare / built-up increase |
 
 Thresholds live in `lib/analysis/config.ts`; **sensitivity** scales them (low ×1.5, medium ×1, high ×0.7). They are heuristics: treat events as places to check, not confirmed changes. Valid data below 70% triggers a warning.
+
+### 🧪 Evidence, rules & confidence
+
+`CHANGE_RULES` (default **fused**) chooses the classifier:
+
+- **legacy** — the shipped thresholds above (`CHANGE_ENGINE` picks v1 or v2).
+- **fused** — every candidate patch is scored against up to three free evidence layers fetched alongside the optical run: a Sentinel-1 GRD water/roughness median (`S1_ENABLED`, ±`S1_WINDOW_DAYS` days, one orbit direction per side), the ESA WorldCover 2021 land-cover prior before date A (`WORLDCOVER_ENABLED`), and a Copernicus DEM hillshade-shadow mask. Patches get a 0–100 confidence (high ≥ 75, medium ≥ 55) and a sub-label such as *likely harvest* or *seasonal water loss*.
+- **ml** — a softmax model trained on synthetic reference scenes over the same features: `npm run features` then `python ml/train.py` writes `artifacts/ml/model.json` (or `ML_MODEL_PATH`); without a model the API fails with `CDSE_ML_MODEL_MISSING`.
+
+Confidence and sub-labels surface in the events list (default **Medium+** filter), the map popup, the **Method & settings** card (rules mode, SAR orbit and date window, WorldCover on/off, terrain mask), the email report and the AI summary. The evidence layers ride the existing CDSE and WorldCover endpoints — no new services, graceful fallback to optical-only when a layer is unavailable.
 
 ### 🤖 AI Summary (Gemini)
 

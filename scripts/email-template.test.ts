@@ -221,3 +221,58 @@ test("assertHtmlBudget rejects anything over the cap", () => {
   );
   assert.doesNotThrow(() => assertHtmlBudget("a".repeat(100)));
 });
+
+test("Phase 5: event sub-labels, method line and caveats reach the report", async () => {
+  const rendered = await renderReportEmail(buildReportEmailData(fixtureInput("all-events")));
+  // Flatten whitespace AND unescape &amp; so the same phrases match HTML + text.
+  const parts = [rendered.html, rendered.text].map((part) =>
+    part.replace(/\s+/g, " ").replace(/&amp;/g, "&"),
+  );
+  for (const part of parts) {
+    assert.ok(part.includes("Likely harvest / crop cycle"), "event sub-label");
+    assert.ok(part.includes("Method: legacy thresholds"), "method line rules token");
+    assert.ok(part.includes("Reliability & caveats"), "caveats heading");
+    assert.ok(part.includes("Legacy thresholds only"), "legacy caveat");
+    assert.ok(part.includes("Confidence tiers are relative"), "tiers caveat");
+  }
+});
+
+test("Phase 5: fused evidence shows orbit/prior/terrain and SAR-skip caveats", async () => {
+  const data = buildReportEmailData(fixtureInput("fused-evidence"));
+  assert.ok(data.method, "method parts present");
+  assert.equal(data.method?.rules, "fused evidence rules");
+  const rendered = await renderReportEmail(data);
+  const parts = [rendered.html, rendered.text].map((part) => part.replace(/\s+/g, " "));
+  for (const part of parts) {
+    assert.ok(part.includes("Method: fused evidence rules"), "rules token");
+    assert.ok(part.includes("Sentinel-1 ASC"), "orbit");
+    assert.ok(part.includes("±6 d median"), "S1 window");
+    assert.ok(part.includes("WorldCover 2021"), "prior on");
+    assert.ok(part.includes("COPERNICUS_30 shadow mask"), "terrain");
+    assert.ok(!part.includes("Legacy thresholds only"), "no legacy caveat when fused");
+  }
+
+  const skipped = buildReportEmailData({
+    ...fixtureInput("fused-evidence"),
+    evidence: {
+      s1: { skipped: "no scene within window" },
+      s1WindowDays: null,
+      worldCover: false,
+      terrain: false,
+      demInstance: null,
+    },
+  });
+  const renderedSkipped = await renderReportEmail(skipped);
+  const skipParts = [renderedSkipped.html, renderedSkipped.text].map((part) =>
+    part.replace(/\s+/g, " "),
+  );
+  for (const part of skipParts) {
+    assert.ok(
+      part.includes("Sentinel-1 unavailable (no scene within window)"),
+      "skip reason in method line",
+    );
+    assert.ok(part.includes("no scene within window"), "skip caveat");
+    assert.ok(part.includes("No land-cover prior was read"), "prior-off caveat");
+    assert.ok(part.includes("No terrain shadow mask"), "terrain-off caveat");
+  }
+});

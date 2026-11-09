@@ -12,7 +12,7 @@ import {
 } from "@/lib/analysis/prompt";
 import { aiSummaryCache, summaryCacheKey, type CompareArtifactEntry } from "@/lib/cache";
 import { buildShareUrl } from "@/lib/compare/shareLink";
-import { dataSource, getServerEnv } from "@/lib/env";
+import { dataSource, getServerEnv, resolveChangeRules } from "@/lib/env";
 import {
   assertEmailReady,
   emailHash,
@@ -160,7 +160,7 @@ export async function POST(request: Request): Promise<Response> {
       language: body.language,
       includeSummary: body.includeSummary,
       includeImage: body.includeImage,
-      engine: env.CHANGE_ENGINE,
+      engine: resolveChangeRules(env).engine,
       recipientHash: emailHash(recipient),
     });
     if (emailWasRecentlySent(sendKey)) {
@@ -291,6 +291,8 @@ export async function POST(request: Request): Promise<Response> {
       deepLink,
       siteUrl: origin,
       generatedAt: metadata.generatedAt,
+      rules: metadata.rules ?? null,
+      evidence: metadata.evidence ?? null,
     });
 
     // Two-pass image budget: measure the markup first, then ask the JPEG
