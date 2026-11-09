@@ -51,8 +51,9 @@ const baseSchema = z.object({
   /** Change engine: v1 = single-date inputs (stable), v2 = composite inputs. */
   CHANGE_ENGINE: z.enum(["v1", "v2"]).default("v1"),
   /** Change-rule mode: legacy = shipped classifiers; fused = Phase 3 rules
-   *  (SAR + WorldCover + terrain evidence). Fused runs the v2 engine. */
-  CHANGE_RULES: z.enum(["legacy", "fused"]).default("fused"),
+   *  (SAR + WorldCover + terrain evidence); ml = Phase 4 model (needs a
+   *  trained model file). Both fused and ml run the v2 engine. */
+  CHANGE_RULES: z.enum(["legacy", "fused", "ml"]).default("fused"),
   /** Sentinel-1 SAR evidence for the fused rules (each side = 1 extra render). */
   S1_ENABLED: boolEnv().default(true),
   /** ±days around each date for the S1 temporal median (one orbit per side). */
@@ -147,7 +148,7 @@ export interface ServerEnv {
   COMPARE_MAX_PX: number;
   PER_ANALYSIS_PU_LIMIT: number;
   CHANGE_ENGINE: "v1" | "v2";
-  CHANGE_RULES: "legacy" | "fused";
+  CHANGE_RULES: "legacy" | "fused" | "ml";
   S1_ENABLED: boolean;
   S1_WINDOW_DAYS: number;
   WORLDCOVER_ENABLED: boolean;
@@ -240,14 +241,15 @@ export function getServerEnv(): ServerEnv {
 }
 
 /**
- * CHANGE_RULES selects the classifier; the fused rules (Phase 3) run on the
- * v2 composite machinery, so `fused` resolves the engine to "v2" regardless
- * of CHANGE_ENGINE. `legacy` honours CHANGE_ENGINE as before.
+ * CHANGE_RULES selects the classifier; the fused rules (Phase 3) and the ML
+ * model (Phase 4) both run on the v2 composite machinery, so "fused"/"ml"
+ * resolve the engine to "v2" regardless of CHANGE_ENGINE. `legacy` honours
+ * CHANGE_ENGINE as before.
  */
 export function resolveChangeRules(env: Pick<ServerEnv, "CHANGE_RULES" | "CHANGE_ENGINE">): {
-  rules: "legacy" | "fused";
+  rules: "legacy" | "fused" | "ml";
   engine: "v1" | "v2";
 } {
   const rules = env.CHANGE_RULES;
-  return { rules, engine: rules === "fused" ? "v2" : env.CHANGE_ENGINE };
+  return { rules, engine: rules === "legacy" ? env.CHANGE_ENGINE : "v2" };
 }

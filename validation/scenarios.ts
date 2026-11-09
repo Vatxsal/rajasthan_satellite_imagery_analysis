@@ -18,8 +18,13 @@
  *   scenario-clouds   — A-side cloud blob on stable ground (no edge bleed)
  */
 import { deriveIndices, type CompositeBands } from "../lib/analysis/composite";
+import type { ClipGeometry } from "../lib/cdse/geometry";
+import { COMPOSITE_ERODE_RADIUS, scaledThresholds, seasonalTag } from "../lib/analysis/config";
+import { combineValidity, dilateInvalid } from "../lib/analysis/classify";
 import { makeAnalysisGrid } from "../lib/analysis/grid";
+import { makeFeatureExtractor, ML_FEATURES } from "../lib/analysis/model";
 import { patchToMultiPolygon } from "../lib/analysis/polygon";
+import { rasterizeAreaMask } from "../lib/analysis/mask";
 import {
   processCompare,
   type CompareSide,
@@ -28,6 +33,16 @@ import {
 } from "../lib/analysis/process";
 import type { ParsedCompositeRaster } from "../lib/analysis/parse";
 import type { CompareEngine } from "../lib/analysis/types";
+import {
+  adaptiveThresholds,
+  applyShift,
+  deriveV2Indices,
+  estimateShift,
+  normalizeBands,
+  type RecentIndices,
+  type V2Indices,
+} from "../lib/analysis/v2";
+import type { ClassifyFusedInput } from "../lib/analysis/fused";
 import type { GeoJsonFeature, GeoJsonFeatureCollection, RefClass, ValidationCase } from "./engine";
 
 /* ------------------------------------------------------------------ */
@@ -61,6 +76,11 @@ const CLASS_TO_REF: RefClass[] = [
   "water_gain",
   "water_loss",
 ];
+
+/** RefClass → its index in CLASS_TO_REF (truth label grid). */
+const REF_INDEX: Record<string, number> = Object.fromEntries(
+  CLASS_TO_REF.map((cls, i) => [cls, i]),
+);
 
 /* ------------------------------------------------------------------ */
 /* deterministic noise                                                 */
@@ -149,6 +169,8 @@ interface SynthGrid {
   /** Surface state per pixel per side (state → index 0-3). */
   aState: Uint8Array;
   bState: Uint8Array;
+  /** Ground-truth label per pixel (index into CLASS_TO_REF; 0 = no_change). */
+  label: Uint8Array;
   /** 1 where A-side is cloud/nodata. */
   aInvalid: Uint8Array;
   /** 1 where the pixel is part of an injected speckle false change. */
@@ -166,6 +188,7 @@ function buildTruth(spec: ScenarioSpec): SynthGrid {
   const n = width * height;
   const aState = new Uint8Array(n).fill(STATE_INDEX.veg);
   const bState = new Uint8Array(n).fill(STATE_INDEX.veg);
+  const label = new Uint8Array(n); // 0 = no_change
   const aInvalid = new Uint8Array(n);
   const speckle = new Uint8Array(n);
 
@@ -177,6 +200,7 @@ function buildTruth(spec: ScenarioSpec): SynthGrid {
         if (inRect(lon, lat, shape.rect)) {
           aState[i] = STATE_INDEX[shape.a];
           bState[i] = STATE_INDEX[shape.b];
+          label[i] = REF_INDEX[shape.cls];
         }
       }
       if (spec.cloud && inRect(lon, lat, spec.cloud)) aInvalid[i] = 1;
@@ -208,7 +232,7 @@ function buildTruth(spec: ScenarioSpec): SynthGrid {
       placed++;
     }
   }
-  return { width, height, aState, bState, aInvalid, speckle };
+  return { width, height, aState, bState, label, aInvalid, speckle };
 }
 
 /** Noisy band cube for one side: 7 Float32Arrays of length w×h. */
@@ -400,4 +424,84 @@ export function buildScenarios(engine: CompareEngine, only?: string): Validation
   return SPECS.filter((s) => !only || s.name === only || `${s.name}-${engine}` === only).map(
     (spec) => runScenario(engine, spec),
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 4 — per-pixel feature rows for /ml/train.py                   */
+/* ------------------------------------------------------------------ */
+
+export interface FeatureRow {
+  scenario: string;
+  /** Ground truth (CLASS_TO_REF vocabulary). */
+  label: RefClass;
+  /** Raw feature values in ML_FEATURES order. */
+  features: Float32Array;
+}
+
+/**
+ * Streams per-pixel training rows for every scenario: the production
+ * pre-classification pipeline (co-registration → normalisation → index
+ * stacks → adaptive thresholds) plus the truth label from construction.
+ * Cloud/invalid pixels are skipped. Consumed by `npm run features`.
+ */
+export function* featureRows(only?: string): Generator<FeatureRow> {
+  for (const spec of SPECS) {
+    if (only && spec.name !== only) continue;
+    const truth = buildTruth(spec);
+    const { width, height, label } = truth;
+    const n = width * height;
+
+    const pa = buildCompositeSide(truth, "a", 1001, 1002);
+    const pb = buildCompositeSide(truth, "b", 2001, 2002);
+    const grid = makeAnalysisGrid(BBOX, width, height);
+    const geometry: ClipGeometry = { type: "Polygon", coordinates: [rectRing(BBOX)] };
+    const inside = rasterizeAreaMask(geometry, grid);
+
+    // Same radiometric pipeline processCompare runs before classification.
+    const preMask = combineValidity(pa.valid, pb.valid, inside);
+    const co = estimateShift(pa, pb, preMask, width, height);
+    if (co.applied) applyShift(pa, pa.valid, co.dx, co.dy, width, height);
+    const normMask = co.applied ? combineValidity(pa.valid, pb.valid, inside) : preMask;
+    normalizeBands(pa, pb, normMask);
+    const a: V2Indices = deriveV2Indices(pa);
+    const b: V2Indices = deriveV2Indices(pb);
+    const aRecent: RecentIndices = {
+      ndvi: pa.recentNdvi,
+      mndwi: pa.recentMndwi,
+      ndbi: pa.recentNdbi,
+    };
+    const bRecent: RecentIndices = {
+      ndvi: pb.recentNdvi,
+      mndwi: pb.recentMndwi,
+      ndbi: pb.recentNdbi,
+    };
+    const valid = dilateInvalid(
+      combineValidity(pa.valid, pb.valid, inside),
+      width,
+      height,
+      COMPOSITE_ERODE_RADIUS,
+    );
+    const adaptive = adaptiveThresholds(a, b, valid, scaledThresholds("medium"));
+
+    const input: ClassifyFusedInput = {
+      a,
+      b,
+      aRecent,
+      bRecent,
+      valid,
+      inside,
+      t: adaptive.t,
+      scales: adaptive.scales,
+      seasonalLossTag: seasonalTag(DATE_B, "loss"),
+      seasonalGainTag: seasonalTag(DATE_B, "gain"),
+      shortGap: false,
+    };
+    const extract = makeFeatureExtractor(input);
+    const buf = new Float32Array(ML_FEATURES.length);
+    for (let i = 0; i < n; i++) {
+      if (inside[i] !== 1 || valid[i] !== 1) continue;
+      extract(i, buf);
+      yield { scenario: spec.name, label: CLASS_TO_REF[label[i]] ?? "no_change", features: buf.slice() };
+    }
+  }
 }

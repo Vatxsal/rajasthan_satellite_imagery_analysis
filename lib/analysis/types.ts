@@ -100,7 +100,7 @@ export type CompareEngine = "v1" | "v2";
 /** Input mode actually used: v1 always "single"; v2 defaults to "composite". */
 export type CompareInputMode = "single" | "composite";
 /** Change-rule mode that produced the result (CHANGE_RULES; legacy = shipped rules). */
-export type CompareRulesMode = "legacy" | "fused";
+export type CompareRulesMode = "legacy" | "fused" | "ml";
 
 /** Which optional evidence the fused rules actually had (method card, Phase 5). */
 export interface EvidenceMeta {

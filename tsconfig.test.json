@@ -13,6 +13,7 @@
   "include": [
     "scripts/*.test.ts",
     "scripts/validate.ts",
+    "scripts/features.ts",
     "scripts/email-preview.ts",
     "scripts/send-test-report.ts",
     "validation/**/*.ts",

@@ -300,8 +300,9 @@ export const FUSED = {
   shapeDelta: 10,
 } as const;
 
-/** Change-rule mode: legacy = the v1/v2 classifiers as shipped; fused = Phase 3. */
-export type CompareRules = "legacy" | "fused";
+/** Change-rule mode: legacy = the v1/v2 classifiers as shipped; fused = Phase 3;
+ *  ml = Phase 4 softmax model (requires a trained model file). */
+export type CompareRules = "legacy" | "fused" | "ml";
 
 // ── Phase 3 — denoise & vector output ──────────────────────────────────────
 

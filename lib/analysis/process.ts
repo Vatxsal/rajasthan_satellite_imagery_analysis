@@ -33,6 +33,7 @@ import {
 } from "./config";
 import { combineValidity, classifyChange, dilateInvalid } from "./classify";
 import { applyShapeEvidence, classifyFused } from "./fused";
+import { classifyModel, loadMlModel } from "./model";
 import { fillSmallHoles, labelPatches, majorityFilter, minPatchPixels } from "./filter";
 import { makeAnalysisGrid, nativeLongSidePx } from "./grid";
 import { rasterizeAreaMask, rasterizeZones } from "./mask";
@@ -290,10 +291,10 @@ export function processCompare(
 ): CompareArtifact {
   const prep = prepareCompare(input);
   const { bbox, grid, width, height, baseThresholds, windowDays, gapDays, minPatchHa, engine, inputMode, estimatedPu } = prep;
-  // Fused rules exist on the v2 composite machinery only — a fused request
+  // Fused and ML rules exist on the v2 composite machinery only — a request
   // against v1 inputs degrades to legacy (recorded honestly in metadata).
   const rules: CompareRules =
-    input.rules === "fused" && engine === "v2" ? "fused" : "legacy";
+    input.rules && input.rules !== "legacy" && engine === "v2" ? input.rules : "legacy";
   // Consume the inputs object up front (it is a throwaway for every caller):
   // raw bands are released as soon as their index stacks are derived, exactly
   // like the original fetch path, so peak memory stays one side at a time.
@@ -402,6 +403,21 @@ export function processCompare(
       });
       conf = fusedOut.confGrid;
       out = fusedOut;
+    } else if (rules === "ml") {
+      // Phase 4: trained softmax model (CDSE_ML_MODEL_MISSING if untrained).
+      const mlOut = classifyModel(
+        {
+          ...base,
+          evidence: {
+            sar: evidence.sar ?? null,
+            prior: evidence.prior ?? null,
+            shadow: evidence.terrain?.shadow ?? null,
+          },
+        },
+        loadMlModel(),
+      );
+      conf = mlOut.confGrid;
+      out = mlOut;
     } else {
       out = classifyV2(base);
     }
@@ -440,7 +456,7 @@ export function processCompare(
   const minPixels = minPatchPixels(minPatchHa, grid.metersX, grid.metersY);
   fillSmallHoles(classGrid, valid, width, height, minPixels);
   const { labels } = labelPatches(classGrid, width, height, minPixels, tiers);
-  if (rules === "fused" && conf && tiers) {
+  if ((rules === "fused" || rules === "ml") && conf && tiers) {
     // Shape evidence runs on the KEPT patches (post-denoise, post-MMU).
     applyShapeEvidence({ classGrid, labels, confGrid: conf, tierGrid: tiers, width, height });
   }
@@ -498,7 +514,7 @@ export function processCompare(
       minPatchHa,
       engine,
       rules,
-      ...(rules === "fused" ? { evidence: evidenceMeta(evidence) } : {}),
+      ...(rules === "fused" || rules === "ml" ? { evidence: evidenceMeta(evidence) } : {}),
       inputMode,
       compositeWindowDays: windowDays,
       estimatedPu,

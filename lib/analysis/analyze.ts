@@ -117,9 +117,10 @@ export async function runCompare(
 ): Promise<CompareArtifact> {
   const prep = prepareCompare(input, { puLimit: getServerEnv().PER_ANALYSIS_PU_LIMIT });
   const { bbox, width, height, windowDays, engine } = prep;
-  const fused = input.rules === "fused" && engine === "v2";
+  // Fused and ML rules both consume the Phase 3 evidence streams.
+  const evidenceOn = (input.rules === "fused" || input.rules === "ml") && engine === "v2";
   // Kick off before the optical renders so evidence latency hides underneath.
-  const evidenceTask = fused
+  const evidenceTask = evidenceOn
     ? fetchFusedEvidence(input, prep)
     : Promise.resolve<EvidenceInputs>({});
 

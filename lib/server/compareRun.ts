@@ -86,8 +86,8 @@ export interface ResolvedCompareParams {
   sensitivity: Sensitivity;
   minPatchHa: number;
   engine: CompareEngine;
-  /** CHANGE_RULES (fused forces the v2 engine — resolveChangeRules). */
-  rules: "legacy" | "fused";
+  /** CHANGE_RULES (fused/ml force the v2 engine — resolveChangeRules). */
+  rules: "legacy" | "fused" | "ml";
   inputMode: CompareInputMode;
   compositeWindowDays: number;
   maxPx: number;
@@ -147,7 +147,7 @@ export function resolveCompareParams(rawBody: unknown): ResolvedCompareParams {
   const inputMode = engine === "v2" ? body.inputMode : "single";
   const compositeWindowDays = inputMode === "composite" ? body.compositeWindowDays : 0;
   const evidencePlan =
-    rules === "fused"
+    rules !== "legacy"
       ? { s1WindowDays: env.S1_ENABLED ? env.S1_WINDOW_DAYS : null, terrain: true }
       : null;
 
@@ -177,7 +177,7 @@ export function resolveCompareParams(rawBody: unknown): ResolvedCompareParams {
     compositeWindowDays,
     rules,
     s1WindowDays: evidencePlan?.s1WindowDays ?? 0,
-    worldCover: rules === "fused" && env.WORLDCOVER_ENABLED ? 1 : 0,
+    worldCover: rules !== "legacy" && env.WORLDCOVER_ENABLED ? 1 : 0,
   });
 
   return {
@@ -310,7 +310,7 @@ export async function ensureCompare(
           compositeWindowDays: resolved.compositeWindowDays,
           rules: resolved.rules,
           evidencePlan:
-            resolved.rules === "fused"
+            resolved.rules !== "legacy"
               ? {
                   s1WindowDays: env.S1_ENABLED ? env.S1_WINDOW_DAYS : null,
                   terrain: true,
