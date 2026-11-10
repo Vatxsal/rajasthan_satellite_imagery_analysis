@@ -25,12 +25,21 @@ export function swipeClipPath(divider: number, side: "left" | "right"): string {
 }
 
 /** Attribution line for the swipe maps (both dates + the basemap). */
-export function swipeAttribution(dates: { dateA: string | null; dateB: string | null }): string {
+export function swipeAttribution(dates: {
+  dateA: string | null;
+  dateB: string | null;
+  /** "basemap" swaps date B's Sentinel credit for the Esri imagery credit. */
+  mode?: "dates" | "basemap";
+}): string {
   const years = new Set<string>();
   if (dates.dateA) years.add(dates.dateA.slice(0, 4));
-  if (dates.dateB) years.add(dates.dateB.slice(0, 4));
+  if (dates.mode !== "basemap" && dates.dateB) years.add(dates.dateB.slice(0, 4));
   const sentinels = Array.from(years).sort().join(", ") || "—";
-  return `Contains modified Copernicus Sentinel data ${sentinels} · © OpenStreetMap contributors`;
+  const tail =
+    dates.mode === "basemap"
+      ? "Imagery © Esri, Maxar, Earthstar Geographics · © OpenStreetMap contributors"
+      : "© OpenStreetMap contributors";
+  return `Contains modified Copernicus Sentinel data ${sentinels} · ${tail}`;
 }
 
 /** Trim trailing zeros so clip values read "50%" not "50.000%". */

@@ -37,6 +37,7 @@ import {
   type RunCompareInput,
 } from "../lib/analysis/process";
 import { WC, type WorldCoverPrior } from "../lib/analysis/prior";
+import { sharpenSwir } from "../lib/analysis/sharpen";
 import type { SarFeatures } from "../lib/analysis/s1";
 import type { TerrainGrids } from "../lib/analysis/terrain";
 import type { ParsedCompositeRaster } from "../lib/analysis/parse";
@@ -302,14 +303,22 @@ function buildCompositeSide(
 }
 
 /** v1 side: exact evalscript indices from the side's noisy bands. */
-function buildSingleSide(grid: SynthGrid, side: "a" | "b", seed: number): CompareSide {
+function buildSingleSide(
+  grid: SynthGrid,
+  side: "a" | "b",
+  seed: number,
+  sharpen?: boolean,
+): CompareSide {
   const n = grid.width * grid.height;
   const bands = buildBands(grid, side, seed);
-  const indices = deriveIndices(bands);
   const valid = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     valid[i] = side === "a" && grid.aInvalid[i] === 1 ? 0 : 1;
   }
+  // SHARPEN_SWIR mirrors production: median bands sharpened before the index
+  // derivation (recent indices are never sharpened — evalscript precomputed).
+  if (sharpen) sharpenSwir(bands, grid.width, grid.height, valid);
+  const indices = deriveIndices(bands);
   return { indices, valid, width: grid.width, height: grid.height };
 }
 
@@ -452,7 +461,12 @@ function buildSyntheticEvidence(truth: SynthGrid): EvidenceInputs {
 const DATE_A = "2026-05-01";
 const DATE_B = "2026-05-20"; // gap 19 d, outside Rajasthan seasonal windows
 
-function runScenario(engine: CompareEngine, spec: ScenarioSpec, rules?: CompareRules): ValidationCase {
+function runScenario(
+  engine: CompareEngine,
+  spec: ScenarioSpec,
+  rules?: CompareRules,
+  sharpen?: boolean,
+): ValidationCase {
   const truth = buildTruth(spec);
   // Fused (and ML) rules exist on the v2 composite machinery only — a fused
   // request against v1 inputs resolves to v2 (mirrors resolveChangeRules).
@@ -474,6 +488,7 @@ function runScenario(engine: CompareEngine, spec: ScenarioSpec, rules?: CompareR
     inputMode: effectiveEngine === "v2" ? "composite" : undefined,
     compositeWindowDays: effectiveEngine === "v2" ? 7 : undefined,
     ...(rules ? { rules } : {}),
+    ...(sharpen ? { sharpen: true } : {}),
     ...(rules === "fused"
       ? { evidencePlan: { s1WindowDays: 6, terrain: true } as const }
       : {}),
@@ -485,8 +500,8 @@ function runScenario(engine: CompareEngine, spec: ScenarioSpec, rules?: CompareR
           parsedB: buildCompositeSide(truth, "b", 2001, 2002),
         }
       : {
-          sideA: buildSingleSide(truth, "a", 1001),
-          sideB: buildSingleSide(truth, "b", 2001),
+          sideA: buildSingleSide(truth, "a", 1001, sharpen),
+          sideB: buildSingleSide(truth, "b", 2001, sharpen),
         };
   const evidence: EvidenceInputs =
     rules === "fused" ? buildSyntheticEvidence(truth) : {};
@@ -514,8 +529,9 @@ export function buildScenarios(
   engine: CompareEngine,
   only?: string,
   rules?: CompareRules,
+  sharpen?: boolean,
 ): ValidationCase[] {
-  const all = SPECS.map((spec) => runScenario(engine, spec, rules));
+  const all = SPECS.map((spec) => runScenario(engine, spec, rules, sharpen));
   if (!only) return all;
   return all.filter((c) => c.name === only || c.name.startsWith(`${only}-`));
 }

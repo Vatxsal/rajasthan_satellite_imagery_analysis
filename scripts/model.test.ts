@@ -39,6 +39,8 @@ function zeroIndices(n: number): V2Indices {
     awei: new Float32Array(n),
     brightness: new Float32Array(n),
     nbr: new Float32Array(n),
+    vBare: new Float32Array(n),
+    vBright: new Float32Array(n),
   };
 }
 

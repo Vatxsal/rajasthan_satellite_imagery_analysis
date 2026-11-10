@@ -90,6 +90,8 @@ export interface ResolvedCompareParams {
   rules: "legacy" | "fused" | "ml";
   inputMode: CompareInputMode;
   compositeWindowDays: number;
+  /** SHARPEN_SWIR — regression SWIR sharpening on the v2 composite. */
+  sharpen: boolean;
   maxPx: number;
 }
 
@@ -178,6 +180,7 @@ export function resolveCompareParams(rawBody: unknown): ResolvedCompareParams {
     rules,
     s1WindowDays: evidencePlan?.s1WindowDays ?? 0,
     worldCover: rules !== "legacy" && env.WORLDCOVER_ENABLED ? 1 : 0,
+    sharpen: env.SHARPEN_SWIR ? 1 : 0,
   });
 
   return {
@@ -192,6 +195,7 @@ export function resolveCompareParams(rawBody: unknown): ResolvedCompareParams {
     rules,
     inputMode,
     compositeWindowDays,
+    sharpen: env.SHARPEN_SWIR,
     maxPx: env.COMPARE_MAX_PX,
   };
 }
@@ -309,6 +313,7 @@ export async function ensureCompare(
           inputMode: resolved.inputMode,
           compositeWindowDays: resolved.compositeWindowDays,
           rules: resolved.rules,
+          sharpen: resolved.sharpen,
           evidencePlan:
             resolved.rules !== "legacy"
               ? {

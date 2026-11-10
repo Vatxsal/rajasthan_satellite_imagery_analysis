@@ -144,67 +144,69 @@ export function classifyFused(input: ClassifyFusedInput): ClassifyFusedOutput {
     const dAwei = b.awei[i] - a.awei[i];
     const dBright = b.brightness[i] - a.brightness[i];
     const dNbr = b.nbr[i] - a.nbr[i];
+    const dVbare = b.vBare[i] - a.vBare[i];
+    const dVbright = b.vBright[i] - a.vBright[i];
 
-    // ── 2-of-3 vote per class (identical to legacy v2) ─────────────────────
+    // ── anchor + support vote per class (identical to legacy v2) ───────────
+    // 10 m-native anchor (NDWI / NDVI / vBare) required at full threshold,
+    // plus ≥1 supporting index; 20 m SWIR-derived indices (MNDWI/AWEI/NDMI/
+    // NDBI/BSI) corroborate but never determine a class alone. State gates
+    // are unchanged (state checks, not change evidence).
     let code: number = CLASS.noChange;
     let votes = 0;
     let sub: number = 0;
 
     if (
       b.mndwi[i] > t.waterGainMndwiMin &&
-      (dMndwi >= t.waterGainD ? 1 : 0) + (dNdwi >= f * t.waterGainD ? 1 : 0) +
-          (dAwei >= aweiT ? 1 : 0) >=
-        2
+      dNdwi >= f * t.waterGainD &&
+      (dMndwi >= t.waterGainD || dAwei >= aweiT)
     ) {
       code = CLASS.waterGain;
       votes =
+        1 +
         (dMndwi >= t.waterGainD ? 1 : 0) +
-        (dNdwi >= f * t.waterGainD ? 1 : 0) +
         (dAwei >= aweiT ? 1 : 0);
     } else if (
       a.mndwi[i] > t.waterLossMndwiMin &&
-      (dMndwi <= t.waterLossD ? 1 : 0) + (dNdwi <= f * t.waterLossD ? 1 : 0) +
-        (dAwei <= -aweiT ? 1 : 0) >=
-        2
+      dNdwi <= f * t.waterLossD &&
+      (dMndwi <= t.waterLossD || dAwei <= -aweiT)
     ) {
       code = CLASS.waterLoss;
       votes =
+        1 +
         (dMndwi <= t.waterLossD ? 1 : 0) +
-        (dNdwi <= f * t.waterLossD ? 1 : 0) +
         (dAwei <= -aweiT ? 1 : 0);
     } else if (
-      (dNdvi <= t.vegLossD ? 1 : 0) + (dNdmi <= f * t.vegLossD ? 1 : 0) +
-        (dBsi >= f * Math.abs(t.vegLossD) ? 1 : 0) >=
-      2
+      dNdvi <= t.vegLossD &&
+      (dNdmi <= f * t.vegLossD || dBsi >= f * Math.abs(t.vegLossD))
     ) {
       code = CLASS.vegLoss;
       votes =
-        (dNdvi <= t.vegLossD ? 1 : 0) +
+        1 +
         (dNdmi <= f * t.vegLossD ? 1 : 0) +
         (dBsi >= f * Math.abs(t.vegLossD) ? 1 : 0);
     } else if (
-      (dNdvi >= t.vegGainD ? 1 : 0) + (dNdmi >= f * t.vegGainD ? 1 : 0) +
-        (dBsi <= -f * t.vegGainD ? 1 : 0) >=
-      2
+      dNdvi >= t.vegGainD &&
+      (dNdmi >= f * t.vegGainD || dBsi <= -f * t.vegGainD)
     ) {
       code = CLASS.vegGain;
       votes =
-        (dNdvi >= t.vegGainD ? 1 : 0) +
+        1 +
         (dNdmi >= f * t.vegGainD ? 1 : 0) +
         (dBsi <= -f * t.vegGainD ? 1 : 0);
     } else if (
       dNdvi <= t.bareBuiltNdviMax &&
       a.mndwi[i] <= t.bareBuiltMaxMndwi &&
       b.mndwi[i] <= t.bareBuiltMaxMndwi &&
-      (dNdbi >= t.bareBuiltD ? 1 : 0) + (dBsi >= f * t.bareBuiltD ? 1 : 0) +
-        (dBright >= brightT ? 1 : 0) >=
-        2
+      dVbare >= f * t.bareBuiltD &&
+      (dVbright >= brightT || dNdbi >= t.bareBuiltD || dBsi >= f * t.bareBuiltD)
     ) {
       code = CLASS.bareBuilt;
       votes =
+        1 +
+        (dVbright >= brightT ? 1 : 0) +
         (dNdbi >= t.bareBuiltD ? 1 : 0) +
-        (dBsi >= f * t.bareBuiltD ? 1 : 0) +
-        (dBright >= brightT ? 1 : 0);
+        (dBsi >= f * t.bareBuiltD ? 1 : 0);
     }
 
     if (code === CLASS.noChange) continue;
@@ -308,7 +310,7 @@ export function classifyFused(input: ClassifyFusedInput): ClassifyFusedOutput {
         const crop = prior ? priorIsCropland(prior, i) : false;
         if (crop) {
           sub = SUB.bareBuiltAgriculture; // harvest/tillage, not construction
-        } else if (votes === 3 && persistent && dBright > 0) {
+        } else if (votes === 4 && persistent && dBright > 0) {
           sub = SUB.bareBuiltPossible;
         } else {
           sub = SUB.bareBuiltSurface;
@@ -318,7 +320,8 @@ export function classifyFused(input: ClassifyFusedInput): ClassifyFusedOutput {
     }
 
     // ── confidence score: v2 points + fused evidence points ────────────────
-    let score = votes === 3 ? 2 : 1;
+    // votes ≥ 3 (of 3 for water/veg, of 4 for bare/built) = full agreement.
+    let score = votes >= 3 ? 2 : 1;
     if (cva >= CVA_BOOST) score += 1;
     score += persistent ? 1 : -1;
     if (seasonal) score -= 1;

@@ -114,7 +114,7 @@ export async function fetchCompareRaster(
       {
         type: "sentinel-2-l2a",
         dataFilter: { timeRange, mosaickingOrder: "mostRecent" },
-        processing: { upsampling: "BILINEAR", downsampling: "BILINEAR" },
+        processing: { upsampling: "BICUBIC", downsampling: "BILINEAR" },
       },
     ],
   });
@@ -139,7 +139,7 @@ export async function fetchCompareCompositeRaster(
       {
         type: "sentinel-2-l2a",
         dataFilter: { timeRange, mosaickingOrder: "mostRecent" },
-        processing: { upsampling: "BILINEAR", downsampling: "BILINEAR" },
+        processing: { upsampling: "BICUBIC", downsampling: "BILINEAR" },
       },
     ],
   });

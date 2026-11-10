@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { booleanIntersects, feature } from "@turf/turf";
+import { area as turfArea, booleanIntersects, feature } from "@turf/turf";
 import { fetchWmtsTile, hasWmtsInstance } from "@/lib/cdse/wmts";
 import { renderTileImage } from "@/lib/cdse/process";
 import {
@@ -183,12 +183,25 @@ export async function GET(
       // Invalid area geometry — fall through and let the render decide.
     }
 
-    // Quota guard: an area whose bbox spans too many tiles at this zoom would
-    // burn hundreds of Process API calls per pan — skip instead.
-    if (tilesSpannedByBBox(area.bbox, z) > MAX_TILES_PER_AREA) {
+    // Quota guard: worst-case tiles that actually intersect the polygon at
+    // this zoom. A bbox-span count over-counts districts whose bbox includes
+    // large empty corners (Jaipur at z15 ≈ 27k bbox tiles vs ~3.5k real ones)
+    // and wrongly disabled native z15 renders. Estimate from polygon area with
+    // a 1.5× shape factor; fall back to the bbox span if the area fails.
+    let worstTiles: number;
+    try {
+      const polyKm2 = turfArea(feature(area.geometry)) / 1e6;
+      const latMid = (area.bbox[1] + area.bbox[3]) / 2;
+      // One XYZ tile covers the standard 2^z grid: 40075 km · cos(lat) / 2^z.
+      const tileKm = (40075.016686 * Math.cos((latMid * Math.PI) / 180)) / 2 ** z;
+      worstTiles = Math.ceil((polyKm2 / Math.max(tileKm * tileKm, 1e-6)) * 1.5) + 16;
+    } catch {
+      worstTiles = tilesSpannedByBBox(area.bbox, z);
+    }
+    if (worstTiles > MAX_TILES_PER_AREA) {
       return emptyTileResponse({
         "X-Tile-Skip": "too-many-tiles",
-        "X-Tile-Skip-Reason": `Area spans more than ${MAX_TILES_PER_AREA} tiles at z${z}.`,
+        "X-Tile-Skip-Reason": `Area needs ~${worstTiles} tiles at z${z} (max ${MAX_TILES_PER_AREA}).`,
       });
     }
 

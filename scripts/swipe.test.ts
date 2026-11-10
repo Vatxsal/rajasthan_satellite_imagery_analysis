@@ -94,6 +94,20 @@ test("swipeAttribution: missing dates fall back to a dash", () => {
   );
 });
 
+test("swipeAttribution: basemap mode credits Esri and drops date B's year", () => {
+  assert.equal(
+    swipeAttribution({ dateA: "2026-11-04", dateB: "2026-10-20", mode: "basemap" }),
+    "Contains modified Copernicus Sentinel data 2026 · Imagery © Esri, Maxar, Earthstar Geographics · © OpenStreetMap contributors",
+  );
+});
+
+test("swipeAttribution: basemap mode with no date still credits Esri", () => {
+  assert.equal(
+    swipeAttribution({ dateA: null, dateB: null, mode: "basemap" }),
+    "Contains modified Copernicus Sentinel data — · Imagery © Esri, Maxar, Earthstar Geographics · © OpenStreetMap contributors",
+  );
+});
+
 // ------------------------------------------------------------ tile URLs
 
 test("buildTileUrl: same-origin path with all four params", () => {

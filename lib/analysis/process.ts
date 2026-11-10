@@ -50,6 +50,7 @@ import {
   s1Samples,
 } from "./pu";
 import type { SarFeatures } from "./s1";
+import { sharpenSwir } from "./sharpen";
 import type { WorldCoverPrior } from "./prior";
 import type { TerrainGrids } from "./terrain";
 import { buildPatchVectors, computeStats, type ZoneMeta } from "./stats";
@@ -105,6 +106,9 @@ export interface RunCompareInput {
   compositeWindowDays?: number;
   /** Change-rule mode (CHANGE_RULES); default "legacy" keeps shipped rules. */
   rules?: CompareRules;
+  /** SHARPEN_SWIR: regression-based B11/B12 sharpening before index
+   *  derivation (v2 composite path only; cache-keyed — it changes NDBI/MNDWI/BSI). */
+  sharpen?: boolean;
   /** PU budget for the fused evidence renders (S1 pair + DEM); null = off. */
   evidencePlan?: { s1WindowDays: number | null; terrain: boolean } | null;
 }
@@ -335,6 +339,10 @@ export function processCompare(
   let conf: Uint8Array | null = null;
   let shortGap = false;
   let engineStats: EngineStats | undefined;
+  let sharpenStats: {
+    a: { b11: { r2: number; applied: boolean }; b12: { r2: number; applied: boolean } };
+    b: { b11: { r2: number; applied: boolean }; b12: { r2: number; applied: boolean } };
+  } | null = null;
 
   if (engine === "v2" && parsedA && parsedB) {
     const pa = parsedA;
@@ -350,6 +358,17 @@ export function processCompare(
       ? combineValidity(pa.valid, pb.valid, inside)
       : preMask;
     const normalization = normalizeBands(pa, pb, normMask);
+
+    // SHARPEN_SWIR (opt-in) — regression-based B11/B12 sharpening between
+    // normalisation and index derivation: NDBI/MNDWI/BSI gain 10 m detail.
+    // Recent-orbit indices arrive pre-computed and stay unsharpened (see
+    // sharpen.ts). v1 legacy inputs are untouched (baseline comparability).
+    sharpenStats = input.sharpen
+      ? {
+          a: sharpenSwir(pa, width, height, pa.valid),
+          b: sharpenSwir(pb, width, height, pb.valid),
+        }
+      : null;
 
     // 2.3 index stacks — A last, so both raw sides stay alive for co-reg only.
     const aIdx: V2Indices = deriveV2Indices(pa);
@@ -437,6 +456,7 @@ export function processCompare(
       },
       cropCycle: { tag: seasonalLossTag ?? seasonalGainTag },
       cvaMean: out.cvaMean,
+      ...(sharpenStats ? { sharpen: sharpenStats } : {}),
     };
   } else if (sideA && sideB) {
     valid = dilateInvalid(
@@ -515,6 +535,7 @@ export function processCompare(
       engine,
       rules,
       ...(rules === "fused" || rules === "ml" ? { evidence: evidenceMeta(evidence) } : {}),
+      ...(sharpenStats ? { sharpen: true } : {}),
       inputMode,
       compositeWindowDays: windowDays,
       estimatedPu,

@@ -52,7 +52,7 @@ export function demDataEntry(demInstance: string): {
   return {
     type: "dem",
     dataFilter: { demInstance },
-    processing: { upsampling: "BILINEAR", downsampling: "BILINEAR" },
+    processing: { upsampling: "BICUBIC", downsampling: "BILINEAR" },
   };
 }
 

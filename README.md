@@ -28,7 +28,7 @@ Next.js 14 · TypeScript · Tailwind · MapLibre GL JS · Zustand · Radix UI ·
 | | Feature | What you get |
 | :-: | --- | --- |
 | 🔎 | **Filters & scenes** | District → Tehsil → ILR cascade, date presets and a calendar that highlights dates with scenes, cloud slider, true / false colour / NDVI. One card per acquisition day with cloud %, **coverage % of the area**, UTC time and scene id. |
-| 🗺️ | **Map & imagery** | OpenFreeMap basemap (English labels) with an Esri satellite switcher, **native-resolution 512 px tiles** clipped to the selected area, opacity slider, legends, address search, boundary layers, light / dark themes. |
+| 🗺️ | **Map & imagery** | OpenFreeMap basemap (English labels) with an Esri satellite switcher, **native-resolution 512 px tiles** (bicubic upscaling, zoom band up to z15) clipped to the selected area, opacity slider, legends, address search, boundary layers, light / dark themes. |
 | ⬇️ | **Downloads** | PNG preview; **GeoTIFF (visual, 8-bit)** that opens correctly anywhere; **GeoTIFF (analysis, FLOAT32 bands)** for processing; Copernicus Browser deep links with per-tile `.SAFE` ids. Clipped to the selection, up to 2500 px per side with a reduced-resolution option. |
 | 🔍 | **Change detection** | Compare two dates: **Swipe**, classified **Changes** map, **Stats** (by class and tehsil), **Events** list with numbered map markers, **Summary**, and PNG / GeoTIFF / CSV / GeoJSON exports. |
 | 🤖 | **AI summary** | Optional Gemini briefing of a comparison in English or हिन्दी, built only from the computed statistics. |
@@ -59,6 +59,8 @@ npm run email:preview  # render email fixtures to .email-preview/
 npm run email:test     # send one test report to EMAIL_TEST_RECIPIENT
 npx tsx scripts/fetch-datameet.ts   # (re)download boundaries (not part of the build)
 node scripts/smoke.browser.cjs      # headless-browser smoke test (needs Chrome)
+node scripts/sharpness.browser.cjs      # imagery sharpness evidence (bicubic z13–15; needs Chrome)
+node scripts/verify-swipe-basemap.browser.cjs  # Swipe dates/basemap mode harness (needs Chrome)
 ```
 
 </details>
@@ -113,6 +115,7 @@ All Copernicus, Gemini and email calls are **server-side**; the browser never se
 | `CHANGE_RULES` / `CHANGE_ENGINE` | server | `fused` / `v1` | Change-rule mode: `legacy`, `fused` or `ml`; `CHANGE_ENGINE` picks v1/v2 for `legacy` only |
 | `S1_ENABLED` / `S1_WINDOW_DAYS` | server | `true` / `6` | Sentinel-1 GRD evidence for fused/ml rules and its ±day temporal median |
 | `WORLDCOVER_ENABLED` | server | `true` | ESA WorldCover 2021 land-cover prior (free COG reads, no PU cost) |
+| `SHARPEN_SWIR` | server | `false` | Opt-in regression sharpening of the 20 m SWIR bands (B11/B12) before index computation; changes NDBI/MNDWI/BSI, so it flips the compare cache key |
 | `ML_MODEL_PATH` | server | `artifacts/ml/model.json` | Trained model for `CHANGE_RULES=ml` (missing → `CDSE_ML_MODEL_MISSING`) |
 | `GEMINI_API_KEY` | 🔒 | unset | Enables the Summary tab |
 | `GEMINI_MODEL` / `AI_SUMMARY_RATE_LIMIT_PER_MIN` | server | `gemini-2.5-flash` / `5` | Model (must be in the key's ListModels) and limit |
@@ -147,7 +150,7 @@ Compare two Sentinel-2 dates over the selected district / tehsil / ILR. Every nu
 
 **Use it:** search an area → arm **Compare** in the scene strip → pick **A** and **B** on two scene cards (the server orders them so A is earlier) → **Analyze**. The results panel (right side on desktop, bottom sheet on mobile, resizable) has:
 
-- **Swipe**: date A left, date B right on two synchronised maps.
+- **Swipe**: date A left, date B right on two synchronised maps — or switch the right side to the **Satellite basemap** (labelled as being from a different date).
 - **Changes**: classified overlay, per-class toggles, opacity, *Boost visibility* (display-only), *Zoom to changes*, PNG / GeoTIFF export.
 - **Stats**: totals, class table, per-tehsil table (click to highlight, optional shading), and a **Method & settings** card (resolution, valid data, scenes, sensitivity and minimum patch re-run, rules mode, SAR orbit/window, WorldCover prior, terrain mask, thresholds in collapsible sections), CSV export.
 - **Events**: surviving change patches, largest first, with sub-labels (e.g. *likely harvest*), confidence tiers (0–100 %, default **Medium+** filter), numbered map markers and a themed popup; GeoJSON export.
@@ -246,7 +249,7 @@ Other providers: `resend` (free tier; needs a verified domain to send to others)
 - [ ] Search a district → select a scene → imagery clipped to the shape; zoom to ~13 and it sharpens
 - [ ] True / False colour / NDVI switch (NDVI legend appears); calendar highlights scene dates
 - [ ] Downloads: PNG, visual GeoTIFF, analysis GeoTIFF (open in QGIS), Copernicus Browser link
-- [ ] Compare two dates weeks apart: Swipe, Changes, Stats, Events, Summary all work; hovering and clicking events highlights and zooms
+- [ ] Compare two dates weeks apart: Swipe (dates **and** Satellite basemap modes), Changes, Stats, Events, Summary all work; hovering and clicking events highlights and zooms
 - [ ] **Send report to mail**: the email arrives (check spam), its links reopen the analysis, Gmail "Show original" shows SPF / DKIM / DMARC PASS
 - [ ] Light / dark with the panel open; panel width 360 to 560 px with no overlapping text
 - [ ] No console or CSP errors; no browser calls to `sh.dataspace.copernicus.eu`; secrets absent from page sources
@@ -281,6 +284,7 @@ app/api/            scenes · imagery · tiles/[z]/[x]/[y] · compare (analyze, 
 components/         shell · filters · layers · map · scenes · compare (tabs, EmailReport, ShareLinkLoader) · ui
 data/               boundaries/ (Datameet GeoJSON) · mock/
 docs/               screenshots/ · email-qa.md
+experiments/        standalone research (super-resolution; not part of the app build)
 lib/cdse/           OAuth, STAC, Process API, evalscripts, tiling maths
 lib/analysis/       change-detection engine (config, classify, filter, stats, encoders)
 lib/compare/        client helpers: stream, map bridge, share links, exports

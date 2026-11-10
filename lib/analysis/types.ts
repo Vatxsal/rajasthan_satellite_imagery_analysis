@@ -93,6 +93,11 @@ export interface EngineStats {
   cropCycle: { tag: string | null };
   /** Mean CVA magnitude over change pixels (Phase 2.5). */
   cvaMean: number;
+  /** SHARPEN_SWIR: per-side B11/B12 fit diagnostics (absent when off). */
+  sharpen?: {
+    a: { b11: { r2: number; applied: boolean }; b12: { r2: number; applied: boolean } };
+    b: { b11: { r2: number; applied: boolean }; b12: { r2: number; applied: boolean } };
+  };
 }
 
 /** Which engine produced the result (v1 = classic single-date, v2 = composite inputs). */
@@ -141,6 +146,8 @@ export interface CompareMetadata {
   rules?: CompareRulesMode;
   /** Fused evidence actually available (CHANGE_RULES=fused only). */
   evidence?: EvidenceMeta;
+  /** True when SHARPEN_SWIR regression sharpening ran on the composite (v2). */
+  sharpen?: boolean;
   /** Input mode used for both sides ("single" = v1-style one-day fetch). */
   inputMode: CompareInputMode;
   /** ±days composite window per side; 0 when inputMode is "single". */

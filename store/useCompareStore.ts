@@ -19,6 +19,8 @@ export type CompareSummaryPhase = "ensure" | "write" | null;
 export type CompareEventsStatus = "idle" | "loading" | "ready" | "error";
 /** Engine v2 input mode — median composite vs the single date each. */
 export type CompareInputMode = "single" | "composite";
+/** Swipe-tab right-hand side: the second date or the Esri satellite basemap. */
+export type CompareSwipeMode = "dates" | "basemap";
 
 /** One page of change events — client cursor growth step AND server page size. */
 const EVENTS_PAGE_SIZE = 100;
@@ -87,6 +89,8 @@ interface CompareState {
   divider: number;
   /** Swipe-tab raster composite shown for BOTH dates (raw imagery control). */
   swipeComposite: CompositeId;
+  /** Right-hand side of the swipe: date B or the Esri satellite basemap. */
+  swipeMode: CompareSwipeMode;
   /** Neutral grey outline of the analysed area on the swipe maps. */
   swipeOutline: boolean;
   /** Display-only dilation + outline so small changes stay visible (default on). */
@@ -138,6 +142,7 @@ interface CompareState {
   probeEventsTotal: () => Promise<void>;
   setDivider: (value: number) => void;
   setSwipeComposite: (value: CompositeId) => void;
+  setSwipeMode: (value: CompareSwipeMode) => void;
   setSwipeOutline: (value: boolean) => void;
   setBoostVisibility: (value: boolean) => void;
   setStripExpanded: (value: boolean) => void;
@@ -229,6 +234,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   eventsError: null,
   divider: 50,
   swipeComposite: "true-color",
+  swipeMode: "dates",
   swipeOutline: true,
   boostVisibility: true,
   stripExpanded: false,
@@ -502,6 +508,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   },
   setDivider: (value) => set({ divider: Math.max(0, Math.min(100, value)) }),
   setSwipeComposite: (value) => set({ swipeComposite: value }),
+  setSwipeMode: (value) => set({ swipeMode: value }),
   setSwipeOutline: (value) => set({ swipeOutline: value }),
   setBoostVisibility: (value) => set({ boostVisibility: value }),
   setStripExpanded: (value) => set({ stripExpanded: value }),

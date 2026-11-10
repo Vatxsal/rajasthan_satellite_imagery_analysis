@@ -271,25 +271,33 @@ function SwipeHelp() {
   const setDivider = useCompareStore((s) => s.setDivider);
   const swipeComposite = useCompareStore((s) => s.swipeComposite);
   const setSwipeComposite = useCompareStore((s) => s.setSwipeComposite);
+  const swipeMode = useCompareStore((s) => s.swipeMode);
+  const setSwipeMode = useCompareStore((s) => s.setSwipeMode);
   const swipeOutline = useCompareStore((s) => s.swipeOutline);
   const setSwipeOutline = useCompareStore((s) => s.setSwipeOutline);
+  const basemapMode = swipeMode === "basemap";
   return (
     <div className="flex flex-col gap-2 text-xs text-text">
       <p className="text-muted">
-        Raw satellite imagery for both dates — no change overlay, tint or filter. Date A (earlier)
-        is on the left, date B (later) on the right; drag the handle on the map (or use arrow
-        keys) to sweep between the two dates.
+        {basemapMode
+          ? "Raw Sentinel-2 imagery for date A on the left, the satellite basemap on the right — no change overlay, tint or filter. Drag the handle on the map (or use arrow keys) to sweep between the two."
+          : "Raw satellite imagery for both dates — no change overlay, tint or filter. Date A (earlier) is on the left, date B (later) on the right; drag the handle on the map (or use arrow keys) to sweep between the two dates."}
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <span className="mono-nums flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm border border-border bg-accent" aria-hidden />A ·{" "}
-          {dateA ? formatShortDate(dateA) : "—"}
+          <span className="h-2.5 w-2.5 rounded-sm border border-border bg-accent" aria-hidden />
+          {basemapMode ? `Sentinel-2 · ${dateA ? formatShortDate(dateA) : "—"}` : `A · ${dateA ? formatShortDate(dateA) : "—"}`}
         </span>
         <span className="mono-nums flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm border border-border bg-surface-2" aria-hidden />B
-          · {dateB ? formatShortDate(dateB) : "—"}
+          <span className="h-2.5 w-2.5 rounded-sm border border-border bg-surface-2" aria-hidden />
+          {basemapMode ? "Satellite basemap" : `B · ${dateB ? formatShortDate(dateB) : "—"}`}
         </span>
       </div>
+      {basemapMode && (
+        <p className="rounded border border-border bg-surface-2 px-2 py-1.5 text-[11px] leading-snug text-muted">
+          Basemap imagery is from a different date
+        </p>
+      )}
       <label className="flex items-center gap-2 text-[11px] text-muted">
         Divider
         <Slider
@@ -304,6 +312,16 @@ function SwipeHelp() {
         <span className="mono-nums">{Math.round(divider)}%</span>
       </label>
       <div className="flex flex-col gap-1.5">
+        <p className="section-label">Compare against</p>
+        <Segmented
+          ariaLabel="Swipe right-hand side"
+          options={[
+            { value: "dates", label: "Date B" },
+            { value: "basemap", label: "Satellite basemap" },
+          ]}
+          value={swipeMode}
+          onChange={(value) => setSwipeMode(value)}
+        />
         <p className="section-label">Imagery</p>
         <Segmented
           ariaLabel="Swipe imagery composite"
@@ -342,8 +360,9 @@ function SwipeHelp() {
           <span className="min-w-0 flex-1">Area outline</span>
         </button>
         <p className="text-[10px] leading-snug text-muted">
-          Both controls apply to both dates; display only — the imagery pixels themselves are
-          unchanged.
+          {basemapMode
+            ? "Controls apply to the Sentinel-2 half; display only — the imagery pixels themselves are unchanged."
+            : "Both controls apply to both dates; display only — the imagery pixels themselves are unchanged."}
         </p>
       </div>
     </div>

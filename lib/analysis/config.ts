@@ -184,7 +184,7 @@ export const SUB = {
   waterLossDrawdown: 51,
   bareBuiltConstruction: 30,
   bareBuiltBare: 31,
-  /** Phase 3 fused: strong evidence (3/3 votes + persistent + brightening). */
+  /** Phase 3 fused: strong evidence (all votes + persistent + brightening). */
   bareBuiltPossible: 32,
   /** Phase 3 fused: bare-soil increase without construction markers. */
   bareBuiltSurface: 33,
@@ -260,7 +260,8 @@ export const VOTE = {
   corrobFactor: 0.6,
   /** |ΔAWEI| corroboration for water classes (× the MNDWI adaptive scale). */
   aweiCorrob: 0.08,
-  /** Δbrightness corroboration for bare/built (× the NDBI adaptive scale). */
+  /** ΔvBright (10 m visible brightness) corroboration for bare/built
+   *  (× the NDBI adaptive scale). */
   brightCorrob: 0.03,
   /** CVA magnitude (in threshold units) that adds one confidence point. */
   cvaBoost: 2.5,

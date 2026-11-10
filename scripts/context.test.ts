@@ -154,7 +154,7 @@ test("demDataEntry + evalscript: docs-verified option names", () => {
   const entry = demDataEntry("COPERNICUS_30");
   assert.equal(entry.type, "dem");
   assert.equal(entry.dataFilter.demInstance, "COPERNICUS_30");
-  assert.equal(entry.processing.upsampling, "BILINEAR");
+  assert.equal(entry.processing.upsampling, "BICUBIC");
   assert.ok(DEM_EVALSCRIPT.includes('input: ["DEM"]'));
   assert.ok(DEM_EVALSCRIPT.includes('sampleType: "FLOAT32"'));
   assert.ok(DEM_EVALSCRIPT.includes("return [sample.DEM]"));

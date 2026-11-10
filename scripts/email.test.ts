@@ -46,6 +46,7 @@ function envFixture(overrides: Partial<ServerEnv> = {}): ServerEnv {
     S1_ENABLED: true,
     S1_WINDOW_DAYS: 6,
     WORLDCOVER_ENABLED: true,
+    SHARPEN_SWIR: false,
     COMPARE_RATE_LIMIT_PER_MIN: 6,
     AI_SUMMARY_RATE_LIMIT_PER_MIN: 5,
     GEMINI_API_KEY: undefined,
