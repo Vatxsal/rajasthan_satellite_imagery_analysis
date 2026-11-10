@@ -46,6 +46,7 @@ export function createConsoleProvider(options: ConsoleProviderOptions): EmailPro
         buildEml({
           from: options.from,
           to: message.to,
+          replyTo: message.replyTo,
           subject: message.subject,
           html: message.html,
           text: message.text,

@@ -30,6 +30,9 @@ export interface EmailMessage {
   html: string;
   /** Plain-text alternative (parity is unit-tested against the HTML). */
   text: string;
+  /** Optional Reply-To (e.g. the access-requester's address). Validated by
+   *  the caller; single-line, never used as a recipient. */
+  replyTo?: string;
   attachments?: EmailAttachment[];
   inlineImages?: EmailInlineImage[];
 }

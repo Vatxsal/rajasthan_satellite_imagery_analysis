@@ -16,7 +16,9 @@
     "verify": "npm run typecheck && npm run lint && npm test && npm run build",
     "generate:mock-data": "node scripts/generate-mock-data.mjs",
     "email:test": "tsc -p tsconfig.test.json && node .test-build/scripts/send-test-report.js",
-    "sharpen:measure": "tsc -p tsconfig.test.json && node .test-build/scripts/sharpen-measure.js"
+    "sharpen:measure": "tsc -p tsconfig.test.json && node .test-build/scripts/sharpen-measure.js",
+    "auth:hash": "tsc -p tsconfig.test.json && node .test-build/scripts/auth-hash.js",
+    "auth:new-user": "tsc -p tsconfig.test.json && node .test-build/scripts/auth-new-user.js"
   },
   "engines": {
     "node": ">=20.9.0"
@@ -28,6 +30,7 @@
     "@react-email/render": "^2.1.1",
     "@turf/turf": "^7.4.0",
     "geotiff": "^3.0.5",
+    "jose": "^5.10.0",
     "jpeg-js": "^0.4.4",
     "lucide-react": "^0.454.0",
     "maplibre-gl": "^4.7.1",

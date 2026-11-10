@@ -1,0 +1,136 @@
+/* ------------------------------------------------------------------
+ * /login page: entrance motion, hero map animation, rotating phrases.
+ * All motion is CSS-only and disabled under prefers-reduced-motion —
+ * no animation library is loaded for this page (hero JS budget).
+ * ------------------------------------------------------------------ */
+
+@keyframes rse-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes rse-phrase-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes rse-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes rse-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rse-scan {
+  from {
+    top: 0%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  to {
+    top: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes rse-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  70% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+/* Staggered entrance for hero/card blocks. */
+.rse-rise {
+  animation: rse-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rse-phrase-in {
+  animation: rse-phrase-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Map: district outlines draw in, fill fades, scan line sweeps. */
+.rse-map-line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: rse-draw 2.6s cubic-bezier(0.4, 0, 0.2, 1) 0.3s forwards;
+}
+
+.rse-map-fill {
+  opacity: 0;
+  animation: rse-fade 1.4s ease-out 1.8s forwards;
+}
+
+.rse-scan {
+  animation: rse-scan 5s linear 2.4s infinite;
+}
+
+.rse-marker-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: rse-pulse 2.4s ease-out infinite;
+}
+
+.rse-counter {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rse-rise,
+  .rse-phrase-in {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .rse-map-line {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .rse-map-fill {
+    animation: none;
+    opacity: 1;
+  }
+  .rse-scan {
+    display: none;
+  }
+  .rse-marker-pulse {
+    animation: none;
+    opacity: 0.35;
+  }
+}

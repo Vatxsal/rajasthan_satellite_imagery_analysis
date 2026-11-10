@@ -1,8 +1,10 @@
 "use client";
 
-import { FileImage, FileSpreadsheet, Loader2, PanelLeft, Moon, Sun } from "lucide-react";
+import { useEffect } from "react";
+import { FileImage, FileSpreadsheet, Loader2, LogIn, LogOut, PanelLeft, Moon, Sun } from "lucide-react";
 import { isDemoData } from "@/lib/data";
 import { useActiveScene, useActiveSelection, useAppStore } from "@/store/useAppStore";
+import { useSession } from "@/store/useSession";
 import { useTheme } from "@/store/useTheme";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
@@ -89,6 +91,15 @@ function UserMenu() {
   const selection = useActiveSelection();
   const downloadBusy = useAppStore((s) => s.downloadBusy);
   const requestDownload = useAppStore((s) => s.requestDownload);
+  const status = useSession((s) => s.status);
+  const role = useSession((s) => s.role);
+  const name = useSession((s) => s.name);
+  const fetchSession = useSession((s) => s.fetchSession);
+  const signOut = useSession((s) => s.signOut);
+
+  useEffect(() => {
+    if (status === "unknown") void fetchSession();
+  }, [status, fetchSession]);
 
   const handleDownload = (format: "png" | "tiff") => {
     if (!activeScene || !selection || downloadBusy) return;
@@ -99,22 +110,60 @@ function UserMenu() {
     );
   };
 
+  const displayName =
+    status === "signed-in"
+      ? name ?? (role === "guest" ? "Guest" : "User")
+      : status === "signed-out"
+        ? "Sign in"
+        : "…";
+  const initials = displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]!.toUpperCase())
+    .join("");
+  const badge = role === "sso" ? "SSO" : role === "guest" ? "Guest" : null;
+
+  const goSignIn = () => {
+    const next = `${window.location.pathname}${window.location.search}`;
+    window.location.assign(next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`);
+  };
+
   return (
     <Menu>
       <MenuTrigger asChild>
         <button
           type="button"
-          aria-label="User menu"
+          aria-label={status === "signed-in" ? `Account: ${displayName}` : "Sign in"}
           className="flex h-8 items-center gap-2 rounded border border-border bg-surface px-1.5 transition-colors duration-150 hover:bg-surface-2"
         >
           <span className="grid h-5 w-5 place-items-center rounded-sm bg-accent-soft text-[11px] font-semibold text-accent">
-            GD
+            {initials || "…"}
           </span>
-          <span className="hidden text-sm text-text sm:block">Guest</span>
+          <span className="hidden max-w-[9rem] truncate text-sm text-text sm:block">
+            {displayName}
+          </span>
+          {badge && (
+            <span
+              className={`hidden rounded-sm px-1 py-px text-[10px] font-semibold uppercase tracking-wide sm:inline ${
+                badge === "SSO"
+                  ? "bg-accent text-accent-fg"
+                  : "border border-border bg-surface-2 text-muted"
+              }`}
+            >
+              {badge}
+            </span>
+          )}
         </button>
       </MenuTrigger>
       <MenuContent align="end">
-        <MenuLabel>guest@explorer.in</MenuLabel>
+        <MenuLabel>
+          {status === "signed-in"
+            ? `${displayName} · ${badge ?? "session"}`
+            : status === "signed-out"
+              ? "Not signed in"
+              : "Checking session…"}
+        </MenuLabel>
         <MenuSeparator />
         <MenuItem>Profile</MenuItem>
         <MenuItem>Preferences</MenuItem>
@@ -137,7 +186,23 @@ function UserMenu() {
           {downloadBusy === "tiff" ? "Preparing…" : "GeoTIFF (10 m)"}
         </MenuItem>
         <MenuSeparator />
-        <MenuItem>Sign out</MenuItem>
+        {role === "guest" && (
+          <MenuItem onSelect={goSignIn}>
+            <LogIn size={14} />
+            Sign in with SSO
+          </MenuItem>
+        )}
+        {status === "signed-in" ? (
+          <MenuItem onSelect={() => void signOut()}>
+            <LogOut size={14} />
+            Sign out
+          </MenuItem>
+        ) : (
+          <MenuItem onSelect={goSignIn}>
+            <LogIn size={14} />
+            Sign in
+          </MenuItem>
+        )}
       </MenuContent>
     </Menu>
   );
