@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { GeoJSONSource, Map as MapLibreMap, RasterTileSource } from "maplibre-gl";
+import type { GeoJSONSource, Map as MapLibreMap } from "maplibre-gl";
 import { MoveHorizontal } from "lucide-react";
 import { getMainMap, setDebugMap, setOverlayImage, syncTabVisibility } from "@/lib/compare/bridge";
 import { buildOverlayBlobUrl, loadOverlayImageData, needsRecolor } from "@/lib/compare/recolor";
 import { swipeAttribution, swipeClipPath } from "@/lib/compare/swipe";
-import { POSITRON_STYLE_URL } from "@/lib/map/constants";
+import { POSITRON_STYLE_URL, SATELLITE_BASEMAP } from "@/lib/map/constants";
 import { buildTileUrl } from "@/lib/map/tiles";
 import { selectActiveSelection, useAppStore } from "@/store/useAppStore";
 import { useCompareStore } from "@/store/useCompareStore";
@@ -36,6 +36,7 @@ export default function CompareMapController() {
   const theme = useTheme((s) => s.theme);
   const dateA = useCompareStore((s) => s.dateA);
   const dateB = useCompareStore((s) => s.dateB);
+  const swipeMode = useCompareStore((s) => s.swipeMode);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const blobRef = useRef<string | null>(null);
@@ -158,23 +159,33 @@ export default function CompareMapController() {
             className="mono-nums absolute top-3 -translate-x-full rounded border border-border bg-surface/90 px-1.5 py-0.5 text-[11px] text-text shadow-float"
             style={{ left: `${divider}%`, paddingRight: "0.5rem" }}
           >
-            A · {dateA ? formatShortDate(dateA) : ""}
+            {swipeMode === "basemap"
+              ? `Sentinel-2 · ${dateA ? formatShortDate(dateA) : ""}`
+              : `A · ${dateA ? formatShortDate(dateA) : ""}`}
           </span>
           <span
             className="mono-nums absolute top-3 rounded border border-border bg-surface/90 px-1.5 py-0.5 text-[11px] text-text shadow-float"
             style={{ left: `${divider}%`, paddingLeft: "0.5rem" }}
           >
-            B · {dateB ? formatShortDate(dateB) : ""}
+            {swipeMode === "basemap" ? "Satellite basemap" : `B · ${dateB ? formatShortDate(dateB) : ""}`}
           </span>
           <div
             role="slider"
             tabIndex={0}
-            aria-label="Comparison divider between date A and date B"
+            aria-label={
+              swipeMode === "basemap"
+                ? "Comparison divider between Sentinel-2 imagery and the satellite basemap"
+                : "Comparison divider between date A and date B"
+            }
             aria-orientation="horizontal"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(divider)}
-            aria-valuetext={`${Math.round(divider)}% — A on the left, B on the right`}
+            aria-valuetext={
+              swipeMode === "basemap"
+                ? `${Math.round(divider)}% — Sentinel-2 on the left, satellite basemap on the right`
+                : `${Math.round(divider)}% — A on the left, B on the right`
+            }
             onPointerDown={startDrag}
             onKeyDown={onDividerKeyDown}
             className="absolute bottom-0 top-0 -ml-3.5 w-7 cursor-ew-resize pointer-events-auto focus:outline-none"
@@ -185,11 +196,19 @@ export default function CompareMapController() {
               <MoveHorizontal size={15} aria-hidden />
             </span>
           </div>
+          {swipeMode === "basemap" && (
+            <span
+              className="absolute left-1/2 -translate-x-1/2 rounded bg-surface/90 px-1.5 py-0.5 text-[11px] leading-tight text-muted shadow-float"
+              style={{ bottom: stripOffset + 12 }}
+            >
+              Basemap imagery is from a different date
+            </span>
+          )}
           <span
             className="absolute left-3 rounded bg-surface/90 px-1.5 py-0.5 text-[11px] leading-tight text-muted"
             style={{ bottom: stripOffset + 12 }}
           >
-            {swipeAttribution({ dateA, dateB })}
+            {swipeAttribution({ dateA, dateB, mode: swipeMode })}
           </span>
           {process.env.NODE_ENV !== "production" && (
             <div className="absolute right-3" style={{ bottom: stripOffset + 12 }}>
@@ -223,8 +242,10 @@ const OUTLINE_COLORS = {
 /**
  * One half of the swipe view: a non-interactive Positron map carrying a
  * single raw-imagery raster layer for its date (composite follows the store)
- * plus an optional neutral outline of the analysed area. Camera follows the
- * main map; tiles are recreated in place when the date/composite changes.
+ * plus an optional neutral outline of the analysed area. In basemap mode the
+ * right half shows the Esri satellite basemap instead of date B. Camera
+ * follows the main map; tiles are recreated in place when the
+ * date/composite/mode changes.
  */
 function SwipeMap({ slot }: { slot: SwipeSlot }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -233,6 +254,7 @@ function SwipeMap({ slot }: { slot: SwipeSlot }) {
   const [ready, setReady] = useState(false);
   const date = useCompareStore((s) => (slot === "left" ? s.dateA : s.dateB));
   const composite = useCompareStore((s) => s.swipeComposite);
+  const swipeMode = useCompareStore((s) => s.swipeMode);
   const outline = useCompareStore((s) => s.swipeOutline);
   const theme = useTheme((s) => s.theme);
 
@@ -297,6 +319,31 @@ function SwipeMap({ slot }: { slot: SwipeSlot }) {
       if (map.getSource(sourceId)) map.removeSource(sourceId);
       lastTileUrlRef.current = null;
     };
+
+    // Right half can swap date B for the Esri satellite basemap (different
+    // tile size/zooms → the source is recreated on every switch).
+    const basemapActive = slot === "right" && swipeMode === "basemap";
+    if (basemapActive) {
+      const url = `basemap:${SATELLITE_BASEMAP.tiles[0]}`;
+      if (lastTileUrlRef.current === url) return;
+      removeTiles();
+      map.addSource(sourceId, {
+        type: "raster",
+        tiles: [...SATELLITE_BASEMAP.tiles],
+        tileSize: 256,
+        maxzoom: SATELLITE_BASEMAP.maxzoom,
+        attribution: SATELLITE_BASEMAP.attribution,
+      });
+      map.addLayer({
+        id: layerId,
+        type: "raster",
+        source: sourceId,
+        paint: { "raster-opacity": 1, "raster-fade-duration": 200 },
+      });
+      lastTileUrlRef.current = url;
+      return;
+    }
+
     if (!date) {
       removeTiles();
       return;
@@ -305,18 +352,14 @@ function SwipeMap({ slot }: { slot: SwipeSlot }) {
     if (!selection) return;
     const url = buildTileUrl({ date, areaId: selection.id, level: selection.level, composite });
     if (lastTileUrlRef.current === url) return;
-    const existing = map.getSource(sourceId) as RasterTileSource | undefined;
-    if (existing) {
-      existing.setTiles([url]);
-      lastTileUrlRef.current = url;
-      return;
-    }
+    // Configs differ across switches (basemap ↔ Sentinel, tile size) — recreate.
+    if (map.getSource(sourceId)) removeTiles();
     map.addSource(sourceId, {
       type: "raster",
       tiles: [url],
       tileSize: 512,
       minzoom: 7,
-      maxzoom: 14,
+      maxzoom: 15,
       attribution: `Contains modified Copernicus Sentinel data ${date.slice(0, 4)}`,
     });
     map.addLayer({
@@ -326,7 +369,7 @@ function SwipeMap({ slot }: { slot: SwipeSlot }) {
       paint: { "raster-opacity": 1, "raster-fade-duration": 200 },
     });
     lastTileUrlRef.current = url;
-  }, [ready, date, composite, slot]);
+  }, [ready, date, composite, slot, swipeMode]);
 
   // ------------------------------------------------ neutral AOI outline
   useEffect(() => {

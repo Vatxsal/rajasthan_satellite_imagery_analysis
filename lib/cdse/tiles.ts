@@ -13,7 +13,10 @@ import type { BBox } from "@/lib/data";
 const MERC_MAX = 20037508.342789244;
 
 export const TILE_MIN_ZOOM = 7;
-export const TILE_MAX_ZOOM = 14;
+/** z14 ≈ 8.5 m/px at Rajasthan latitudes (slightly finer than native 10 m);
+ *  z15 ≈ 4.3 m/px — without a native z15 render the map can only overzoom the
+ *  z14 tile (2× client-side blur), so the route serves z15 too. */
+export const TILE_MAX_ZOOM = 15;
 /** 512px tiles (matches Copernicus Browser's raster output). */
 export const TILE_SIZE = 512;
 /** Max tiles an area's bbox may span at one zoom (quota guard). */

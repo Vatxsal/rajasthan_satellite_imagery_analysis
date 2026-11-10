@@ -31,6 +31,8 @@ function zeroIndices(n: number): V2Indices {
     awei: new Float32Array(n),
     brightness: new Float32Array(n),
     nbr: new Float32Array(n),
+    vBare: new Float32Array(n),
+    vBright: new Float32Array(n),
   };
 }
 
@@ -59,6 +61,9 @@ test("deriveV2Indices: parity trio + extended indices + zero-denominator convent
   assert.ok(Math.abs(idx.awei[0] - 0.5) < 1e-6);
   assert.ok(Math.abs(idx.brightness[0] - (0.1 + 0.3 + 0.2 + 0.05 + 0.6 + 0.1 + 0.05) / 7) < 1e-6);
   assert.ok(Math.abs(idx.nbr[0] - (0.6 - 0.05) / 0.65) < 1e-6);
+  // vBare = (0.1−0.3)/(0.1+0.3); vBright = (0.1+0.3+0.2)/3
+  assert.ok(Math.abs(idx.vBare[0] - -0.5) < 1e-6);
+  assert.ok(Math.abs(idx.vBright[0] - 0.2) < 1e-6);
 
   // All-zero bands → every ratio index 0 (v1 convention).
   const empty = deriveV2Indices({
@@ -285,7 +290,7 @@ test("classifyV2: transient water gain → low tier, ponding sub-label", () => {
   assert.equal(out.transientPixels, n);
 });
 
-test("classifyV2: bare/built 3-vote beats the sub-threshold veg dip", () => {
+test("classifyV2: bare/built anchor+support beats the sub-threshold veg dip", () => {
   const n = 16;
   const a = zeroIndices(n);
   const b = zeroIndices(n);
@@ -299,6 +304,10 @@ test("classifyV2: bare/built 3-vote beats the sub-threshold veg dip", () => {
   b.ndbi.fill(0.1);
   a.brightness.fill(0.15);
   b.brightness.fill(0.2);
+  a.vBare.fill(-0.05);
+  b.vBare.fill(0.4); // 10 m anchor: bare → built blue/green contrast
+  a.vBright.fill(0.15);
+  b.vBright.fill(0.2); // 10 m support: visible brightening
   a.mndwi.fill(-0.05);
   b.mndwi.fill(-0.05);
   const aRecent = { ndvi: new Float32Array(n).fill(0.5), mndwi: Float32Array.from(a.mndwi), ndbi: Float32Array.from(a.ndbi) };

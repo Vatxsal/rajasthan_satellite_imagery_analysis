@@ -772,6 +772,12 @@ function fitToBbox(
   const app = useAppStore.getState();
   const desktop = typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches;
   const strip = desktop && app.resultsOpen && (app.searching || app.hasSearched) ? app.stripHeightPx : 0;
+  // duration must be 0: MapLibre's fitBounds → flyTo freezes the animation's
+  // screen anchor (pointAtOffset) at call time, and the results drawer resizes
+  // the container right after this runs — mid-flight frames then pin the
+  // camera to the stale anchor, dragging it off the bbox centre (the swipe
+  // divider ends up outside the AOI). An instant fit sets the camera before
+  // the resize, and MapLibre's resize preserves it.
   map.fitBounds(bboxToBounds(bbox), {
     padding: {
       top: options.padding ?? 64,
@@ -779,7 +785,7 @@ function fitToBbox(
       left: options.padding ?? 64,
       bottom: (options.padding ?? 64) + strip,
     },
-    duration: 600,
+    duration: 0,
     maxZoom: options.maxZoom ?? 12,
   });
 }

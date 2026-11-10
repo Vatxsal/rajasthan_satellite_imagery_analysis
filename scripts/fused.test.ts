@@ -47,6 +47,8 @@ function zeroIndices(n: number): V2Indices {
     awei: new Float32Array(n),
     brightness: new Float32Array(n),
     nbr: new Float32Array(n),
+    vBare: new Float32Array(n),
+    vBright: new Float32Array(n),
   };
 }
 
@@ -159,7 +161,7 @@ function waterLossInput(): ClassifyFusedInput {
   });
 }
 
-/** Bare/built 3-vote with mild veg dip (sub-threshold). */
+/** Bare/built full votes with mild veg dip (sub-threshold). */
 function bareBuiltInput(): ClassifyFusedInput {
   const n = 16;
   const a = zeroIndices(n);
@@ -174,6 +176,10 @@ function bareBuiltInput(): ClassifyFusedInput {
   b.ndbi.fill(0.1);
   a.brightness.fill(0.15);
   b.brightness.fill(0.2);
+  a.vBare.fill(-0.05);
+  b.vBare.fill(0.4); // 10 m anchor: bare → built blue/green contrast
+  a.vBright.fill(0.15);
+  b.vBright.fill(0.2); // 10 m support: visible brightening
   a.mndwi.fill(-0.05);
   b.mndwi.fill(-0.05);
   return scenario({
@@ -285,7 +291,7 @@ test("classifyFused ≡ classifyV2 with no evidence (class/tier/persist)", () =>
 test("prior cropland → bare_agri sub-label with a confidence penalty", () => {
   const input = bareBuiltInput();
   const base = classifyFused(input);
-  assert.equal(base.subGrid[0], SUB.bareBuiltPossible, "3 votes + persistent + bright → possible");
+  assert.equal(base.subGrid[0], SUB.bareBuiltPossible, "4 votes + persistent + bright → possible");
   const withCrop = classifyFused({
     ...input,
     evidence: { prior: priorFixture(16, WC.cropland) },

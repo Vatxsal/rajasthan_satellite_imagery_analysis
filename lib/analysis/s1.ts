@@ -80,6 +80,9 @@ export function s1DataEntry(
       orthorectify: "true",
       demInstance: "COPERNICUS_30", // Copernicus DEM (global for S1)
       speckleFilter: { type: "LEE", windowSizeX: 5, windowSizeY: 5 },
+      // Docs: NEAREST|BILINEAR|BICUBIC — matches the optical analysis grids.
+      upsampling: "BICUBIC",
+      downsampling: "BILINEAR",
     },
   };
 }

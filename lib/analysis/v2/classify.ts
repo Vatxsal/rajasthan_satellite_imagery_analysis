@@ -1,9 +1,11 @@
 /**
  * Phase 2.5/2.6/2.7/2.8 — the v2 pixel classifier.
  *
- * Replaces the single-index gates of v1 with a multi-index vote: each class
- * has a primary Δ-index plus two corroborating indices; a class needs 2 of 3
- * votes (and its state gates) and keeps the v1 precedence order. Every change
+ * Replaces the single-index gates of v1 with an anchor + support vote: each
+ * class has a 10 m-native anchor Δ-index (NDWI / NDVI / vBare) that must
+ * cross the full threshold plus at least one supporting index (SWIR-derived
+ * indices corroborate but never determine a class alone), and keeps the v1
+ * precedence order. Every change
  * pixel additionally gets:
  *
  *  - CVA magnitude (normalised index-change energy) → confidence points
@@ -116,67 +118,71 @@ export function classifyV2(input: ClassifyV2Input): ClassifyV2Output {
     const dAwei = b.awei[i] - a.awei[i];
     const dBright = b.brightness[i] - a.brightness[i];
     const dNbr = b.nbr[i] - a.nbr[i];
+    const dVbare = b.vBare[i] - a.vBare[i];
+    const dVbright = b.vBright[i] - a.vBright[i];
 
-    // ── 2-of-3 vote per class, v1 precedence order ─────────────────────────
+    // ── anchor + support vote per class, v1 precedence order ───────────────
+    // Every class needs its 10 m-native anchor index (NDWI / NDVI / vBare)
+    // across the full threshold AND at least one supporting index. The 20 m
+    // SWIR-derived indices (MNDWI/AWEI/NDMI/NDBI/BSI) can corroborate but
+    // never determine a class alone; bare/built also accepts the 10 m
+    // vBright as support. State gates (water MNDWI mins, bare/built NDVI
+    // max) are unchanged — they check the A/B state, not the change.
     let code: number = CLASS.noChange;
     let votes = 0;
     let sub: number = 0;
 
     if (
       b.mndwi[i] > t.waterGainMndwiMin &&
-      (dMndwi >= t.waterGainD ? 1 : 0) + (dNdwi >= f * t.waterGainD ? 1 : 0) +
-          (dAwei >= aweiT ? 1 : 0) >=
-        2
+      dNdwi >= f * t.waterGainD &&
+      (dMndwi >= t.waterGainD || dAwei >= aweiT)
     ) {
       code = CLASS.waterGain;
       votes =
+        1 +
         (dMndwi >= t.waterGainD ? 1 : 0) +
-        (dNdwi >= f * t.waterGainD ? 1 : 0) +
         (dAwei >= aweiT ? 1 : 0);
     } else if (
       a.mndwi[i] > t.waterLossMndwiMin &&
-      (dMndwi <= t.waterLossD ? 1 : 0) + (dNdwi <= f * t.waterLossD ? 1 : 0) +
-          (dAwei <= -aweiT ? 1 : 0) >=
-        2
+      dNdwi <= f * t.waterLossD &&
+      (dMndwi <= t.waterLossD || dAwei <= -aweiT)
     ) {
       code = CLASS.waterLoss;
       votes =
+        1 +
         (dMndwi <= t.waterLossD ? 1 : 0) +
-        (dNdwi <= f * t.waterLossD ? 1 : 0) +
         (dAwei <= -aweiT ? 1 : 0);
     } else if (
-      (dNdvi <= t.vegLossD ? 1 : 0) + (dNdmi <= f * t.vegLossD ? 1 : 0) +
-        (dBsi >= f * Math.abs(t.vegLossD) ? 1 : 0) >=
-      2
+      dNdvi <= t.vegLossD &&
+      (dNdmi <= f * t.vegLossD || dBsi >= f * Math.abs(t.vegLossD))
     ) {
       code = CLASS.vegLoss;
       votes =
-        (dNdvi <= t.vegLossD ? 1 : 0) +
+        1 +
         (dNdmi <= f * t.vegLossD ? 1 : 0) +
         (dBsi >= f * Math.abs(t.vegLossD) ? 1 : 0);
     } else if (
-      (dNdvi >= t.vegGainD ? 1 : 0) + (dNdmi >= f * t.vegGainD ? 1 : 0) +
-        (dBsi <= -f * t.vegGainD ? 1 : 0) >=
-      2
+      dNdvi >= t.vegGainD &&
+      (dNdmi >= f * t.vegGainD || dBsi <= -f * t.vegGainD)
     ) {
       code = CLASS.vegGain;
       votes =
-        (dNdvi >= t.vegGainD ? 1 : 0) +
+        1 +
         (dNdmi >= f * t.vegGainD ? 1 : 0) +
         (dBsi <= -f * t.vegGainD ? 1 : 0);
     } else if (
       dNdvi <= t.bareBuiltNdviMax &&
       a.mndwi[i] <= t.bareBuiltMaxMndwi &&
       b.mndwi[i] <= t.bareBuiltMaxMndwi &&
-      (dNdbi >= t.bareBuiltD ? 1 : 0) + (dBsi >= f * t.bareBuiltD ? 1 : 0) +
-        (dBright >= brightT ? 1 : 0) >=
-        2
+      dVbare >= f * t.bareBuiltD &&
+      (dVbright >= brightT || dNdbi >= t.bareBuiltD || dBsi >= f * t.bareBuiltD)
     ) {
       code = CLASS.bareBuilt;
       votes =
+        1 +
+        (dVbright >= brightT ? 1 : 0) +
         (dNdbi >= t.bareBuiltD ? 1 : 0) +
-        (dBsi >= f * t.bareBuiltD ? 1 : 0) +
-        (dBright >= brightT ? 1 : 0);
+        (dBsi >= f * t.bareBuiltD ? 1 : 0);
     }
 
     if (code === CLASS.noChange) continue;
@@ -269,7 +275,8 @@ export function classifyV2(input: ClassifyV2Input): ClassifyV2Output {
     }
 
     // ── confidence tier (§2.8): scored, every change pixel gets one ───────
-    let score = votes === 3 ? 2 : 1;
+    // votes ≥ 3 (of 3 for water/veg, of 4 for bare/built) = full agreement.
+    let score = votes >= 3 ? 2 : 1;
     if (cva >= VOTE.cvaBoost) score += 1;
     score += persistent ? 1 : -1;
     if (seasonal) score -= 1;

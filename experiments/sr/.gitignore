@@ -1,0 +1,7 @@
+.venv/
+data/
+out/
+models/
+*.ckpt
+__pycache__/
+*.pyc

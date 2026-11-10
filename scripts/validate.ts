@@ -8,6 +8,7 @@
  *   npm run validate -- --engine v1 --px 512 --out validation/reports/custom.md
  *   npm run validate -- --scenarios --engine v2
  *   npm run validate -- --scenarios --rules fused        # Phase 6 (forces v2)
+ *   npm run validate -- --scenarios --rules fused --sharpen  # SHARPEN_SWIR on
  *
  * Loads reference polygons (QGIS-drawn, see validation/README.md) and the
  * engine's GeoJSON output for the same area/dates, then reports per-class
@@ -65,6 +66,7 @@ function main(): void {
   const manifestPath = path.resolve(root, "validation/cases.json");
   const scenarios = args.includes("--scenarios");
   const holdout = args.includes("--holdout");
+  const sharpen = args.includes("--sharpen");
   const rulesArg = argValue(args, "--rules");
   if (rulesArg !== undefined && rulesArg !== "legacy" && rulesArg !== "fused") {
     console.error(`--rules must be legacy|fused (got "${rulesArg}")`);
@@ -72,6 +74,10 @@ function main(): void {
   }
   if (rulesArg !== undefined && !scenarios) {
     console.error("--rules only applies to --scenarios runs (static predictions carry no rules)");
+    process.exit(1);
+  }
+  if (sharpen && !scenarios) {
+    console.error("--sharpen only applies to --scenarios runs");
     process.exit(1);
   }
   const rules = rulesArg as CompareRules | undefined;
@@ -89,7 +95,9 @@ function main(): void {
   const outPath = path.resolve(
     root,
     argValue(args, "--out") ??
-      `validation/reports/${engineTag}${scenarios ? "-scenarios" : ""}${holdout ? "-holdout" : ""}.md`,
+      `validation/reports/${engineTag}${scenarios ? "-scenarios" : ""}${
+        sharpen ? "-sharpen" : ""
+      }${holdout ? "-holdout" : ""}.md`,
   );
 
   let entries: CaseEntry[] = [];
@@ -120,7 +128,7 @@ function main(): void {
   }
 
   const cases: ValidationCase[] = scenarios
-    ? buildScenarios(engine, only, rules)
+    ? buildScenarios(engine, only, rules, sharpen)
     : entries.map((entry) => {
         const reference = readGeoJson(path.resolve(root, entry.reference));
         const prediction = readGeoJson(path.resolve(root, entry.prediction));
@@ -144,9 +152,7 @@ function main(): void {
     !scenarios &&
     entries.some((e) => !e.reference.includes("fixtures") && !e.prediction.includes("fixtures"));
   const note = scenarios
-    ? rules === "fused"
-      ? "scenario fixtures — fused rules with synthetic truth-derived evidence (validation/scenarios.ts)"
-      : "scenario fixtures — synthetic A/B rasters through the real engine pipeline (validation/scenarios.ts)"
+    ? `${rules === "fused" ? "scenario fixtures — fused rules with synthetic truth-derived evidence" : "scenario fixtures — synthetic A/B rasters through the real engine pipeline"} (validation/scenarios.ts)${sharpen ? " + SHARPEN_SWIR" : ""}`
     : hasRealRef
       ? undefined
       : "synthetic fixtures only — real QGIS references pending (see validation/README.md)";

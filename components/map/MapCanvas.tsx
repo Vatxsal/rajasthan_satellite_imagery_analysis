@@ -595,7 +595,7 @@ function setImageryTiles(
     tiles: [urlTemplate],
     tileSize: 512,
     minzoom: 7,
-    maxzoom: 14,
+    maxzoom: 15,
     attribution,
   });
   // Insert below admin/selection outlines so the polygon stays on top.

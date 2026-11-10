@@ -122,7 +122,7 @@ export const aiSummaryCache: BlobCache = sharedInstance("rse.aiSummaryCache", ()
  * Bump whenever evalscripts or render settings change so previously cached
  * PNGs (produced by different code) are not served.
  */
-export const RENDER_VERSION = "v4-visual-dn";
+export const RENDER_VERSION = "v5-bicubic-z15";
 
 export function imageryCacheKey(input: {
   geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
@@ -183,6 +183,8 @@ export function compareCacheKey(input: {
   s1WindowDays?: number;
   /** WorldCover prior on/off — affects fused results. */
   worldCover?: number;
+  /** SHARPEN_SWIR (1/0) — regression SWIR sharpening changes NDBI/MNDWI/BSI. */
+  sharpen?: number;
 }): string {
   const payload = JSON.stringify([
     COMPARE_VERSION,
@@ -198,6 +200,7 @@ export function compareCacheKey(input: {
     input.rules ?? "legacy",
     input.s1WindowDays ?? 0,
     input.worldCover ?? 0,
+    input.sharpen ?? 0,
   ]);
   return createHash("sha256").update(payload).digest("hex");
 }

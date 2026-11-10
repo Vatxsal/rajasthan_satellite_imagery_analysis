@@ -72,6 +72,11 @@ export async function renderSceneImage(query: ProcessQuery): Promise<Buffer> {
                 to: `${query.date}T23:59:59Z`,
               },
             },
+            // Docs (S2L2A processing options): upsampling/downsampling accept
+            // NEAREST | BILINEAR | BICUBIC (default NEAREST). BICUBIC keeps the
+            // 20 m SWIR bands smooth at our 10 m output grids; BILINEAR is the
+            // proper choice for coarse downsampling (thumbnails/analysis grids).
+            processing: { upsampling: "BICUBIC", downsampling: "BILINEAR" },
           },
         ],
       },
@@ -127,7 +132,8 @@ export interface TileRenderQuery {
  * Renders one native-resolution XYZ tile (Copernicus Browser behaviour):
  * bounds.bbox = tile bbox (EPSG:3857), bounds.geometry = area polygon (same
  * CRS) so pixels outside the area are transparent, timeRange = the full UTC
- * day, mosaickingOrder "mostRecent", resampling BILINEAR.
+ * day, mosaickingOrder "mostRecent", upsampling BICUBIC / downsampling
+ * BILINEAR (docs: processing.upsampling|downsampling = NEAREST|BILINEAR|BICUBIC).
  */
 export async function renderTileImage(query: TileRenderQuery): Promise<Buffer> {
   const env = getServerEnv();
@@ -158,7 +164,7 @@ export async function renderTileImage(query: TileRenderQuery): Promise<Buffer> {
               },
               mosaickingOrder: "mostRecent",
             },
-            processing: { upsampling: "BILINEAR", downsampling: "BILINEAR" },
+            processing: { upsampling: "BICUBIC", downsampling: "BILINEAR" },
           },
         ],
       },
