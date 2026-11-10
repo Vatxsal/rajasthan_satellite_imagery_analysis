@@ -20,6 +20,17 @@ const boolEnv = () =>
     return value; // unknown token → zod type error below
   }, z.boolean());
 
+/**
+ * Like boolEnv() but treats an EMPTY value as "unset" and falls back to the
+ * default — so a copied `.env.example` line (`AUTH_REQUIRED=`) keeps the
+ * production-safe default instead of silently coercing to false.
+ */
+const boolEnvDefault = (defaultValue: boolean) =>
+  z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    boolEnv().default(defaultValue),
+  );
+
 const baseSchema = z.object({
   CDSE_TOKEN_URL: z
     .string()
@@ -120,6 +131,32 @@ const baseSchema = z.object({
   /** Optional Cloudflare Turnstile anti-abuse (blank = disabled). */
   TURNSTILE_SITE_KEY: optionalString,
   TURNSTILE_SECRET_KEY: optionalString,
+
+  // ── Authentication & access gate (/login, /api/auth/*) ───────────────────
+  /** Gate every route behind a session cookie. Default: true in production,
+   *  false in dev/test. With AUTH_REQUIRED=true and no usable SESSION_SECRET
+   *  the app FAILS CLOSED (plain "Authentication is not configured" page). */
+  AUTH_REQUIRED: boolEnvDefault(process.env.NODE_ENV === "production"),
+  /** Allow unauthenticated "Continue as guest" sessions. */
+  GUEST_ENABLED: boolEnvDefault(true),
+  /** HS256 secret for session cookies — 32+ random chars; auth refuses to
+   *  issue or verify sessions without it (never logged, never sent). */
+  SESSION_SECRET: optionalString,
+  /** JSON array of { username, passwordHash, displayName? } entries created
+   *  with `npm run auth:new-user` (Sensitive on Vercel). */
+  SSO_USERS: optionalString,
+  /** Guest session lifetime (hours). */
+  SESSION_TTL_GUEST_HOURS: z.coerce.number().positive().max(8_760).default(12),
+  /** SSO session lifetime (hours) — 168 = 7 days. */
+  SESSION_TTL_SSO_HOURS: z.coerce.number().positive().max(8_760).default(168),
+  /** Guest sessions allowed per IP per hour. */
+  AUTH_GUEST_PER_IP_PER_HOUR: z.coerce.number().int().min(1).default(20),
+  // ── Access requests (POST /api/access-request → admin email) ─────────────
+  /** Requests per IP per UTC day. */
+  ACCESS_REQUEST_PER_IP_PER_DAY: z.coerce.number().int().min(1).default(3),
+  /** Deployment-wide requests per UTC day (independent of EMAIL_DAILY_CAP);
+   *  0 disables sending (form reports "unavailable"). */
+  ACCESS_REQUEST_DAILY_CAP: z.coerce.number().int().min(0).default(10),
   /** Canonical site origin for email deep links; required to actually send. */
   NEXT_PUBLIC_SITE_URL: z.string().trim().url().optional(),
 });
@@ -177,6 +214,15 @@ export interface ServerEnv {
   EMAIL_TEST_RECIPIENT?: string;
   TURNSTILE_SITE_KEY?: string;
   TURNSTILE_SECRET_KEY?: string;
+  AUTH_REQUIRED: boolean;
+  GUEST_ENABLED: boolean;
+  SESSION_SECRET?: string;
+  SSO_USERS?: string;
+  SESSION_TTL_GUEST_HOURS: number;
+  SESSION_TTL_SSO_HOURS: number;
+  AUTH_GUEST_PER_IP_PER_HOUR: number;
+  ACCESS_REQUEST_PER_IP_PER_DAY: number;
+  ACCESS_REQUEST_DAILY_CAP: number;
   NEXT_PUBLIC_SITE_URL?: string;
 }
 

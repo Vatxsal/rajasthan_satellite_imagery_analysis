@@ -33,6 +33,7 @@ Next.js 14 · TypeScript · Tailwind · MapLibre GL JS · Zustand · Radix UI ·
 | 🔍 | **Change detection** | Compare two dates: **Swipe**, classified **Changes** map, **Stats** (by class and tehsil), **Events** list with numbered map markers, **Summary**, and PNG / GeoTIFF / CSV / GeoJSON exports. |
 | 🤖 | **AI summary** | Optional Gemini briefing of a comparison in English or हिन्दी, built only from the computed statistics. |
 | 📧 | **Email report** | One click (**Send report to mail**) emails the top events, stats, AI summary, change-map image, `events.csv` and a link that reopens the analysis. Fixed-recipient mode for production. |
+| 🔐 | **Access gate & landing** | `/login` hero page with shared-credential **Sign in**, **Continue as guest**, and an in-card **Request access** form that emails the admin. Email deep links survive the login bounce. |
 
 ---
 
@@ -57,6 +58,8 @@ npm run build / start  # production build / serve it
 npm run lint / typecheck / test
 npm run email:preview  # render email fixtures to .email-preview/
 npm run email:test     # send one test report to EMAIL_TEST_RECIPIENT
+npm run auth:new-user  # mint an SSO entry: password printed once, JSON for SSO_USERS
+npm run auth:hash      # hash a password for an existing SSO_USERS entry (argv or stdin)
 npx tsx scripts/fetch-datameet.ts   # (re)download boundaries (not part of the build)
 node scripts/smoke.browser.cjs      # headless-browser smoke test (needs Chrome)
 node scripts/sharpness.browser.cjs      # imagery sharpness evidence (bicubic z13–15; needs Chrome)
@@ -128,6 +131,13 @@ All Copernicus, Gemini and email calls are **server-side**; the browser never se
 | `EMAIL_DAILY_CAP` / `EMAIL_RATE_LIMIT_PER_ADDRESS_PER_DAY` / `EMAIL_RATE_LIMIT_PER_IP_PER_DAY` | server | `80` / `3` / `10` | Email quotas (UTC day, per instance) |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | server / 🔒 | unset | Optional CAPTCHA; set **both or neither** |
 | `EMAIL_TEST_RECIPIENT` | dev | unset | Target for `npm run email:test` |
+| `AUTH_REQUIRED` | server | `true` in prod / `false` in dev | Gate every route behind the session cookie (`""` = default) |
+| `SESSION_SECRET` | 🔒 | n/a | HS256 secret, 32+ chars; required to sign/verify sessions; rotation signs everyone out |
+| `SSO_USERS` | 🔒 | unset | JSON array of shared-credential users (build with `npm run auth:new-user`) |
+| `GUEST_ENABLED` | server | `true` | Allow **Continue as guest** sessions |
+| `SESSION_TTL_GUEST_HOURS` / `SESSION_TTL_SSO_HOURS` | server | `12` / `168` | Session lifetimes |
+| `AUTH_GUEST_PER_IP_PER_HOUR` | server | `20` | Guest sessions per IP per hour |
+| `ACCESS_REQUEST_PER_IP_PER_DAY` / `ACCESS_REQUEST_DAILY_CAP` | server | `3` / `10` | Access-request quotas (UTC day; cap `0` hides the form) |
 
 🔒 = secret. On Vercel mark secrets **Sensitive**, keep `NEXT_PUBLIC_*` as **Config** (Vercel refuses to hide public values), paste values **without quotes**, and redeploy after every change.
 
@@ -216,6 +226,45 @@ Other providers: `resend` (free tier; needs a verified domain to send to others)
 
 ---
 
+## 🔐 Authentication & access
+
+Production runs behind a session gate (`middleware.ts`, Edge, jose-verified `rse_session` cookie — httpOnly, SameSite=Lax, Secure in production). Three states, read from `AUTH_REQUIRED` + `SESSION_SECRET`:
+
+| State | Behaviour |
+| --- | --- |
+| **off** (`AUTH_REQUIRED=false`) | Everything is open; `/login` still works (dev default). |
+| **ready** (gate on + valid secret) | Unauthenticated pages bounce to `/login?next=…`; unauthenticated APIs answer `401 UNAUTHENTICATED`; signed-in users opening `/login` are redirected home. |
+| **misconfigured** (gate on, secret missing/short) | **Fails closed:** a plain "Authentication is not configured" page (503) for every app route; only `/api/health/*` and static files stay up. |
+
+**Sign-in options** on the landing page:
+
+- **Sign in** — shared credentials from `SSO_USERS` (scrypt-hashed; verified with a dummy-hash path so timing cannot enumerate users; 5 failures / 15 min per IP *and* per username → `429` + `Retry-After`). Every bad password answers the same `401 INVALID_CREDENTIALS`.
+- **Continue as guest** — a limited session (`guest:<uuid>` subject, `GUEST_ENABLED`, `AUTH_GUEST_PER_IP_PER_HOUR` quota) for people who just want the dashboard.
+- **Request access** — posts to `/api/access-request`; the admin mailbox (`EMAIL_FIXED_RECIPIENT`) receives a formatted table (name, company, Reply-To = requester, reason, IST time, request id) plus a **how to create this user** hint. Nothing is stored, nothing is auto-replied.
+
+**Granting access to someone:**
+
+1. They fill the form on `/login`, or you add them directly.
+2. Mint credentials: `npm run auth:new-user -- --username <name> --display "Full Name"` — the password is printed **once**, nothing is written to disk.
+3. Add the printed JSON entry to `SSO_USERS` (one-line JSON array; Vercel → Environment Variables → mark **Sensitive**).
+4. **Redeploy**, then send the person their username + password over a trusted channel.
+
+> **This is shared-credential login, not federated SSO.** Everyone shares one `SSO_USERS` list with no per-user roles, MFA or password reset. The natural upgrade path is an identity provider (Keycloak / gov SSO / Supabase Auth) or per-user credentials with hashed passwords — the session cookie, middleware gate and login UI already sit in front of the app, so only `lib/auth/users.ts` + the login route would change.
+
+**Sessions:** JWT (HS256) with `role`/`sub`/`name` claims; TTLs `SESSION_TTL_GUEST_HOURS` (12 h) and `SESSION_TTL_SSO_HOURS` (168 h = 7 days). **Rotating `SESSION_SECRET` signs everyone out.** The top-bar user menu shows *Guest* or the SSO display name with a role badge and **Sign out**; guests also get **Sign in with SSO**. Emailed deep links (`/?a=…&A=…&B=…&tab=events&e=…`) survive the bounce through a sanitised `next` parameter (same-origin relative paths only).
+
+**Access-request limits** (independent of the report-email quotas): 3 / IP / UTC day, 2 / requester address / day (SHA-256 hashed), `ACCESS_REQUEST_DAILY_CAP` (10) shared across the deployment, 10-minute duplicate-content suppression (no quota), honeypot, optional Turnstile (fail-closed), and a friendly `503 ACCESS_UNAVAILABLE` when `EMAIL_FIXED_RECIPIENT` is unset or the cap is `0` — the UI hides the send button then. Logs only ever contain a hash prefix of the address.
+
+**Env vars:** `AUTH_REQUIRED`, `SESSION_SECRET` 🔒, `SSO_USERS` 🔒, `GUEST_ENABLED`, `SESSION_TTL_*`, `AUTH_GUEST_PER_IP_PER_HOUR`, `ACCESS_REQUEST_*` — all documented in [Configuration](#-configuration). Generate the secret with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+**Windows note:** `npm run auth:hash -- <password>` — npm escapes spaces as `^` on Windows; prefer piping (`echo -n "pw" | npm run auth:hash`) or `auth:new-user` (which sanitises `^` out of `--display`).
+
+---
+
 ## ⚠️ Known Limitations
 
 | Area | Limitation |
@@ -225,7 +274,7 @@ Other providers: `resend` (free tier; needs a verified domain to send to others)
 | **Crop cycles** | Harvest, tillage and irrigation look like change. Gaps under ~30 days show little; compare the same season across years. |
 | **Single-date images** | Residual haze or shadow can create false change; composites are planned. |
 | **Boundaries** | Census 2011: newer districts are missing and some tehsils are renamed. ILR data is a mock. |
-| **Hosting** | No login. Rate limits, quotas and caches are per serverless instance; Vercel limits on duration, memory and response size apply. |
+| **Hosting** | No database: sessions, lockout counters, rate limits and quotas are per serverless instance (cold starts reset them); Vercel limits on duration, memory and response size apply. |
 | **AI summary** | Can misread images; always check Stats and Changes. |
 
 ---
@@ -233,7 +282,7 @@ Other providers: `resend` (free tier; needs a verified domain to send to others)
 ## ▲ Deploy to Vercel
 
 1. Import the repo (Next.js is auto-detected).
-2. Add the variables from [Configuration](#-configuration). Use **Production** scope for the email variables so preview deployments cannot send mail. Leave `TILE_CACHE_DIR` and `CDSE_WMTS_INSTANCE_ID` unset.
+2. Add the variables from [Configuration](#-configuration). Use **Production** scope for the email variables so preview deployments cannot send mail. Mark `SESSION_SECRET`, `SSO_USERS`, `SMTP_PASS`, `RESEND_API_KEY`, `GEMINI_API_KEY` and the CDSE keys **Sensitive**. Leave `TILE_CACHE_DIR` and `CDSE_WMTS_INSTANCE_ID` unset.
 3. `vercel.json` pins the region to `fra1` (close to Copernicus); route `maxDuration` is 60 s for renders and analysis.
 4. **Redeploy** after any env change (and untick the build cache when env values changed).
 
@@ -251,6 +300,7 @@ Other providers: `resend` (free tier; needs a verified domain to send to others)
 - [ ] Downloads: PNG, visual GeoTIFF, analysis GeoTIFF (open in QGIS), Copernicus Browser link
 - [ ] Compare two dates weeks apart: Swipe (dates **and** Satellite basemap modes), Changes, Stats, Events, Summary all work; hovering and clicking events highlights and zooms
 - [ ] **Send report to mail**: the email arrives (check spam), its links reopen the analysis, Gmail "Show original" shows SPF / DKIM / DMARC PASS
+- [ ] **Gate**: signed out → `/login` (with `?next=` preserved); sign in, guest, sign out all work; emailed deep link lands on the right analysis after login; a bad password always says *Invalid username or password*
 - [ ] Light / dark with the panel open; panel width 360 to 560 px with no overlapping text
 - [ ] No console or CSP errors; no browser calls to `sh.dataspace.copernicus.eu`; secrets absent from page sources
 - [ ] Sentinel Hub dashboard usage looks sane after a session
@@ -265,6 +315,7 @@ Other providers: `resend` (free tier; needs a verified domain to send to others)
 | **Headers** | CSP (allow-lists only self, OpenFreeMap, Esri, Nominatim, Cloudflare Turnstile), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, HSTS. |
 | **API** | zod validation on every route, 512 KB body cap, same-origin check on POST (`403 CROSS_ORIGIN`), `{ code, message }` errors without upstream details. |
 | **Quota & abuse** | Per-IP rate limits (API, tiles, compare, AI, email), daily render budget, upstream timeouts, email guard rails above. |
+| **Sessions & gate** | httpOnly/SameSite=Lax cookie, HS256 via `jose`, scrypt (N=16384) password hashes with a dummy-hash timing path, uniform `401 INVALID_CREDENTIALS`, lockout (5 / 15 min per IP + username), fail-closed 503 when the gate is on without a usable secret, sanitised `next` redirects, no subject/secret in API responses. |
 | **AI** | Gemini key is server-only; the summary uses server-side analysis data only; model output is validated and rendered as plain text. |
 
 `npm audit` advisories that need major upgrades (Next 16 / MapLibre 6 / Tailwind 4) are not reachable at runtime here; re-evaluate on the next major upgrade.
@@ -280,19 +331,22 @@ Run `npm run verify` before pushing: typecheck → lint → unit tests → produ
 ## 🗂️ Project Layout
 
 ```text
-app/api/            scenes · imagery · tiles/[z]/[x]/[y] · compare (analyze, overlay, summary, email, email/config) · health (cdse, gemini)
-components/         shell · filters · layers · map · scenes · compare (tabs, EmailReport, ShareLinkLoader) · ui
+app/api/            scenes · imagery · tiles/[z]/[x]/[y] · compare (analyze, overlay, summary, email, email/config) · auth (login, guest, logout, session) · access-request · health (cdse, gemini)
+app/login/          landing page (hero + auth card, page-level CSS)
+components/         shell · filters · layers · map · scenes · compare (tabs, EmailReport, ShareLinkLoader) · login (LoginHero, AuthCard) · ui
 data/               boundaries/ (Datameet GeoJSON) · mock/
 docs/               screenshots/ · email-qa.md
 experiments/        standalone research (super-resolution; not part of the app build)
+lib/auth/           config, session (jose), passwords (scrypt), users (SSO_USERS), limits (lockout/guest), nextPath
 lib/cdse/           OAuth, STAC, Process API, evalscripts, tiling maths
 lib/analysis/       change-detection engine (config, classify, filter, stats, encoders)
 lib/compare/        client helpers: stream, map bridge, share links, exports
 lib/email/          providers (smtp, resend, console), templates, quotas
-lib/server/         API helpers, area resolution, budgets, Gemini client, Turnstile
+lib/server/         API helpers, area resolution, budgets, Gemini client, Turnstile, access-request quotas
 lib/data/           DataAdapter + mock/cdse adapters, boundaries
-store/              Zustand stores (app, compare)
-scripts/            mock data, Datameet fetcher, email tools, tests
+store/              Zustand stores (app, compare, session)
+scripts/            mock data, Datameet fetcher, email tools, auth CLIs, tests
+middleware.ts       Edge access gate (public paths, 401s, /login?next=)
 ```
 
 ---
@@ -335,7 +389,7 @@ interface DataAdapter {
 - **Change Engine v2** (planned): multi-observation composites, radiometric normalisation, adaptive thresholds, plot-level objects (parcel mode when cadastral polygons exist), smoother sub-pixel edges, full-coverage block processing, per-event confidence scores and a validation harness.
 - **Automatic alerts:** notify when new change events appear (email reports are manual today).
 - **Real ILR / parcel boundaries** and post-2011 district and tehsil boundaries.
-- **Persistent cache, login and per-user quotas;** a durable rate limiter (Upstash / Vercel KV).
+- **Persistent cache and per-user quotas;** a durable rate limiter (Upstash / Vercel KV), and a proper identity provider (per-user accounts, MFA, password reset) instead of shared credentials.
 - **Swipe fidelity:** raw, unfiltered imagery with the earlier date always on the left.
 - Time-lapse and multi-date comparison.
 
@@ -361,6 +415,13 @@ interface DataAdapter {
 | Email errors | `EMAIL_DISABLED` / `EMAIL_RATE_LIMITED` / `EMAIL_CAPTCHA_FAILED` / `EMAIL_SEND_FAILED` | Configure the provider; wait for the stated reset (05:30 IST); check Turnstile keys; check the SMTP credentials |
 | SMTP authentication failed | n/a | Use a fresh 16-character app password (no spaces) with 2-Step Verification on; `EMAIL_FROM` must use the same address as `SMTP_USER` |
 | `npm run email:test` sends to the wrong address | n/a | A shell variable overrides `.env.local`: clear it (PowerShell `Remove-Item Env:EMAIL_TEST_RECIPIENT`) |
+| Locked out of the dashboard | `AUTH_RATE_LIMITED` | Wait for the countdown (5 failures / 15 min per IP + username); counters are per instance, so a cold start also clears them. As an admin, reset the username counter only by redeploying — or wait it out |
+| "Authentication is not configured" (plain 503 page) | `AUTH_NOT_CONFIGURED` | `AUTH_REQUIRED=true` but `SESSION_SECRET` is missing/short (<32 chars) — the gate fails closed by design. Set the secret (Vercel → **Sensitive**) and redeploy |
+| Redirect loop between `/` and `/login` | n/a | Almost always a cookie that cannot stick: run over http (localhost is fine), check no proxy strips `Set-Cookie`, and confirm `SESSION_SECRET` is identical across deployments. `AUTH_REQUIRED=false` bypasses the gate for debugging |
+| Emailed report link asks to sign in | n/a | Expected when the gate is on: the link bounces through `/login?next=…` and resumes the deep link after login (session must still be valid) |
+| Sign-in always says *Invalid username or password* | `INVALID_CREDENTIALS` | The entry in `SSO_USERS` must be a fresh `auth:new-user` hash (old `scrypt$` formats with different params fail closed) and the username is case-insensitive; check for a stray space in the JSON |
+| "Access requests are unavailable right now" | `ACCESS_UNAVAILABLE` | Set `EMAIL_FIXED_RECIPIENT` (and keep `ACCESS_REQUEST_DAILY_CAP` > 0); the request form hides itself until then |
+| Turnstile enabled but the widget never appears | n/a | Set **both** `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` — with only the secret the server rejects every attempt and the login page cannot render the challenge |
 | Vercel build fails at "Linting" | n/a | Run `npm run verify`; unused variables are lint errors |
 | `EADDRINUSE` on dev | n/a | Free port 3000 or run `npm run dev -- -p 3001` |
 | PowerShell breaks `curl` JSON | n/a | Use the browser, Postman or a Node script for POST tests |

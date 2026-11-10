@@ -83,6 +83,8 @@ function boundary(): string {
 export interface EmlInput {
   from: string;
   to: string;
+  /** Optional Reply-To header value (single line; CR/LF stripped). */
+  replyTo?: string;
   subject: string;
   html: string;
   text: string;
@@ -94,6 +96,7 @@ export function buildEml(input: EmlInput): string {
   const headers = [
     `From: ${encodeHeaderValue(input.from)}`,
     `To: ${encodeHeaderValue(input.to)}`,
+    ...(input.replyTo ? [`Reply-To: ${encodeHeaderValue(input.replyTo)}`] : []),
     `Subject: ${encodeHeaderValue(input.subject)}`,
     `Date: ${new Date().toUTCString().replace("GMT", "+0000")}`,
     `Message-ID: <${Date.now()}.${Math.random().toString(36).slice(2, 10)}@rse.local>`,

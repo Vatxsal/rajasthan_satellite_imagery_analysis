@@ -56,6 +56,7 @@ export function createResendProvider(config: ResendProviderConfig): EmailProvide
           body: JSON.stringify({
             from: config.from,
             to: [message.to],
+            ...(message.replyTo ? { reply_to: message.replyTo } : {}),
             subject: message.subject,
             html: message.html,
             text: message.text,

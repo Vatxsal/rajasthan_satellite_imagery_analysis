@@ -18,6 +18,8 @@
     "scripts/email-preview.ts",
     "scripts/send-test-report.ts",
     "scripts/sharpen-measure.ts",
+    "scripts/auth-hash.ts",
+    "scripts/auth-new-user.ts",
     "validation/**/*.ts",
     "types/*.d.ts"
   ]

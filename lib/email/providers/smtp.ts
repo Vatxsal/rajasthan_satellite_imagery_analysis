@@ -68,10 +68,11 @@ export function createSmtpProvider(config: SmtpProviderConfig): EmailProvider {
       });
 
       try {
-        const info = await transport.sendMail({
-          from: config.from,
-          to: message.to,
-          subject: message.subject,
+      const info = await transport.sendMail({
+        from: config.from,
+        to: message.to,
+        replyTo: message.replyTo,
+        subject: message.subject,
           html: message.html,
           text: message.text,
           attachments: [

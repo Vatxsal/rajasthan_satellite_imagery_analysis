@@ -49,6 +49,8 @@ yarn-error.log*
 *.tiff
 *.png
 !docs/screenshots/*.png
+# static share image for OG/Twitter tags
+!public/og.png
 
 # vercel
 .vercel
