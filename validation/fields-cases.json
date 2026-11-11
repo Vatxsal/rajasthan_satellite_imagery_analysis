@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "name": "fields-aligned",
+      "reference": "validation/fixtures/fields-aligned.reference.geojson",
+      "prediction": "validation/fixtures/fields-aligned.prediction.geojson",
+      "note": "identical layers — every metric must be perfect"
+    },
+    {
+      "name": "fields-shifted-swap",
+      "reference": "validation/fixtures/fields-shifted-swap.reference.geojson",
+      "prediction": "validation/fixtures/fields-shifted-swap.prediction.geojson",
+      "note": "prediction shifted ~50 m east + kharif/rabi class swap on A and B"
+    },
+    {
+      "name": "fields-missed",
+      "reference": "validation/fixtures/fields-missed.reference.geojson",
+      "prediction": "validation/fixtures/fields-missed.prediction.geojson",
+      "note": "field D missed entirely, spurious field E added"
+    }
+  ]
+}

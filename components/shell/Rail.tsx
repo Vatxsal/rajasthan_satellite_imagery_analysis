@@ -1,6 +1,6 @@
 "use client";
 
-import { Bookmark, Layers, Ruler, SlidersHorizontal } from "lucide-react";
+import { Bookmark, Layers, Ruler, SlidersHorizontal, Sprout } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAppStore, type SidebarTabId } from "@/store/useAppStore";
 import Tooltip from "@/components/ui/Tooltip";
@@ -9,6 +9,7 @@ import { cn } from "@/components/ui/cn";
 const ITEMS: { id: SidebarTabId; label: string; Icon: LucideIcon }[] = [
   { id: "filters", label: "Search & filters", Icon: SlidersHorizontal },
   { id: "layers", label: "Layers", Icon: Layers },
+  { id: "fields", label: "Fields & crops", Icon: Sprout },
   { id: "distance", label: "Measure", Icon: Ruler },
   { id: "queries", label: "Saved queries", Icon: Bookmark },
 ];

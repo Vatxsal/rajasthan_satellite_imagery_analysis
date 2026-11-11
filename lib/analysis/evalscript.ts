@@ -115,6 +115,52 @@ function evaluatePixel(samples) {
 }`;
 
 /**
+ * Phase-2 monthly NDVI input: ONE render per agri-year month (a month-long
+ * timeRange, ORBIT mosaicking) returning a 2-band FLOAT32 raster:
+ *
+ *   1 NDVI — median of every valid orbit in the month
+ *   2 VALID — 1 when ≥ 1 orbit contributed, else 0
+ *
+ * Valid sample = dataMask ∧ SCL ∉ excluded ∧ CLD ≤ COMPOSITE_MAX_CLOUD_PROB
+ * (same gate as the engine-v2 composite). An all-cloud month returns
+ * [0, 0] — VALID=0 distinguishes "no observation" from a real NDVI of 0.
+ * Field zonal means are then computed client-side per month
+ * (lib/fields/pattern.ts zonalMonthlyMeans).
+ */
+export const NDVI_MONTH_EVALSCRIPT = `${HEADER}function setup() {
+  return {
+    input: [{ bands: ["B04", "B08", "SCL", "CLD", "dataMask"] }],
+    mosaicking: "ORBIT",
+    output: { bands: 2, sampleType: "FLOAT32" },
+  };
+}
+var excluded = ${JSON.stringify(EXCLUDED_SCL)};
+var maxCloudProb = ${COMPOSITE_MAX_CLOUD_PROB};
+function isValidSample(s) {
+  if (s.dataMask !== 1) return 0;
+  var cls = Math.round(s.SCL);
+  for (var i = 0; i < excluded.length; i++) {
+    if (cls === excluded[i]) return 0;
+  }
+  if (s.CLD > maxCloudProb) return 0;
+  return 1;
+}
+function evaluatePixel(samples) {
+  var ndvi = [];
+  for (var i = 0; i < samples.length; i++) {
+    var s = samples[i];
+    if (!isValidSample(s)) continue;
+    var den = s.B08 + s.B04;
+    ndvi.push(den === 0 ? 0 : (s.B08 - s.B04) / den);
+  }
+  if (ndvi.length === 0) return [0, 0];
+  ndvi.sort(function (a, b) { return a - b; });
+  var mid = ndvi.length >> 1;
+  var median = ndvi.length % 2 ? ndvi[mid] : (ndvi[mid - 1] + ndvi[mid]) / 2;
+  return [median, 1];
+}`;
+
+/**
  * Sentinel-1 GRD input (Phase 1): per-pixel temporal median of every valid
  * acquisition in the ±S1_WINDOW_DAYS range, one orbit direction per side.
  * Bands: 1 median VV (linear power) · 2 median VH · 3 valid-observation count.

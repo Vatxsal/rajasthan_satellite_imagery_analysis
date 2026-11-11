@@ -7,6 +7,7 @@ import TopBar from "@/components/shell/TopBar";
 import SceneStrip from "@/components/scenes/SceneStrip";
 import CompareDrawer from "@/components/compare/CompareDrawer";
 import CompareMapController from "@/components/compare/CompareMapController";
+import FieldsMapController from "@/components/fields/FieldsMapController";
 import DownloadDialog from "@/components/scenes/DownloadDialog";
 import ShareLinkLoader from "@/components/ShareLinkLoader";
 import ToastStack from "@/components/ui/ToastStack";
@@ -24,6 +25,7 @@ export default function Page() {
         <main className="relative min-h-0 min-w-0 flex-1">
           <MapCanvas />
           <CompareMapController />
+          <FieldsMapController />
           {isDesktop && <SceneStrip />}
         </main>
         {/* Desktop: resizable right-hand results panel (map keeps the majority of the viewport). */}

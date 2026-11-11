@@ -22,6 +22,8 @@ export const V2_INPUT_BANDS = 9; // B02 B03 B04 B05 B08 B11 B12 SCL CLD (evalscr
 export const S1_INPUT_BANDS = 2;
 /** Phase 3: DEM render = the DEM band (dataMask not counted). */
 export const DEM_INPUT_BANDS = 1;
+/** Phase 2: monthly NDVI render = B04 B08 SCL CLD (dataMask not counted). */
+export const NDVI_MONTH_INPUT_BANDS = 4;
 
 const TILE_PX = 512;
 const MIN_SIZE_FACTOR = 0.01;
