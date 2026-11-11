@@ -3,7 +3,7 @@ import { z } from "zod";
 import { area, featureCollection, intersect, union } from "@turf/turf";
 import { searchCatalog, type CatalogHit } from "@/lib/cdse/catalog";
 import { bboxAreaKm2, bboxFromGeometry, type ClipGeometry } from "@/lib/cdse/geometry";
-import { districtsFc, ilrsFc, tehsilsFc } from "@/lib/data/boundaries";
+import { districtsFc, ilrsFc, resolveDistrictId, tehsilsFc } from "@/lib/data/boundaries";
 import type { Scene, SceneProduct } from "@/lib/data";
 import { getServerEnv } from "@/lib/env";
 import { errorResponse, rateLimitGuard, readJsonBody, sameOriginGuard } from "@/lib/server/api";
@@ -53,7 +53,9 @@ function findGeometry(params: {
     }
   }
   if (params.districtId) {
-    const feature = districtsFc.features.find((f) => f.properties?.id === params.districtId);
+    const feature = districtsFc.features.find(
+      (f) => f.properties?.id === resolveDistrictId(params.districtId!),
+    );
     if (feature) {
       return { geometry: feature.geometry as ClipGeometry, districtId: String(feature.properties?.id ?? "") };
     }

@@ -1,12 +1,21 @@
 /**
- * Fetches Rajasthan district and tehsil (taluk) boundaries from Datameet's
- * Census 2011 repos, filters to Rajasthan, simplifies slightly, and writes:
+ * Fetches Rajasthan tehsil (taluk) boundaries from Datameet's Census 2011
+ * shapefile, filters to Rajasthan, simplifies slightly, and writes:
  *
- *   data/boundaries/districts.geojson   { id, name }
  *   data/boundaries/tehsils.geojson     { id, name, parentId, districtId }
  *
+ * Districts are NOT written here — data/boundaries/districts.geojson holds
+ * the current 41-district (2024) set from OpenStreetMap. The Census district
+ * TopoJSON below is still fetched, but only to derive Census-era district ids
+ * for tehsil parent matching (t-<district>-<taluk> ids must stay stable).
+ *
+ * After running this, re-parent the tehsils to the 41-district layout:
+ *
+ *   npx tsx scripts/fetch-districts-41.ts --reparent-only
+ *   npm run validate:boundaries
+ *
  * Sources:
- *   Districts (Census 2011, TopoJSON):
+ *   Districts (Census 2011, TopoJSON, ids only):
  *     https://github.com/datameet/indian-district-boundaries
  *   Tehsils/taluks (shapefile, STATE/TALUK/DISTRICT attributes):
  *     https://github.com/datameet/taluk_boundaries
@@ -104,8 +113,10 @@ async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   mkdirSync(TMP_DIR, { recursive: true });
 
-  // ------------------------------------------------------------- districts
-  console.log("Fetching Census 2011 district TopoJSON…");
+  // ------------------------------------------------- census district index
+  // Fetched only so tehsil rows can keep their Census-era district ids;
+  // districts.geojson itself is owned by scripts/fetch-districts-41.ts.
+  console.log("Fetching Census 2011 district TopoJSON (id index only)…");
   const topoBuffer = await fetchBuffer(DISTRICTS_TOPOJSON_URL);
   const topology = JSON.parse(topoBuffer.toString("utf8")) as {
     objects: Record<string, unknown>;
@@ -118,9 +129,8 @@ async function main() {
   const districts = districtFc.features.filter((f) =>
     STATE_MATCH.test(String((f.properties as Record<string, unknown>)?.st_nm ?? "")),
   );
-  console.log(`  ${districts.length} Rajasthan districts (Census 2011)`);
+  console.log(`  ${districts.length} Rajasthan districts (Census 2011, ids only)`);
 
-  const districtOut: GeoJSON.Feature[] = [];
   const districtIndex: { id: string; name: string; geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon }[] = [];
 
   for (const f of districts) {
@@ -130,7 +140,6 @@ async function main() {
       | GeoJSON.Polygon
       | GeoJSON.MultiPolygon;
     const id = `d-${slug(name)}`;
-    districtOut.push({ type: "Feature", properties: { id, name }, geometry });
     districtIndex.push({ id, name, geometry });
   }
 
@@ -192,15 +201,16 @@ async function main() {
   }
 
   // ------------------------------------------------------------ write files
-  const districtsDoc: GeoJSON.FeatureCollection = {
+  const tehsilsDoc = {
     type: "FeatureCollection",
-    features: districtOut,
-  };
-  const tehsilsDoc: GeoJSON.FeatureCollection = {
-    type: "FeatureCollection",
+    metadata: {
+      source: "Datameet Census 2011 taluk boundaries (datameet/taluk_boundaries)",
+      license: "see upstream repository (no explicit licence file)",
+      note: "Census-2011 tehsil boundaries — may not match current tehsils. Re-parented to the 41-district (2024) layout by largest overlap; geometry and ids unchanged.",
+      count: tehsilOut.length,
+    },
     features: tehsilOut,
   };
-  writeFileSync(join(OUT_DIR, "districts.geojson"), JSON.stringify(districtsDoc));
   writeFileSync(join(OUT_DIR, "tehsils.geojson"), JSON.stringify(tehsilsDoc));
 
   const tehsilAreaKm2 =
@@ -212,10 +222,13 @@ async function main() {
       }
     }, 0) / 1e6;
 
-  console.log(`Wrote ${districtOut.length} districts → data/boundaries/districts.geojson`);
   console.log(
     `Wrote ${tehsilOut.length} tehsils → data/boundaries/tehsils.geojson (skipped ${skipped}, ~${Math.round(tehsilAreaKm2).toLocaleString()} km² total)`,
   );
+  console.log(
+    "Next: npx tsx scripts/fetch-districts-41.ts --reparent-only && npm run validate:boundaries",
+  );
+  console.log("(districts.geojson was NOT touched — it holds the current 41-district set)");
 }
 
 main().catch((error) => {

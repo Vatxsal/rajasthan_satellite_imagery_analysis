@@ -13,6 +13,7 @@ import type { Scene } from "@/lib/data";
 import { dataAdapter } from "@/lib/data";
 import { useIsDesktop } from "@/lib/hooks/useMediaQuery";
 import {
+  BOUNDARY_ATTRIBUTION,
   HOME_VIEW,
   POSITRON_STYLE_URL,
   RAJASTHAN_BBOX,
@@ -195,8 +196,16 @@ function addAppLayers(map: MapLibreMap): void {
   );
 
   // ---------------------------------------------------------- custom sources
-  map.addSource(SRC.districts, { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
-  map.addSource(SRC.tehsils, { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
+  map.addSource(SRC.districts, {
+    type: "geojson",
+    data: EMPTY_FEATURE_COLLECTION,
+    attribution: BOUNDARY_ATTRIBUTION,
+  });
+  map.addSource(SRC.tehsils, {
+    type: "geojson",
+    data: EMPTY_FEATURE_COLLECTION,
+    attribution: BOUNDARY_ATTRIBUTION,
+  });
   map.addSource(SRC.ilrs, { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
   map.addSource(SRC.stateOutline, { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
   map.addSource(SRC.activeScene, { type: "geojson", data: EMPTY_FEATURE_COLLECTION });

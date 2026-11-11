@@ -279,6 +279,7 @@ function SwipeMap({ slot }: { slot: SwipeSlot }) {
       });
       mapRef.current = instance;
       setDebugMap(slot, instance);
+      instance.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-left");
       instance.on("load", () => {
         if (!disposed) setReady(true);
       });

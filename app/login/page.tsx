@@ -42,6 +42,8 @@ interface RajasthanOutline {
   width: number;
   height: number;
   markers: DistrictMarker[];
+  districtCount: number;
+  tehsilCount: number;
 }
 
 interface GeoJsonGeometry {
@@ -140,6 +142,8 @@ function loadOutline(): RajasthanOutline {
 
   const file = path.join(process.cwd(), "data", "boundaries", "districts.geojson");
   const geo = JSON.parse(fs.readFileSync(file, "utf8")) as GeoJsonFile;
+  const tehsilsFile = path.join(process.cwd(), "data", "boundaries", "tehsils.geojson");
+  const tehsils = JSON.parse(fs.readFileSync(tehsilsFile, "utf8")) as GeoJsonFile;
 
   let minLon = Infinity;
   let maxLon = -Infinity;
@@ -216,7 +220,14 @@ function loadOutline(): RajasthanOutline {
     markers.push({ name, x: Math.round(x), y: Math.round(y) });
   }
 
-  outlineCache = { path: pathData, width, height, markers };
+  outlineCache = {
+    path: pathData,
+    width,
+    height,
+    markers,
+    districtCount: geo.features.length,
+    tehsilCount: tehsils.features.length,
+  };
   return outlineCache;
 }
 
@@ -259,6 +270,8 @@ export default async function LoginPage({
           mapWidth={outline.width}
           mapHeight={outline.height}
           markers={outline.markers}
+          districtCount={outline.districtCount}
+          tehsilCount={outline.tehsilCount}
         />
 
         <div

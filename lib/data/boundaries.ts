@@ -5,19 +5,23 @@ import mockDistrictsFc from "@/data/mock/districts.geojson";
 import mockIlrsFc from "@/data/mock/ilrs.geojson";
 import mockTehsilsFc from "@/data/mock/tehsils.geojson";
 
+export { DISTRICT_ID_ALIASES, resolveDistrictId } from "./districtAliases";
+
 /**
- * Active boundary datasets. Prefers the Datameet-derived files written by
- * `scripts/fetch-datameet.ts` (data/boundaries/*.geojson) and falls back to
- * the bundled mock boundaries while those are empty/placeholder. ILR units
- * stay on the mock set (empty in practice) until real data arrives.
+ * Active boundary datasets. Districts are the current 41 (OpenStreetMap,
+ * ODbL — written by `scripts/fetch-districts-41.ts`); tehsils are the
+ * Census-2011 set re-parented to the new district layout. Both live in
+ * data/boundaries/*.geojson and fall back to the bundled mock boundaries
+ * while those are empty/placeholder. ILR units stay on the mock set
+ * (empty in practice) until real data arrives.
  */
 
 type FeatureCollection = GeoJSON.FeatureCollection;
 
 /**
- * GeoJSON RFC 7946 winding: exterior rings CCW, holes CW. Shapefile/TopoJSON
- * sources (Datameet) use the opposite convention, and Sentinel Hub's geometry
- * mask treats clockwise exteriors as holes — yielding fully transparent
+ * GeoJSON RFC 7946 winding: exterior rings CCW, holes CW. The Datameet
+ * shapefile/TopoJSON tehsils use the opposite convention, and Sentinel Hub's
+ * geometry mask treats clockwise exteriors as holes — yielding fully transparent
  * renders. Normalise once at load so every consumer gets RFC-correct rings.
  */
 function ringSignedArea(ring: number[][]): number {

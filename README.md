@@ -60,7 +60,8 @@ npm run email:preview  # render email fixtures to .email-preview/
 npm run email:test     # send one test report to EMAIL_TEST_RECIPIENT
 npm run auth:new-user  # mint an SSO entry: password printed once, JSON for SSO_USERS
 npm run auth:hash      # hash a password for an existing SSO_USERS entry (argv or stdin)
-npx tsx scripts/fetch-datameet.ts   # (re)download boundaries (not part of the build)
+npx tsx scripts/fetch-districts-41.ts # refresh district boundaries + re-parent tehsils (not part of the build)
+npm run validate:boundaries           # validate counts, tiling, area and legacy deltas
 node scripts/smoke.browser.cjs      # headless-browser smoke test (needs Chrome)
 node scripts/sharpness.browser.cjs      # imagery sharpness evidence (bicubic z13–15; needs Chrome)
 node scripts/verify-swipe-basemap.browser.cjs  # Swipe dates/basemap mode harness (needs Chrome)
@@ -81,7 +82,7 @@ flowchart LR
     API --> GEM["Gemini<br/>(optional)"]
     API --> SMTP["SMTP / Resend<br/>(email)"]
     API --> CACHE[("LRU + TTL cache")]
-    BND[("Datameet boundaries")] --> UI
+    BND[("Boundary GeoJSON")] --> UI
 ```
 
 All Copernicus, Gemini and email calls are **server-side**; the browser never sees a credential. Swapping the data source only means swapping the `dataAdapter` singleton.
@@ -334,7 +335,7 @@ Run `npm run verify` before pushing: typecheck → lint → unit tests → produ
 app/api/            scenes · imagery · tiles/[z]/[x]/[y] · compare (analyze, overlay, summary, email, email/config) · auth (login, guest, logout, session) · access-request · health (cdse, gemini)
 app/login/          landing page (hero + auth card, page-level CSS)
 components/         shell · filters · layers · map · scenes · compare (tabs, EmailReport, ShareLinkLoader) · login (LoginHero, AuthCard) · ui
-data/               boundaries/ (Datameet GeoJSON) · mock/
+data/               boundaries/ (OSM districts · Census tehsils) · mock/
 docs/               screenshots/ · email-qa.md
 experiments/        standalone research (super-resolution; not part of the app build)
 lib/auth/           config, session (jose), passwords (scrypt), users (SSO_USERS), limits (lockout/guest), nextPath
@@ -345,7 +346,7 @@ lib/email/          providers (smtp, resend, console), templates, quotas
 lib/server/         API helpers, area resolution, budgets, Gemini client, Turnstile, access-request quotas
 lib/data/           DataAdapter + mock/cdse adapters, boundaries
 store/              Zustand stores (app, compare, session)
-scripts/            mock data, Datameet fetcher, email tools, auth CLIs, tests
+scripts/            mock data, boundary fetchers, email tools, auth CLIs, tests
 middleware.ts       Edge access gate (public paths, 401s, /login?next=)
 ```
 
@@ -368,7 +369,7 @@ Public Sans for UI, IBM Plex Mono (tabular numerals) for coordinates, dates and 
 
 ## 🧭 Data & Extensibility
 
-**Boundaries:** real Rajasthan districts (33) and tehsils (224) from [Datameet](https://datameet.org) Census 2011. Refresh with `npx tsx scripts/fetch-datameet.ts` (writes `data/boundaries/*.geojson`, rings normalised to counter-clockwise; clockwise exterior rings render empty in Sentinel Hub). ILR comes from `data/mock/ilrs.geojson` until real data arrives. To use client data, replace the GeoJSON (`id`, `name`, `parentId`, Polygon/MultiPolygon in EPSG:4326) or implement a new adapter.
+**Boundaries:** the current 41 districts (28–30 Dec 2024 reorganisation) come from [OpenStreetMap](https://www.openstreetmap.org) (ODbL, Overpass `admin_level=5` relations) and the 224 tehsils are the [Datameet](https://datameet.org) Census-2011 taluk boundaries, re-parented to the new district layout. Refresh with `npx tsx scripts/fetch-districts-41.ts` (writes `data/boundaries/*.geojson`, rings normalised to counter-clockwise; clockwise exterior rings render empty in Sentinel Hub) and check with `npm run validate:boundaries` (41 features, exact names, gaps/overlaps, area within ±2% of 342,000 km², legacy deltas). District geometry © OpenStreetMap contributors (ODbL); tehsil geometry © Datameet / Census 2011 (see `data/boundaries/README.md`). **Government/administrative use:** these are community-mapped and Census-era boundaries — cross-check against Survey of India / Rajasthan DoITC (RajDhara) products before relying on them officially. ILR comes from `data/mock/ilrs.geojson` until real data arrives. To use client data, replace the GeoJSON (`id`, `name`, `parentId`, Polygon/MultiPolygon in EPSG:4326) or implement a new adapter.
 
 **DataAdapter:** all data access goes through one interface (`lib/data/adapter.ts`); swap the singleton in `lib/data/index.ts` to add PostGIS, Supabase or another STAC.
 
@@ -388,7 +389,7 @@ interface DataAdapter {
 - **Draw tool** (planned): draw a polygon or rectangle, name it with a note, run imagery and change detection on it, and export it as GeoJSON / Shapefile.
 - **Change Engine v2** (planned): multi-observation composites, radiometric normalisation, adaptive thresholds, plot-level objects (parcel mode when cadastral polygons exist), smoother sub-pixel edges, full-coverage block processing, per-event confidence scores and a validation harness.
 - **Automatic alerts:** notify when new change events appear (email reports are manual today).
-- **Real ILR / parcel boundaries** and post-2011 district and tehsil boundaries.
+- **Real ILR / parcel boundaries** and current (post-reorganisation) tehsil boundaries.
 - **Persistent cache and per-user quotas;** a durable rate limiter (Upstash / Vercel KV), and a proper identity provider (per-user accounts, MFA, password reset) instead of shared credentials.
 - **Swipe fidelity:** raw, unfiltered imagery with the earlier date always on the left.
 - Time-lapse and multi-date comparison.
@@ -405,7 +406,7 @@ interface DataAdapter {
 | Everything 500s in `cdse` mode | `CDSE_CONFIG` | Set `CDSE_CLIENT_ID` / `CDSE_CLIENT_SECRET` |
 | Auth failures | `CDSE_AUTH` / 401 | Recreate the OAuth client in the **Sentinel Hub dashboard**; check whitespace; token URL and API base must match |
 | Upstream errors | `UPSTREAM_ERROR` (502) | Copernicus outage or timeout: retry |
-| Renders empty / imagery never appears | n/a | Polygon winding must be counter-clockwise (re-run the Datameet script) |
+| Renders empty / imagery never appears | n/a | Polygon winding must be counter-clockwise (re-run `npx tsx scripts/fetch-districts-41.ts`) |
 | Tiles blank for a date | n/a | No acquisition covers that tile on that day: pick another date |
 | GeoTIFF looks black | n/a | The **analysis** GeoTIFF holds raw reflectance (0 to ~1): stretch it in GIS software, or use **GeoTIFF (visual)** |
 | No scene on a date | `COMPARE_NO_SCENE` | Pick another date |
@@ -432,7 +433,7 @@ interface DataAdapter {
 
 - **Sentinel-2:** contains modified Copernicus Sentinel data, © ESA / Copernicus, via the [Copernicus Data Space Ecosystem](https://dataspace.copernicus.eu/) (Copernicus licence terms apply; keep the attribution).
 - **Basemaps:** [OpenFreeMap](https://openfreemap.org/) (OpenMapTiles, © OpenStreetMap contributors, ODbL) and Esri World Imagery (Esri, Maxar, Earthstar Geographics; check Esri's terms for commercial use). **Geocoding:** [Nominatim](https://nominatim.org/), © OpenStreetMap contributors.
-- **Boundaries:** [Datameet](https://datameet.org) Census 2011 compilations (Census of India open data).
+- **Boundaries:** districts © [OpenStreetMap](https://www.openstreetmap.org) contributors (ODbL-1.0, via Overpass); tehsils © [Datameet](https://datameet.org) Census 2011 compilations (Census of India open data, upstream has no explicit licence file).
 - **AI:** Google Gemini API (optional). **Libraries:** MapLibre GL JS, Next.js, zod, turf, Radix UI, Nodemailer, lucide; fonts Public Sans and IBM Plex Mono (SIL OFL).
 
 ---

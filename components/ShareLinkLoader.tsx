@@ -16,7 +16,7 @@ import { parseShareLink, type ShareLink } from "@/lib/compare/shareLink";
 import { bboxFromGeometry } from "@/lib/cdse/geometry";
 import { dataSource } from "@/lib/dataSource";
 import type { District, Ilr, Tehsil } from "@/lib/data";
-import { districtsFc, ilrsFc, tehsilsFc } from "@/lib/data/boundaries";
+import { districtsFc, ilrsFc, resolveDistrictId, tehsilsFc } from "@/lib/data/boundaries";
 import { useAppStore } from "@/store/useAppStore";
 import { useCompareStore } from "@/store/useCompareStore";
 
@@ -37,14 +37,15 @@ function polygonOf(feature: GeoJSON.Feature): GeoJSON.Polygon | null {
 }
 
 function districtById(id: string): District | null {
-  const feature = districtsFc.features.find((candidate) => candidate.properties?.id === id);
+  const resolved = resolveDistrictId(id);
+  const feature = districtsFc.features.find((candidate) => candidate.properties?.id === resolved);
   if (!feature) return null;
   const geometry = polygonOf(feature);
   const bbox = geometry ? bboxFromGeometry(geometry) : null;
   if (!geometry || !bbox) return null;
   return {
-    id: String(feature.properties?.id ?? id),
-    name: String(feature.properties?.name ?? id),
+    id: String(feature.properties?.id ?? resolved),
+    name: String(feature.properties?.name ?? resolved),
     geometry,
     bbox,
   };

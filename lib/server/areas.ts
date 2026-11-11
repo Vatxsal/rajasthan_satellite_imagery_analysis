@@ -1,12 +1,13 @@
-import { districtsFc, ilrsFc, tehsilsFc } from "@/lib/data/boundaries";
+import { districtsFc, ilrsFc, resolveDistrictId, tehsilsFc } from "@/lib/data/boundaries";
 import type { AreaLevel, BBox } from "@/lib/data";
 import { bboxFromGeometry } from "@/lib/cdse/geometry";
 
 /**
  * Server-side area lookup shared by /api/scenes, /api/imagery and /api/tiles.
  * Sources are the boundary datasets served by the data adapter
- * (data/boundaries/*.geojson once populated via scripts/fetch-datameet.ts,
- * else the bundled mock boundaries).
+ * (data/boundaries/*.geojson — refreshed via scripts/fetch-districts-41.ts,
+ * else the bundled mock boundaries). District ids accept alternate spellings
+ * through resolveDistrictId.
  */
 
 export interface ResolvedArea {
@@ -49,16 +50,17 @@ export function resolveArea(level: AreaLevel, areaId: string): ResolvedArea | nu
       bbox,
     };
   }
-  const feature = districtsFc.features.find((f) => f.properties?.id === areaId);
+  const districtId = resolveDistrictId(areaId);
+  const feature = districtsFc.features.find((f) => f.properties?.id === districtId);
   if (!feature) return null;
   const geometry = feature.geometry as GeoJSON.Polygon;
   const bbox = bboxFromGeometry(geometry);
   if (!bbox) return null;
   return {
     level: "district",
-    id: areaId,
-    name: String(feature.properties?.name ?? areaId),
-    districtId: areaId,
+    id: districtId,
+    name: String(feature.properties?.name ?? districtId),
+    districtId,
     geometry,
     bbox,
   };
