@@ -1,0 +1,37 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "cls": "rabi-only", "fid": "A" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[75.8005, 26.9], [75.8045, 26.9], [75.8045, 26.904], [75.8005, 26.904], [75.8005, 26.9]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "cls": "kharif-only", "fid": "B" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[75.8055, 26.9], [75.8095, 26.9], [75.8095, 26.904], [75.8055, 26.904], [75.8055, 26.9]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "cls": "double-cropped", "fid": "C" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[75.8005, 26.905], [75.8045, 26.905], [75.8045, 26.909], [75.8005, 26.909], [75.8005, 26.905]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "cls": "fallow", "fid": "D" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[75.8055, 26.905], [75.8095, 26.905], [75.8095, 26.909], [75.8055, 26.909], [75.8055, 26.905]]]
+      }
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "cls": "kharif-only", "fid": "A" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[75.8, 26.9], [75.804, 26.9], [75.804, 26.904], [75.8, 26.904], [75.8, 26.9]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "cls": "rabi-only", "fid": "B" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[75.805, 26.9], [75.809, 26.9], [75.809, 26.904], [75.805, 26.904], [75.805, 26.9]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "cls": "double-cropped", "fid": "C" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[75.8, 26.905], [75.804, 26.905], [75.804, 26.909], [75.8, 26.909], [75.8, 26.905]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "cls": "evergreen", "fid": "E" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[75.81, 26.9], [75.814, 26.9], [75.814, 26.904], [75.81, 26.904], [75.81, 26.9]]]
+      }
+    }
+  ]
+}

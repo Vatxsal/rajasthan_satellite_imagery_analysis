@@ -159,6 +159,32 @@ const baseSchema = z.object({
   ACCESS_REQUEST_DAILY_CAP: z.coerce.number().int().min(0).default(10),
   /** Canonical site origin for email deep links; required to actually send. */
   NEXT_PUBLIC_SITE_URL: z.string().trim().url().optional(),
+
+  // ── Fields & cropping pattern (/api/fields) ──────────────────────────────
+  /** Show the fields demo. Empty = default: on only for the live CDSE source. */
+  FIELDS_ENABLED: boolEnvDefault(dataSource === "cdse"),
+  /** Default minimum confidence (0-100) when a request omits minConfidence. */
+  FIELDS_MIN_CONFIDENCE: z.coerce.number().int().min(0).max(100).default(69),
+  /** Selection cap in km² — larger bboxes are rejected with AREA_TOO_LARGE. */
+  FIELDS_MAX_KM2: z.coerce.number().positive().default(25),
+  /** Features returned per response; larger sets report truncated: true. */
+  FIELDS_MAX_COUNT: z.coerce.number().int().min(1).default(3000),
+  /** Field boundary archive (Fields of the World IN_RJ, Source Cooperative). */
+  FTW_PMTILES_URL: z
+    .string()
+    .url()
+    .default(
+      "https://data.source.coop/ftw/global-data/predictions/vectors/alpha/results-by-admin-conf/admin:country_code=IN/IN_RJ.pmtiles",
+    ),
+  /** Confidence COG sampled per field point-on-surface (FTW, Source Cooperative). */
+  FTW_CONFIDENCE_COG_URL: z
+    .string()
+    .url()
+    .default(
+      "https://data.source.coop/ftw/global-data/predictions/confidence/confidence/prue_v1_confidence_global.tif",
+    ),
+  /** Phase 2: group field NDVI curves with k-means in POST /api/fields/pattern. */
+  FIELDS_GROUPING: boolEnvDefault(false),
 });
 
 /** Strict shape used when NEXT_PUBLIC_DATA_SOURCE=cdse — credentials are mandatory. */
@@ -224,6 +250,13 @@ export interface ServerEnv {
   ACCESS_REQUEST_PER_IP_PER_DAY: number;
   ACCESS_REQUEST_DAILY_CAP: number;
   NEXT_PUBLIC_SITE_URL?: string;
+  FIELDS_ENABLED: boolean;
+  FIELDS_MIN_CONFIDENCE: number;
+  FIELDS_MAX_KM2: number;
+  FIELDS_MAX_COUNT: number;
+  FTW_PMTILES_URL: string;
+  FTW_CONFIDENCE_COG_URL: string;
+  FIELDS_GROUPING: boolean;
 }
 
 /**

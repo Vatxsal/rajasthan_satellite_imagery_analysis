@@ -21,6 +21,7 @@ import {
 } from "@/lib/map/constants";
 import { buildTileUrlTemplate } from "@/lib/map/tiles";
 import { addCompareLayers, registerMainMap, unregisterMainMap } from "@/lib/compare/bridge";
+import { addFieldsLayers } from "@/lib/fields/mapBridge";
 import {
   EMPTY_FEATURE_COLLECTION,
   bboxToBounds,
@@ -435,6 +436,8 @@ function addAppLayers(map: MapLibreMap): void {
 
   // Compare mode: classified overlay + date-A tiles (restores after style reloads).
   addCompareLayers(map);
+  // Fields demo: parcel outlines + pattern class fills (restores after style reloads).
+  addFieldsLayers(map);
 }
 
 /** Re-applies theme-dependent paint (accent + boundary line colours/casings). */

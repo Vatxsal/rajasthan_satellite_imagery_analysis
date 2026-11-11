@@ -27,7 +27,7 @@ export interface AreaSelection {
   bbox: BBox;
 }
 
-export type SidebarTabId = "filters" | "layers" | "distance" | "queries";
+export type SidebarTabId = "filters" | "layers" | "distance" | "queries" | "fields";
 
 export type AdminLayerId = "districts" | "tehsils" | "ilrs";
 

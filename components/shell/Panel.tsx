@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect } from "react";
-import { Bookmark, Layers, PanelLeftClose, Ruler, SlidersHorizontal, X } from "lucide-react";
+import { Bookmark, Layers, PanelLeftClose, Ruler, SlidersHorizontal, Sprout, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import FiltersPanel from "@/components/filters/FiltersPanel";
 import MeasurePanel from "@/components/filters/MeasurePanel";
 import SavedQueriesPanel from "@/components/filters/SavedQueriesPanel";
+import FieldsPanel from "@/components/fields/FieldsPanel";
 import LayersPanel from "@/components/layers/LayersPanel";
 import SceneStrip from "@/components/scenes/SceneStrip";
 import { useIsDesktop } from "@/lib/hooks/useMediaQuery";
@@ -18,11 +19,13 @@ const TITLES: Record<SidebarTabId, string> = {
   layers: "Layers",
   distance: "Measure",
   queries: "Saved queries",
+  fields: "Fields & crops",
 };
 
 const TAB_ITEMS: { id: SidebarTabId; label: string; Icon: LucideIcon }[] = [
   { id: "filters", label: "Filters", Icon: SlidersHorizontal },
   { id: "layers", label: "Layers", Icon: Layers },
+  { id: "fields", label: "Fields", Icon: Sprout },
   { id: "distance", label: "Measure", Icon: Ruler },
   { id: "queries", label: "Saved", Icon: Bookmark },
 ];
@@ -32,6 +35,8 @@ function TabBody() {
   switch (tab) {
     case "layers":
       return <LayersPanel />;
+    case "fields":
+      return <FieldsPanel />;
     case "distance":
       return <MeasurePanel />;
     case "queries":

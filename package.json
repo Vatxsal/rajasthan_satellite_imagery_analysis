@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsc -p tsconfig.test.json && node --test .test-build/scripts/",
     "validate": "tsc -p tsconfig.test.json && node .test-build/scripts/validate.js",
+    "validate:fields": "tsc -p tsconfig.test.json && node .test-build/scripts/validate-fields.js",
     "phase6": "tsc -p tsconfig.test.json && node --expose-gc .test-build/scripts/phase6.js",
     "features": "tsc -p tsconfig.test.json && node .test-build/scripts/features.js",
     "email:preview": "tsc -p tsconfig.test.json && node .test-build/scripts/email-preview.js",

@@ -78,6 +78,15 @@ function envFixture(overrides: Partial<ServerEnv> = {}): ServerEnv {
     ACCESS_REQUEST_PER_IP_PER_DAY: 3,
     ACCESS_REQUEST_DAILY_CAP: 10,
     NEXT_PUBLIC_SITE_URL: "https://example.org",
+    FIELDS_ENABLED: false,
+    FIELDS_MIN_CONFIDENCE: 69,
+    FIELDS_MAX_KM2: 25,
+    FIELDS_MAX_COUNT: 3000,
+    FTW_PMTILES_URL:
+      "https://data.source.coop/ftw/global-data/predictions/vectors/alpha/results-by-admin-conf/admin:country_code=IN/IN_RJ.pmtiles",
+    FTW_CONFIDENCE_COG_URL:
+      "https://data.source.coop/ftw/global-data/predictions/confidence/confidence/prue_v1_confidence_global.tif",
+    FIELDS_GROUPING: false,
     ...overrides,
   };
 }

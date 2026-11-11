@@ -47,6 +47,11 @@ export class MemoryLruCache implements BlobCache {
       this.store.delete(oldest);
     }
   }
+
+  /** Drops every entry (test harness only). */
+  clear(): void {
+    this.store.clear();
+  }
 }
 
 /**
@@ -107,6 +112,11 @@ export class MemoryObjectLru<T> {
       if (oldest === undefined) break;
       this.store.delete(oldest);
     }
+  }
+
+  /** Drops every entry (test harness only). */
+  clear(): void {
+    this.store.clear();
   }
 }
 
@@ -212,6 +222,64 @@ export function summaryCacheKey(input: {
   includeImages: boolean;
 }): string {
   const payload = `${input.analysisKey}|${input.language}|${input.includeImages ? 1 : 0}`;
+  return createHash("sha256").update(payload).digest("hex");
+}
+
+// ------------------------------------------------- fields (cropping pattern)
+
+/** Bump when the field extraction pipeline changes (zoom, merge, caps, ids). */
+export const FIELDS_VERSION = "v1";
+/** Raw field entries are expensive (tile + COG reads) — keep them a week. */
+export const FIELDS_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/** One built field selection: bbox+year keyed, before per-request thresholds. */
+export type FieldsRawEntry = import("@/lib/fields/query").FieldsRawEntry;
+
+/** Small LRU: each entry is a whole selection (up to 12k features). */
+export const fieldsCache = sharedInstance(
+  "rse.fieldsCache",
+  () => new MemoryObjectLru<FieldsRawEntry>(4),
+);
+
+/** Cache key for one built field selection — bbox rounded to 6 dp. */
+export function fieldsCacheKey(input: { bbox: [number, number, number, number]; year: number }): string {
+  const payload = JSON.stringify([
+    FIELDS_VERSION,
+    input.bbox.map((value) => Math.round(value * 1e6) / 1e6),
+    input.year,
+  ]);
+  return createHash("sha256").update(payload).digest("hex");
+}
+
+/** Bump when the pattern rules/calendar/stream frames change (invalidates stored results). */
+export const PATTERN_VERSION = "v1";
+
+/** One finished pattern run: the full NDJSON result (12 curves per field). */
+export type PatternResult = import("@/lib/fields/patternRun").PatternResult;
+
+/** Small LRU: each entry is a whole 12-month run (up to 3000 curves). */
+export const patternCache = sharedInstance(
+  "rse.patternCache",
+  () => new MemoryObjectLru<PatternResult>(4),
+);
+
+/** Cache key for one pattern run — bbox rounded to 6 dp, thresholds included. */
+export function patternCacheKey(input: {
+  bbox: [number, number, number, number];
+  year: number;
+  minConfidence: number;
+  grouping: boolean;
+  maxCount: number;
+}): string {
+  const payload = JSON.stringify([
+    FIELDS_VERSION,
+    PATTERN_VERSION,
+    input.bbox.map((value) => Math.round(value * 1e6) / 1e6),
+    input.year,
+    input.minConfidence,
+    input.grouping ? 1 : 0,
+    input.maxCount,
+  ]);
   return createHash("sha256").update(payload).digest("hex");
 }
 

@@ -52,6 +52,41 @@ export function toIndexRasters(parsed: ParsedCompareRaster): IndexRasters {
   return { ndvi: parsed.ndvi, mndwi: parsed.mndwi, ndbi: parsed.ndbi };
 }
 
+export interface ParsedNdviMonth {
+  width: number;
+  height: number;
+  /** Median NDVI of the month's valid orbits (0 where VALID=0). */
+  ndvi: Float32Array;
+  /** 1 when ≥ 1 valid orbit contributed to the pixel. */
+  valid: Uint8Array;
+}
+
+/** Parses the 2-band FLOAT32 monthly NDVI render (NDVI month median + VALID). */
+export async function parseNdviMonthRaster(buffer: Buffer): Promise<ParsedNdviMonth> {
+  const ab = buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength,
+  ) as ArrayBuffer;
+  const tiff = await fromArrayBuffer(ab);
+  const image = await tiff.getImage();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const bands = (await image.readRasters({
+    width,
+    height,
+    samples: [0, 1],
+  })) as Float32Array[];
+
+  const ndvi = bands[0];
+  const validBand = bands[1];
+  const valid = new Uint8Array(width * height);
+  for (let i = 0; i < valid.length; i++) {
+    valid[i] = validBand[i] >= 0.5 ? 1 : 0;
+  }
+
+  return { width, height, ndvi, valid };
+}
+
 export interface ParsedCompositeRaster {
   width: number;
   height: number;

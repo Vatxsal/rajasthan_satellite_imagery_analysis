@@ -130,3 +130,42 @@ summary. The script is offline — it never calls CDSE.
 The fixtures ship with an **authored prediction** (not real engine output) so the harness is
 verifiable before any labels exist. The committed baseline report is marked
 *"synthetic fixtures only"* until real references are added.
+
+## Fields harness (`npm run validate:fields`)
+
+Scores **field boundaries + cropping-pattern classes** (the Fields tab) the same way —
+reference polygons drawn in QGIS vs our `properties.cls` GeoJSON for the same extent.
+
+```bash
+npm run validate:fields                                 # all cases in validation/fields-cases.json
+npm run validate:fields -- --case fields-aligned        # one case
+npm run validate:fields -- --px 512 --tol 3             # grid long side / boundary tolerance (px)
+```
+
+Output: `validation/reports/fields-baseline.md` plus a console summary. Offline, no network.
+
+### Metrics
+
+| Metric | What it scores |
+|---|---|
+| Field mask IoU / P / R / F1 | binary field-vs-`no_field` segmentation (every pixel outside a reference field is a true negative — no unlabelled exclusion zone) |
+| Boundary MCC | Matthews correlation between the two ±`--tol` boundary bands (geometry quality near the edges) |
+| Per-class P / R / F1 / IoU + area error | cropping-pattern classes from `properties.cls` |
+| Confusion matrix | pattern classes × predicted, with `no_field` as background row/column |
+
+### Creating field references in QGIS
+
+Same workflow as above (steps 1–3 and 7–8), with two differences:
+
+1. Export the Fields tab's field boundaries (with their pattern `cls` where you can
+   determine it) as the **prediction** file; digitize trusted field extents as the
+   **reference** file.
+2. `cls` values must be exactly one of: `fallow`, `kharif-only`, `rabi-only`,
+   `double-cropped`, `zaid`, `evergreen`, `unclassified`. A **missing** `cls`
+   scores as `unclassified` (boundary-only labels are fine); an unknown value
+   drops the feature. For a pure boundary check, omit `cls` on both sides.
+
+Register cases in `validation/fields-cases.json` (same shape as `cases.json` plus
+an optional `note`). Synthetic self-test fixtures live in
+`validation/fixtures/fields-*.geojson` and are the only cases until real
+references are added.

@@ -106,6 +106,9 @@ export default function AuthCard({
   const [captchaAttempt, setCaptchaAttempt] = useState(0);
 
   const showCaptcha = captchaRequired && Boolean(turnstileSiteKey);
+  // Buttons must wait for the widget: sending `turnstileToken: null` fails
+  // the API schema with a 400 (single-use tokens arrive asynchronously).
+  const captchaReady = !showCaptcha || Boolean(turnstileToken);
 
   const refreshCaptcha = useCallback(() => {
     if (!captchaRequired) return;
@@ -246,7 +249,7 @@ export default function AuthCard({
   };
 
   const authDisabled =
-    busy !== null || (retryAfter > 0 && authError !== null);
+    busy !== null || (retryAfter > 0 && authError !== null) || !captchaReady;
 
   return (
     <div
@@ -532,6 +535,7 @@ export default function AuthCard({
                 size="md"
                 disabled={
                   requestBusy ||
+                  !captchaReady ||
                   name.trim().length === 0 ||
                   company.trim().length === 0 ||
                   email.trim().length === 0 ||
