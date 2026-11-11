@@ -24,6 +24,10 @@ export const SATELLITE_BASEMAP = {
 
 export type BasemapId = "streets" | "satellite";
 
+/** Shown by each map's AttributionControl for the boundary overlays. */
+export const BOUNDARY_ATTRIBUTION =
+  "Districts © OpenStreetMap contributors (ODbL) · Tehsils © Datameet / Census 2011";
+
 export const NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
 
 export function bboxToPolygon(bbox: BBox): GeoJSON.Polygon {

@@ -21,6 +21,7 @@
     "scripts/sharpen-measure.ts",
     "scripts/auth-hash.ts",
     "scripts/auth-new-user.ts",
+    "scripts/validate-boundaries.ts",
     "validation/**/*.ts",
     "types/*.d.ts"
   ]

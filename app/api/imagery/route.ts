@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { renderSceneImage } from "@/lib/cdse/process";
 import { bboxFromGeometry, bboxAreaKm2, type ClipGeometry } from "@/lib/cdse/geometry";
-import { districtsFc, ilrsFc, tehsilsFc } from "@/lib/data/boundaries";
+import { districtsFc, ilrsFc, resolveDistrictId, tehsilsFc } from "@/lib/data/boundaries";
 import { imageryCache, imageryCacheKey } from "@/lib/cache";
 import { getServerEnv } from "@/lib/env";
 import { binaryStreamResponse, errorResponse, rateLimitGuard, readJsonBody, sameOriginGuard } from "@/lib/server/api";
@@ -63,7 +63,9 @@ function geometryFromIds(params: {
     if (feature) return feature.geometry as ClipGeometry;
   }
   if (params.districtId) {
-    const feature = districtsFc.features.find((f) => f.properties?.id === params.districtId);
+    const feature = districtsFc.features.find(
+      (f) => f.properties?.id === resolveDistrictId(params.districtId!),
+    );
     if (feature) return feature.geometry as ClipGeometry;
   }
   return null;

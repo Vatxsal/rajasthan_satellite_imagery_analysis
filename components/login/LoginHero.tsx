@@ -23,12 +23,14 @@ const PHRASES = [
   "Compare any two dates.",
 ];
 
-const VALUE_POINTS = [
-  { icon: Satellite, text: "10 m detail, every ~5 days" },
-  { icon: Map, text: "33 districts, 224 tehsils" },
-  { icon: Languages, text: "Hindi and English AI summaries" },
-  { icon: Mail, text: "Report in your inbox in one click" },
-];
+function valuePointsFor(districtCount: number, tehsilCount: number) {
+  return [
+    { icon: Satellite, text: "10 m detail, every ~5 days" },
+    { icon: Map, text: `${districtCount} districts, ${tehsilCount} tehsils` },
+    { icon: Languages, text: "Hindi and English AI summaries" },
+    { icon: Mail, text: "Report in your inbox in one click" },
+  ];
+}
 
 const STEPS = ["Pick an area", "Compare two dates", "Get the report"];
 
@@ -38,12 +40,14 @@ interface CounterSpec {
   label: string;
 }
 
-const COUNTERS: CounterSpec[] = [
-  { value: 33, label: "Districts" },
-  { value: 224, label: "Tehsils" },
-  { value: 10, suffix: " m", label: "Ground detail" },
-  { value: 5, suffix: " d", label: "Revisit" },
-];
+function counters(districtCount: number, tehsilCount: number): CounterSpec[] {
+  return [
+    { value: districtCount, label: "Districts" },
+    { value: tehsilCount, label: "Tehsils" },
+    { value: 10, suffix: " m", label: "Ground detail" },
+    { value: 5, suffix: " d", label: "Revisit" },
+  ];
+}
 
 function prefersReducedMotion(): boolean {
   return (
@@ -89,6 +93,8 @@ interface LoginHeroProps {
   mapWidth: number;
   mapHeight: number;
   markers: DistrictMarker[];
+  districtCount: number;
+  tehsilCount: number;
 }
 
 export default function LoginHero({
@@ -96,7 +102,11 @@ export default function LoginHero({
   mapWidth,
   mapHeight,
   markers,
+  districtCount,
+  tehsilCount,
 }: LoginHeroProps) {
+  const valuePoints = valuePointsFor(districtCount, tehsilCount);
+  const counterSpecs = counters(districtCount, tehsilCount);
   const [phraseIndex, setPhraseIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const [reduced, setReduced] = useState(false);
@@ -159,7 +169,7 @@ export default function LoginHero({
         className="rse-rise grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2"
         style={{ animationDelay: "180ms" }}
       >
-        {VALUE_POINTS.map(({ icon: Icon, text }) => (
+        {valuePoints.map(({ icon: Icon, text }) => (
           <li key={text} className="flex items-center gap-2.5 text-sm text-text">
             <span className="grid h-7 w-7 shrink-0 place-items-center rounded border border-border bg-surface">
               <Icon size={14} className="text-accent" aria-hidden />
@@ -225,7 +235,7 @@ export default function LoginHero({
         className="rse-rise grid grid-cols-2 gap-4 border-t border-border pt-5 sm:grid-cols-4"
         style={{ animationDelay: "340ms" }}
       >
-        {COUNTERS.map((counter) => (
+        {counterSpecs.map((counter) => (
           <Counter key={counter.label} {...counter} />
         ))}
       </div>

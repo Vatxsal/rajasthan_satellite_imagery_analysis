@@ -11,6 +11,10 @@ jobs:
     env:
       # Offline demo mode: no CDSE credentials needed in CI.
       NEXT_PUBLIC_DATA_SOURCE: mock
+      # CI has no SESSION_SECRET, so the production auth gate would fail
+      # closed (503 on /). Explicit opt-out (lib/auth/config.ts) so the
+      # smoke test exercises the real pages.
+      AUTH_REQUIRED: "false"
     steps:
       - uses: actions/checkout@v4
 
