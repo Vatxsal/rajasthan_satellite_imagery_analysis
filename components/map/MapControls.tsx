@@ -27,7 +27,7 @@ function ControlButton({
       title={label}
       aria-label={label}
       onClick={onClick}
-      className="grid h-8 w-8 place-items-center rounded border border-border bg-surface text-text shadow-float transition-colors duration-150 hover:bg-surface-2"
+      className="grid h-8 w-8 place-items-center rounded border border-border bg-surface text-text shadow-float transition-colors duration-150 hover:bg-surface-2 max-lg:h-11 max-lg:w-11"
     >
       {children}
     </button>
@@ -50,7 +50,7 @@ export default function MapControls({
           title="Zoom in"
           aria-label="Zoom in"
           onClick={onZoomIn}
-          className="grid h-8 w-8 place-items-center border-b border-border text-text transition-colors duration-150 hover:bg-surface-2"
+          className="grid h-8 w-8 place-items-center border-b border-border text-text transition-colors duration-150 hover:bg-surface-2 max-lg:h-11 max-lg:w-11"
         >
           <Plus size={15} />
         </button>
@@ -59,7 +59,7 @@ export default function MapControls({
           title="Zoom out"
           aria-label="Zoom out"
           onClick={onZoomOut}
-          className="grid h-8 w-8 place-items-center text-text transition-colors duration-150 hover:bg-surface-2"
+          className="grid h-8 w-8 place-items-center text-text transition-colors duration-150 hover:bg-surface-2 max-lg:h-11 max-lg:w-11"
         >
           <Minus size={15} />
         </button>
@@ -81,7 +81,7 @@ export default function MapControls({
             type="button"
             title="More actions"
             aria-label="More actions"
-            className="grid h-8 w-8 place-items-center rounded border border-border bg-surface text-text shadow-float transition-colors duration-150 hover:bg-surface-2"
+            className="grid h-8 w-8 place-items-center rounded border border-border bg-surface text-text shadow-float transition-colors duration-150 hover:bg-surface-2 max-lg:h-11 max-lg:w-11"
           >
             <MoreHorizontal size={15} />
           </button>

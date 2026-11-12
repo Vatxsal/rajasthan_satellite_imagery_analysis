@@ -116,5 +116,7 @@ export default function TurnstileWidget({ siteKey, onVerify }: TurnstileWidgetPr
     );
   }
 
-  return <div ref={hostRef} aria-label="Captcha verification" />;
+  // role="group": aria-label is prohibited on a bare <div> (axe/Lighthouse
+  // aria-prohibited-attr); the host is a labelled container for the iframe.
+  return <div ref={hostRef} role="group" aria-label="Captcha verification" />;
 }

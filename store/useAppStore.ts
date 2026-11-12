@@ -29,6 +29,9 @@ export interface AreaSelection {
 
 export type SidebarTabId = "filters" | "layers" | "distance" | "queries" | "fields";
 
+/** Which bottom sheet owns the phone viewport (exactly one at a time). */
+export type SheetKey = "panel" | "results" | "compare";
+
 export type AdminLayerId = "districts" | "tehsils" | "ilrs";
 
 export type ToastTone = "info" | "success" | "error";
@@ -76,6 +79,13 @@ interface AppState {
   toggleResults: () => void;
   setResultsOpen: (value: boolean) => void;
   setSidebarTab: (tab: SidebarTabId) => void;
+  /**
+   * Currently open bottom sheet + its measured pixel height. Written only by
+   * the open sheet (closing clears only its own slot) so map chrome offsets
+   * (`--sheet-h`, controls) always follow the one visible sheet.
+   */
+  sheet: { key: SheetKey | null; height: number };
+  setSheetState: (key: SheetKey, height: number) => void;
 
   // area filters / selection -------------------------------------------
   districtId: string | null;
@@ -199,6 +209,14 @@ export const useAppStore = create<AppState>((set, get) => {
   setResultsOpen: (value) => set({ resultsOpen: value }),
   setSidebarTab: (tab) => set({ sidebarTab: tab, sidebarCollapsed: false, sidebarOpen: true }),
 
+  sheet: { key: null, height: 0 },
+  setSheetState: (key, height) =>
+    set((s) => {
+      if (height > 0) return { sheet: { key, height } };
+      // Closing: only clear the slot if this sheet still owns it.
+      return s.sheet.key === key ? { sheet: { key: null, height: 0 } } : {};
+    }),
+
   districtId: null,
   tehsilId: null,
   ilrId: null,
@@ -292,7 +310,17 @@ export const useAppStore = create<AppState>((set, get) => {
       maxCloudCover: get().maxCloudCover,
       composite: get().composite,
     };
-    set({ searching: true, hasSearched: true, resultsOpen: true, activeSceneId: null, searchError: null });
+    // Phone: the results sheet takes over from the filters sheet (one sheet
+    // at a time); tablet/desktop keep their panel drawer/rail alongside.
+    const phone = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+    set({
+      searching: true,
+      hasSearched: true,
+      resultsOpen: true,
+      activeSceneId: null,
+      searchError: null,
+      ...(phone ? { sidebarOpen: false } : {}),
+    });
     try {
       const scenes = await dataAdapter.searchScenes(params);
       set({ scenes, searching: false, searchError: null });

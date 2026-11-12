@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { FileImage, FileSpreadsheet, Loader2, LogIn, LogOut, PanelLeft, Moon, Sun } from "lucide-react";
 import { isDemoData } from "@/lib/data";
+import { togglePanelSheet } from "@/lib/sheets";
 import { useActiveScene, useActiveSelection, useAppStore } from "@/store/useAppStore";
 import { useSession } from "@/store/useSession";
 import { useTheme } from "@/store/useTheme";
@@ -124,6 +125,19 @@ function UserMenu() {
     .join("");
   const badge = role === "sso" ? "SSO" : role === "guest" ? "Guest" : null;
 
+  // The trigger shows initials, the display name and (≥640px) a badge. The
+  // accessible name must contain every visible fragment verbatim or
+  // Lighthouse's label-content-name-mismatch fires (e.g. visible "SI" vs a
+  // bare "Sign in" label), so compose it from exactly what is rendered.
+  const visibleLabel = [
+    ...new Set([
+      initials || "…",
+      displayName,
+      ...(badge ? [badge] : []),
+      ...(status === "unknown" ? ["checking session"] : []),
+    ]),
+  ].join(" ");
+
   const goSignIn = () => {
     const next = `${window.location.pathname}${window.location.search}`;
     window.location.assign(next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`);
@@ -134,7 +148,7 @@ function UserMenu() {
       <MenuTrigger asChild>
         <button
           type="button"
-          aria-label={status === "signed-in" ? `Account: ${displayName}` : "Sign in"}
+          aria-label={status === "signed-in" ? `Account: ${visibleLabel}` : visibleLabel}
           className="flex h-8 items-center gap-2 rounded border border-border bg-surface px-1.5 transition-colors duration-150 hover:bg-surface-2"
         >
           <span className="grid h-5 w-5 place-items-center rounded-sm bg-accent-soft text-[11px] font-semibold text-accent">
@@ -208,33 +222,53 @@ function UserMenu() {
   );
 }
 
+function DataChip() {
+  return isDemoData ? (
+    <Chip className="hidden text-[11px] sm:inline-flex" aria-label="Demo data">
+      Demo data
+    </Chip>
+  ) : (
+    <Chip tone="success" className="hidden text-[11px] sm:inline-flex" aria-label="Live Copernicus data">
+      Live data
+    </Chip>
+  );
+}
+
 export default function TopBar() {
-  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const sidebarOpen = useAppStore((s) => s.sidebarOpen);
+  const selection = useActiveSelection();
 
   return (
     <header className="relative z-40 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-surface px-3">
-      <div className="flex min-w-0 items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="lg:hidden"
-          onClick={toggleSidebar}
-          aria-label="Open panel"
-        >
-          <PanelLeft size={16} />
-        </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="lg:hidden"
+        onClick={togglePanelSheet}
+        aria-label={sidebarOpen ? "Close panel" : "Open panel"}
+        aria-expanded={sidebarOpen}
+      >
+        <PanelLeft size={16} />
+      </Button>
+
+      {/* Phone/tablet: breadcrumb when an area is selected, else the short title. */}
+      <div className="flex min-w-0 flex-1 items-center gap-2 lg:hidden">
+        {selection ? (
+          <Breadcrumb />
+        ) : (
+          <h1 className="truncate text-base font-semibold tracking-tight text-text">
+            Rajasthan Explorer
+          </h1>
+        )}
+        <DataChip />
+      </div>
+
+      {/* Desktop: full wordmark left, selection path centered. */}
+      <div className="hidden min-w-0 items-center gap-2 lg:flex">
         <h1 className="truncate text-base font-semibold tracking-tight text-text">
           Rajasthan Imagery Explorer
         </h1>
-        {isDemoData ? (
-          <Chip className="hidden text-[11px] sm:inline-flex" aria-label="Demo data">
-            Demo data
-          </Chip>
-        ) : (
-          <Chip tone="success" className="hidden text-[11px] sm:inline-flex" aria-label="Live Copernicus data">
-            Live data
-          </Chip>
-        )}
+        <DataChip />
       </div>
 
       <div className="pointer-events-none mx-auto hidden min-w-0 px-4 lg:block">

@@ -14,7 +14,7 @@ import SceneSkeleton from "./SceneSkeleton";
 type SortMode = "cloud" | "date";
 
 interface SceneStripProps {
-  variant?: "docked" | "inline";
+  variant?: "docked" | "inline" | "stack";
 }
 
 const SORT_LABELS: Record<SortMode, string> = {
@@ -136,13 +136,8 @@ export default function SceneStrip({ variant = "docked" }: SceneStripProps) {
   // Slim strip in compare mode: cards hidden until the user expands them.
   const showBody = !compareMode || stripExpanded;
 
-  const body = showBody ? (
-    <div
-      className={cn(
-        "flex gap-2 overflow-x-auto px-3 pb-2",
-        variant === "docked" ? "min-h-0 flex-1 pt-2" : "pt-2",
-      )}
-    >
+  const cards = (
+    <>
       {searching && (
         <>
           <SceneSkeleton />
@@ -168,12 +163,30 @@ export default function SceneStrip({ variant = "docked" }: SceneStripProps) {
           <SceneCard key={scene.id} scene={scene} />
         ),
       )}
-    </div>
+    </>
+  );
+
+  const body = showBody ? (
+    variant === "stack" ? (
+      // Tablet results drawer: vertical list, full-width cards.
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-3 pb-3 pt-2 [&>*]:min-w-0 [&>*]:w-full [&>*]:shrink">
+        {cards}
+      </div>
+    ) : (
+      <div
+        className={cn(
+          "flex gap-2 overflow-x-auto px-3 pb-2",
+          variant === "docked" ? "min-h-0 flex-1 pt-2" : "pt-2",
+        )}
+      >
+        {cards}
+      </div>
+    )
   ) : null;
 
-  if (variant === "inline") {
+  if (variant === "inline" || variant === "stack") {
     return (
-      <div className="bg-surface">
+      <div className={cn("flex min-h-0 flex-col bg-surface", variant === "stack" && "h-full")}>
         {header}
         <CompareBar />
         {body}
@@ -185,7 +198,7 @@ export default function SceneStrip({ variant = "docked" }: SceneStripProps) {
     <section
       ref={sectionRef}
       aria-label="Search results"
-      className="absolute inset-x-0 bottom-0 z-30 flex max-h-[50vh] flex-col border-t border-border bg-surface"
+      className="absolute inset-x-0 bottom-0 z-30 flex max-h-[50svh] flex-col border-t border-border bg-surface"
     >
       {header}
       <CompareBar />

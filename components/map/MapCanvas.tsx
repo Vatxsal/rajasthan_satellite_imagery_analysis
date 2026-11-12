@@ -8,10 +8,9 @@ import type {
   Map as MapLibreMap,
   RasterTileSource,
 } from "maplibre-gl";
-import { union, featureCollection as turfFeatureCollection } from "@turf/turf";
 import type { Scene } from "@/lib/data";
 import { dataAdapter } from "@/lib/data";
-import { useIsDesktop } from "@/lib/hooks/useMediaQuery";
+import { useFormFactor } from "@/lib/hooks/useMediaQuery";
 import {
   BOUNDARY_ATTRIBUTION,
   HOME_VIEW,
@@ -33,6 +32,7 @@ import { BOUNDARY_LINE_THEMES, MAP_PALETTES, type BoundaryLineStyle } from "@/li
 import { createPlaceholderImageryUrl } from "@/lib/map/placeholderImagery";
 import { selectActiveSelection, useActiveScene, useActiveSelection, useAppStore } from "@/store/useAppStore";
 import { useTheme, type ThemeId } from "@/store/useTheme";
+import { cn } from "@/components/ui/cn";
 import AddressSearch from "./AddressSearch";
 import BasemapSwitcher from "./BasemapSwitcher";
 import CompositeLegendBar from "./CompositeLegend";
@@ -93,7 +93,7 @@ const mapRuntime = {
   placeholderUrl: null as string | null,
   adminData: null as AdminBoundaryData | null,
   adminLoad: null as Promise<AdminBoundaryData> | null,
-  /** Union of all districts = Rajasthan state outline (All Rajasthan view). */
+  /** Precomputed Rajasthan state outline (public/data/state-outline.geojson). */
   outlineData: null as GeoJSON.Feature | null,
   outlineLoad: null as Promise<GeoJSON.Feature | null> | null,
   imageryTilesUrl: null as string | null,
@@ -397,7 +397,7 @@ function addAppLayers(map: MapLibreMap): void {
         feature ? featureCollection([feature]) : EMPTY_FEATURE_COLLECTION,
       );
     } catch {
-      // Map disposed while the outline was unioning.
+      // Map disposed while the outline was loading.
     }
   };
 
@@ -408,12 +408,12 @@ function addAppLayers(map: MapLibreMap): void {
     }
     applyAdminData(mapRuntime.adminData);
 
-    // The state outline is one big union of every district — deliberately
-    // computed after the individual boundaries so district lines never wait
-    // on it, and only ever computed once per page load.
+    // The state outline ships precomputed (scripts/generate-state-outline.mjs
+    // unions the districts offline) — the old in-app union burned ~100s of
+    // main-thread time on throttled mobile CPUs. Fetch it once per load.
     if (!mapRuntime.outlineData) {
       if (!mapRuntime.outlineLoad) {
-        mapRuntime.outlineLoad = buildStateOutline(mapRuntime.adminData.districts);
+        mapRuntime.outlineLoad = fetchStateOutline();
       }
       mapRuntime.outlineData = await mapRuntime.outlineLoad;
     }
@@ -542,41 +542,20 @@ async function loadAdminBoundaries(): Promise<AdminBoundaryData> {
 }
 
 /**
- * Outer boundary of Rajasthan = union of every district polygon. Cached after
- * the first computation; yields to the event loop every few districts so the
- * clipper can never freeze the map for long.
+ * Precomputed outer boundary of Rajasthan (union of every district) from
+ * public/data/state-outline.geojson — generated offline by
+ * `npm run generate:state-outline`. Returns null on any failure so the map
+ * still renders district lines without the state outline.
  */
-async function buildStateOutline(
-  districts: GeoJSON.FeatureCollection,
-): Promise<GeoJSON.Feature | null> {
-  let accumulated: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null = null;
-  const features = districts.features.filter(
-    (feature) =>
-      feature.geometry?.type === "Polygon" || feature.geometry?.type === "MultiPolygon",
-  );
-
-  for (let index = 0; index < features.length; index++) {
-    const feature = features[index]!;
-    if (!accumulated) {
-      accumulated = {
-        type: "Feature",
-        properties: {},
-        geometry: feature.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon,
-      };
-      continue;
-    }
-    try {
-      const merged = union(
-        turfFeatureCollection([accumulated, feature as typeof accumulated]),
-      );
-      if (merged) accumulated = merged as typeof accumulated;
-    } catch {
-      // A district that fails to clip is skipped — we keep the outline so far.
-    }
-    if (index % 8 === 7) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+async function fetchStateOutline(): Promise<GeoJSON.Feature | null> {
+  try {
+    const response = await fetch("/data/state-outline.geojson");
+    if (!response.ok) return null;
+    const data = (await response.json()) as GeoJSON.Feature;
+    return data?.type === "Feature" && data.geometry ? data : null;
+  } catch {
+    return null;
   }
-
-  return accumulated;
 }
 
 function sceneToFeature(scene: Scene): GeoJSON.Feature {
@@ -660,7 +639,8 @@ export default function MapCanvas() {
   const [ready, setReady] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const isDesktop = useIsDesktop();
+  const factor = useFormFactor();
+  const isDesktop = factor === "desktop";
   const theme = useTheme((s) => s.theme);
   const palette = MAP_PALETTES[theme];
 
@@ -677,10 +657,25 @@ export default function MapCanvas() {
   const locateNonce = useAppStore((s) => s.locateNonce);
   const stripOpen = useAppStore((s) => s.resultsOpen);
   const stripHeightPx = useAppStore((s) => s.stripHeightPx);
+  const searching = useAppStore((s) => s.searching);
+  const hasSearched = useAppStore((s) => s.hasSearched);
+  const sheetHeight = useAppStore((s) => s.sheet.height);
   const toggleImageryStore = useAppStore((s) => s.toggleImagery);
   const selection = useActiveSelection();
   const activeScene = useActiveScene();
   const supportsLiveImagery = typeof dataAdapter.getSceneImage === "function";
+
+  // Open bottom-sheet height → CSS var for maplibre attribution/scale offsets
+  // (React-positioned chrome below uses the same store value inline).
+  useEffect(() => {
+    document.documentElement.style.setProperty("--sheet-h", `${sheetHeight}px`);
+  }, [sheetHeight]);
+  useEffect(
+    () => () => {
+      document.documentElement.style.removeProperty("--sheet-h");
+    },
+    [],
+  );
 
   // ------------------------------------------------ map bootstrap
   useEffect(() => {
@@ -699,6 +694,9 @@ export default function MapCanvas() {
         zoom: HOME_VIEW.zoom,
         attributionControl: false,
         preserveDrawingBuffer: true,
+        // Cap the render buffer at 2× — DPR-3/4 phones waste GPU memory for
+        // no visible gain at normal zoom levels.
+        pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
       });
       map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-left");
       map.addControl(new maplibregl.ScaleControl({ maxWidth: 100, unit: "metric" }), "bottom-left");
@@ -1008,23 +1006,48 @@ export default function MapCanvas() {
     }
   }, []);
 
-  // Map controls sit just above the results strip — the strip sizes to its
-  // content, so the offsets follow the measured height from the store.
-  const leftBottomStyle = { bottom: stripOpen ? stripHeightPx + 56 : 56 };
-  const rightBottomStyle = { bottom: stripOpen ? stripHeightPx + 12 : 12 };
-  const legendStyle = { bottom: stripOpen ? stripHeightPx + 40 : 48 };
+  // Map controls sit just above the results strip on desktop (the strip
+  // sizes to its content, so the offsets follow the measured height). On
+  // phone/tablet they clear the bottom tab bar and whichever sheet is open.
+  const stripActive = searching || hasSearched;
+  const dockedStripVisible = isDesktop && stripOpen && stripActive;
+  const bottomChrome = "calc(var(--tabbar-h, 0px) + var(--sheet-h, 0px)";
+  const leftBottomStyle = dockedStripVisible
+    ? { bottom: stripHeightPx + 56 }
+    : isDesktop
+      ? { bottom: 56 }
+      : { bottom: `${bottomChrome} + 50px)` };
+  const rightBottomStyle = dockedStripVisible
+    ? { bottom: stripHeightPx + 12 }
+    : isDesktop
+      ? { bottom: 12 }
+      : { bottom: `${bottomChrome} + 28px)` };
+  // Non-desktop stacking above the tab bar/sheet: the attribution container
+  // occupies +4..+46 (42px incl. its padding), the 62px basemap/legend row
+  // clears it at +50, the composite ramp clears the row at +117.
+  const legendStyle = dockedStripVisible
+    ? { bottom: stripHeightPx + 40 }
+    : isDesktop
+      ? { bottom: 48 }
+      : { bottom: `${bottomChrome} + 117px)` };
 
   return (
     <div
       className={`map-shell relative h-full w-full overflow-hidden bg-surface-2 ${measureActive ? "cursor-crosshair" : ""}`}
-      data-strip={stripOpen ? "open" : "closed"}
+      data-strip={dockedStripVisible ? "open" : "closed"}
       style={{ "--strip-h": `${stripHeightPx}px` } as React.CSSProperties}
     >
       <div ref={containerRef} className="absolute inset-0" />
 
+      {/* Rendered before the map reports ready: the input itself needs no map
+          instance (selectResult bails when mapRef is null), and gating it on
+          ready deferred the page's LCP candidate until WebGL/tile init. The
+          loading sheet below stays under it (z-10 < z-20) so the input is
+          actually painted — and usable — while the map boots. */}
+      <AddressSearch mapRef={mapRef} />
+
       {ready ? (
         <>
-          <AddressSearch mapRef={mapRef} />
           <MapControls
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
@@ -1033,20 +1056,28 @@ export default function MapCanvas() {
             onFullscreen={handleFullscreen}
             onScreenshot={handleScreenshot}
           />
-          <div className="absolute left-3 z-20 flex items-end gap-2 transition-[bottom] duration-150 ease-out" style={leftBottomStyle}>
+          <div
+            className="absolute left-3 z-20 flex items-end gap-2 transition-[bottom] duration-150 ease-out"
+            style={leftBottomStyle}
+          >
             <BasemapSwitcher />
             <LegendControl />
           </div>
-          <CursorCoords
-            mapRef={mapRef}
-            className="absolute right-3 z-10 transition-[bottom] duration-150 ease-out"
-            style={rightBottomStyle}
-          />
+          {factor !== "phone" && (
+            <CursorCoords
+              mapRef={mapRef}
+              className="absolute right-3 z-10 transition-[bottom] duration-150 ease-out"
+              style={rightBottomStyle}
+            />
+          )}
 
           {supportsLiveImagery && activeScene && imageryVisible && (
             <CompositeLegendBar
               composite={activeScene.composite}
-              className="absolute right-3 z-10 transition-[bottom] duration-150 ease-out"
+              className={cn(
+                "absolute z-10 transition-[bottom] duration-150 ease-out",
+                isDesktop ? "right-3" : "left-3",
+              )}
               style={legendStyle}
             />
           )}
@@ -1084,7 +1115,7 @@ export default function MapCanvas() {
           )}
         </>
       ) : (
-        <div className="absolute inset-0 z-30 grid place-items-center bg-bg">
+        <div className="absolute inset-0 z-10 grid place-items-center bg-bg">
           <p className="mono-nums text-xs text-muted">Loading map…</p>
         </div>
       )}

@@ -150,10 +150,10 @@ export default function LoginHero({
         onFocus={() => setPaused(true)}
         onBlur={() => setPaused(false)}
       >
-        <h1 className="max-w-[16ch] text-3xl font-semibold leading-[1.15] tracking-tight text-text sm:text-4xl lg:text-[44px]">
+        <h1 className="max-w-[16ch] text-fluid-display font-semibold leading-[1.15] tracking-tight text-text">
           See Rajasthan change, from space.
         </h1>
-        <p className="min-h-[1.6em] text-lg font-medium text-accent sm:text-xl">
+        <p className="min-h-[1.6em] text-fluid-h2 font-medium text-accent">
           <span key={reduced ? 0 : phraseIndex} className={reduced ? undefined : "rse-phrase-in"}>
             {reduced ? PHRASES[0] : PHRASES[phraseIndex]}
           </span>

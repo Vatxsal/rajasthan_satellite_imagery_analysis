@@ -134,3 +134,15 @@
     opacity: 0.35;
   }
 }
+
+/* Phones: drop the two looping decorations (battery + the scan line fights
+   the smaller map anyway). Entrance motion still plays once. */
+@media (max-width: 767px) {
+  .rse-scan {
+    display: none;
+  }
+  .rse-marker-pulse {
+    animation: none;
+    opacity: 0.35;
+  }
+}

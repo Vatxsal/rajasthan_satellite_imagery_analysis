@@ -24,6 +24,9 @@ const contentSecurityPolicy = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Emits .map files for the first-party bundle so tools (Lighthouse
+  // best-practices valid-source-maps, DevTools) can map production code.
+  productionBrowserSourceMaps: true,
   // Allows building alongside a running dev server (e.g. NEXT_DIST_DIR=.next-verify).
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
   webpack: (config) => {
