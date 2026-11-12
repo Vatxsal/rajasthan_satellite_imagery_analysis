@@ -42,7 +42,7 @@ export default function CompareMapController() {
   const blobRef = useRef<string | null>(null);
 
   const swipeActive = Boolean(result) && tab === "swipe";
-  const stripOffset = useStripOffset();
+  const stripBottom = useStripBottom();
 
   // ------------------------------------------------ overlay recolour
   useEffect(() => {
@@ -192,26 +192,26 @@ export default function CompareMapController() {
             style={{ left: `${divider}%` }}
           >
             <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-accent shadow-float" />
-            <span className="absolute left-1/2 top-1/2 grid h-8 w-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-border bg-surface text-text shadow-float">
+            <span className="absolute left-1/2 top-1/2 grid h-8 w-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-border bg-surface text-text shadow-float max-lg:h-11 max-lg:w-11">
               <MoveHorizontal size={15} aria-hidden />
             </span>
           </div>
           {swipeMode === "basemap" && (
             <span
               className="absolute left-1/2 -translate-x-1/2 rounded bg-surface/90 px-1.5 py-0.5 text-[11px] leading-tight text-muted shadow-float"
-              style={{ bottom: stripOffset + 12 }}
+              style={{ bottom: stripBottom }}
             >
               Basemap imagery is from a different date
             </span>
           )}
           <span
             className="absolute left-3 rounded bg-surface/90 px-1.5 py-0.5 text-[11px] leading-tight text-muted"
-            style={{ bottom: stripOffset + 12 }}
+            style={{ bottom: stripBottom }}
           >
             {swipeAttribution({ dateA, dateB, mode: swipeMode })}
           </span>
           {process.env.NODE_ENV !== "production" && (
-            <div className="absolute right-3" style={{ bottom: stripOffset + 12 }}>
+            <div className="absolute right-3" style={{ bottom: stripBottom }}>
               <SwipeDebugBadge />
             </div>
           )}
@@ -221,14 +221,19 @@ export default function CompareMapController() {
   );
 }
 
-/** Desktop scene-strip offset for bottom-anchored chips (same rule as MapCanvas). */
-function useStripOffset(): number {
+/**
+ * Bottom offset for compare chips: desktop follows the docked scene strip;
+ * phone/tablet clear the bottom tab bar and whichever sheet is open.
+ */
+function useStripBottom(): number | string {
   const resultsOpen = useAppStore((s) => s.resultsOpen);
   const searching = useAppStore((s) => s.searching);
   const hasSearched = useAppStore((s) => s.hasSearched);
   const stripHeightPx = useAppStore((s) => s.stripHeightPx);
-  if (typeof window !== "undefined" && !window.matchMedia("(min-width: 1024px)").matches) return 0;
-  return resultsOpen && (searching || hasSearched) ? stripHeightPx : 0;
+  if (typeof window !== "undefined" && !window.matchMedia("(min-width: 1024px)").matches) {
+    return "calc(var(--tabbar-h, 0px) + var(--sheet-h, 0px) + 12px)";
+  }
+  return resultsOpen && (searching || hasSearched) ? stripHeightPx + 12 : 12;
 }
 
 type SwipeSlot = "left" | "right";

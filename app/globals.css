@@ -11,7 +11,10 @@
   --border: 218 215 207;
   --text: 27 29 34;
   --text-muted: 107 110 118;
-  --accent: 194 65 12;
+  /* 154 52 18 (#9a3412): 6.25:1 on --accent-soft and 7.5:1 as a white-foreground
+     background — the previous 194 65 12 measured 4.39:1 on accent-soft chips
+     (Lighthouse color-contrast failure at 11px). */
+  --accent: 154 52 18;
   --accent-soft: 251 233 224;
   --accent-fg: 255 255 255;
   --success: 47 125 91;
@@ -322,6 +325,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: grid;
   width: 22px;
   height: 22px;
+  /* Keep map markers small even on touch devices (button touch floor below). */
+  min-height: 22px;
+  min-width: 22px;
   place-items: center;
   padding: 0;
   border: 2px solid rgb(var(--surface));
@@ -369,4 +375,114 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* ------------------------------------------------------- responsive layout */
+/* Bottom-anchored chrome offsets: the phone tab bar and whichever bottom
+   sheet is currently open (measured px, written by BottomSheet). Desktop
+   leaves both at 0 and keeps the original strip offsets. */
+:root {
+  --tabbar-h: 0px;
+  --sheet-h: 0px;
+}
+@media (max-width: 767px) {
+  :root {
+    --tabbar-h: calc(56px + env(safe-area-inset-bottom));
+  }
+}
+
+/* Headings wrap evenly instead of leaving an orphan word. */
+h1,
+h2,
+h3,
+h4 {
+  text-wrap: balance;
+}
+
+/* Fluid type — scales between the phone and desktop ends without breakpoints. */
+.text-fluid-display {
+  font-size: clamp(1.75rem, 1.25rem + 2.2vw, 2.75rem);
+}
+.text-fluid-h2 {
+  font-size: clamp(1.15rem, 1rem + 0.7vw, 1.5rem);
+}
+
+@media (max-width: 1023px) {
+  /* iOS/iPadOS zoom any focused field below 16px — win over utility
+     text-* classes (!important) and give form controls a 44px hit area.
+     Hidden honeypots stay out of layout. Range/checkbox/radio keep their
+     own sizing rules below; they are not text-entry fields. */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+  select,
+  textarea {
+    min-height: 44px;
+  }
+  /* 44×44 touch floor for tappable controls (desktop density unchanged).
+     Icon buttons keep their w- and h- classes — min- only raises the floor. */
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="switch"],
+  [role="menuitem"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Segmented options stay fluid inside their group. */
+  [role="group"] button {
+    min-width: 0;
+  }
+  /* Sliders get a 44px hit area; the 4px track stays slim and centered. */
+  input[type="range"] {
+    height: 44px;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    height: 22px;
+    width: 22px;
+    margin-top: -9px;
+  }
+  input[type="range"]::-moz-range-thumb {
+    height: 22px;
+    width: 22px;
+  }
+  /* Legibility floor: micro utility sizes climb to 12px on phones/tablets
+     (Lighthouse best-practices font-size + real-device readability). Same
+     unlayered-override trick as the input rule above. */
+  .text-\[10px\],
+  .text-\[11px\] {
+    font-size: 12px;
+  }
+}
+
+/* Bottom map chrome: attribution/scale sit above the tab bar + open sheet
+   instead of floating over the middle of the map (the old data-strip
+   translate applied even when no strip was rendered). The attribution is
+   capped short of the scale bar and ellipsized to one line. */
+@media (max-width: 1023px) {
+  .maplibregl-ctrl-bottom-left,
+  .maplibregl-ctrl-bottom-right {
+    bottom: calc(var(--tabbar-h, 0px) + var(--sheet-h, 0px) + 4px);
+    transform: none;
+  }
+  .maplibregl-ctrl-attrib {
+    max-width: calc(100vw - 11rem);
+    /* 12px legibility floor (was 10px — the dominant Lighthouse font-size
+       offender); the one-line ellipsis keeps it compact. */
+    font-size: 12px !important;
+  }
+  .maplibregl-ctrl-attrib-inner {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* The degree scale collides with the basemap switcher at this size;
+     position readout stays available via CursorCoords on tablets. */
+  .maplibregl-ctrl-scale {
+    display: none;
+  }
 }

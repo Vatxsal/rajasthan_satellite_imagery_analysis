@@ -91,7 +91,7 @@ export default function AddressSearch({ mapRef }: AddressSearchProps) {
   return (
     <div
       ref={rootRef}
-      className="absolute left-3 top-3 z-20 w-80 max-w-[calc(100vw-1.5rem)] transition-[width] duration-150 ease-out focus-within:w-96"
+      className="absolute left-3 top-3 z-20 w-80 max-w-[calc(100vw-4.5rem)] transition-[width] duration-150 ease-out focus-within:w-96"
     >
       <div className="relative">
         <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />

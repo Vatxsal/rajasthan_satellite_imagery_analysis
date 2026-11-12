@@ -17,6 +17,7 @@
     "email:preview": "tsc -p tsconfig.test.json && node .test-build/scripts/email-preview.js",
     "verify": "npm run typecheck && npm run lint && npm test && npm run build",
     "generate:mock-data": "node scripts/generate-mock-data.mjs",
+    "generate:state-outline": "node scripts/generate-state-outline.mjs",
     "email:test": "tsc -p tsconfig.test.json && node .test-build/scripts/send-test-report.js",
     "sharpen:measure": "tsc -p tsconfig.test.json && node .test-build/scripts/sharpen-measure.js",
     "auth:hash": "tsc -p tsconfig.test.json && node .test-build/scripts/auth-hash.js",

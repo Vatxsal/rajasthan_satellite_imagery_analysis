@@ -1,18 +1,30 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect } from "react";
 import { Bookmark, Layers, PanelLeftClose, Ruler, SlidersHorizontal, Sprout, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import FiltersPanel from "@/components/filters/FiltersPanel";
-import MeasurePanel from "@/components/filters/MeasurePanel";
-import SavedQueriesPanel from "@/components/filters/SavedQueriesPanel";
-import FieldsPanel from "@/components/fields/FieldsPanel";
 import LayersPanel from "@/components/layers/LayersPanel";
-import SceneStrip from "@/components/scenes/SceneStrip";
-import { useIsDesktop } from "@/lib/hooks/useMediaQuery";
+import { useFormFactor } from "@/lib/hooks/useMediaQuery";
 import { useAppStore, type SidebarTabId } from "@/store/useAppStore";
 import Button from "@/components/ui/Button";
+import BottomSheet from "@/components/ui/BottomSheet";
 import { cn } from "@/components/ui/cn";
+
+// Heavier tabs load only when first opened (mobile perf budget).
+const FieldsPanel = dynamic(() => import("@/components/fields/FieldsPanel"), {
+  ssr: false,
+  loading: () => <PanelLoading />,
+});
+const MeasurePanel = dynamic(() => import("@/components/filters/MeasurePanel"), {
+  ssr: false,
+  loading: () => <PanelLoading />,
+});
+const SavedQueriesPanel = dynamic(() => import("@/components/filters/SavedQueriesPanel"), {
+  ssr: false,
+  loading: () => <PanelLoading />,
+});
 
 const TITLES: Record<SidebarTabId, string> = {
   filters: "Search & filters",
@@ -29,6 +41,14 @@ const TAB_ITEMS: { id: SidebarTabId; label: string; Icon: LucideIcon }[] = [
   { id: "distance", label: "Measure", Icon: Ruler },
   { id: "queries", label: "Saved", Icon: Bookmark },
 ];
+
+function PanelLoading() {
+  return (
+    <p role="status" className="p-4 text-xs text-muted">
+      Loading…
+    </p>
+  );
+}
 
 function TabBody() {
   const tab = useAppStore((s) => s.sidebarTab);
@@ -53,9 +73,58 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
 }
 
+function PanelTabs() {
+  const tab = useAppStore((s) => s.sidebarTab);
+  const setSidebarTab = useAppStore((s) => s.setSidebarTab);
+  return (
+    <div
+      role="tablist"
+      aria-label="Panel sections"
+      className="flex gap-1 border-b border-border px-2 pb-2 pt-1 max-lg:overflow-x-auto"
+    >
+      {TAB_ITEMS.map(({ id, label, Icon }) => {
+        const active = tab === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => setSidebarTab(id)}
+            className={cn(
+              "flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded border px-1 py-1.5 text-xs transition-colors duration-150",
+              "max-lg:flex-none max-lg:shrink-0 max-lg:whitespace-nowrap",
+              active
+                ? "border-border bg-accent-soft font-medium text-accent"
+                : "border-transparent text-muted hover:text-text",
+            )}
+          >
+            <Icon size={14} strokeWidth={1.8} className="shrink-0" />
+            <span className="truncate">{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function PanelHeader({ onClose, closeLabel }: { onClose: () => void; closeLabel: string }) {
+  const tab = useAppStore((s) => s.sidebarTab);
+  return (
+    <header className="flex shrink-0 items-center justify-between gap-2 px-3 pb-1 pt-1">
+      <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-text">{TITLES[tab]}</h2>
+      <Button variant="ghost" size="icon" aria-label={closeLabel} onClick={onClose}>
+        <X size={16} />
+      </Button>
+    </header>
+  );
+}
+
 export default function Panel() {
-  const isDesktop = useIsDesktop();
-  return isDesktop ? <DesktopPanel /> : <MobileSheet />;
+  const factor = useFormFactor();
+  if (factor === "desktop") return <DesktopPanel />;
+  if (factor === "tablet") return <TabletPanelDrawer />;
+  return <PhonePanelSheet />;
 }
 
 function DesktopPanel() {
@@ -108,85 +177,53 @@ function DesktopPanel() {
   );
 }
 
-function MobileSheet() {
+/**
+ * Tablet (768–1023px): overlay side drawer under the top bar. No backdrop —
+ * the map stays interactive, exactly like the desktop rail. The results /
+ * compare drawer owns the right edge, so the two never collide.
+ */
+function TabletPanelDrawer() {
   const open = useAppStore((s) => s.sidebarOpen);
-  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
-  const tab = useAppStore((s) => s.sidebarTab);
-  const setSidebarTab = useAppStore((s) => s.setSidebarTab);
-  const hasSearched = useAppStore((s) => s.hasSearched);
-  const searching = useAppStore((s) => s.searching);
+  const close = () => useAppStore.setState({ sidebarOpen: false });
 
   useEffect(() => {
+    if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && useAppStore.getState().sidebarOpen) {
-        useAppStore.getState().toggleSidebar();
-      }
+      if (event.key === "Escape") close();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [open]);
 
   return (
-    <>
-      {open && (
-        <button
-          type="button"
-          aria-label="Close panel"
-          onClick={toggleSidebar}
-          className="fixed inset-0 z-40 bg-black/30 lg:hidden"
-        />
+    <aside
+      aria-hidden={!open}
+      className={cn(
+        "fixed bottom-0 left-0 top-12 z-40 flex w-[clamp(20rem,34vw,22.5rem)] flex-col border-r border-border bg-surface shadow-float transition-[transform,visibility] duration-150 ease-out",
+        open ? "translate-x-0" : "invisible -translate-x-full",
       )}
-      <section
-        aria-hidden={!open}
-        className={cn(
-          "fixed inset-x-0 bottom-0 z-50 flex max-h-[78vh] flex-col rounded-t-lg border-t border-border bg-surface lg:hidden",
-          "transition-transform duration-150 ease-out",
-          open ? "translate-y-0" : "translate-y-full",
-        )}
-      >
-        <div className="flex justify-center pt-2">
-          <span aria-hidden className="h-1 w-9 rounded-full bg-border" />
-        </div>
+    >
+      <PanelHeader onClose={close} closeLabel="Close panel" />
+      <PanelTabs />
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <TabBody />
+      </div>
+    </aside>
+  );
+}
 
-        <header className="flex items-center justify-between px-3 pb-2 pt-2">
-          <h2 className="text-sm font-semibold text-text">{TITLES[tab]}</h2>
-          <Button variant="ghost" size="icon" aria-label="Close panel" onClick={toggleSidebar}>
-            <X size={16} />
-          </Button>
-        </header>
+/** Phone (<768px): snap-point bottom sheet owned by the bottom tab bar. */
+function PhonePanelSheet() {
+  const open = useAppStore((s) => s.sidebarOpen);
+  const close = () => useAppStore.setState({ sidebarOpen: false });
 
-        <div className="flex gap-1 border-b border-border px-2 pb-2">
-          {TAB_ITEMS.map(({ id, label, Icon }) => {
-            const active = tab === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setSidebarTab(id)}
-                className={cn(
-                  "flex flex-1 items-center justify-center gap-1.5 rounded border px-1 py-1.5 text-xs transition-colors duration-150",
-                  active
-                    ? "border-border bg-accent-soft text-accent"
-                    : "border-transparent text-muted hover:text-text",
-                )}
-              >
-                <Icon size={14} strokeWidth={1.8} />
-                {label}
-              </button>
-            );
-          })}
-        </div>
-
-        {(hasSearched || searching) && (
-          <div className="border-b border-border">
-            <SceneStrip variant="inline" />
-          </div>
-        )}
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <TabBody />
-        </div>
-      </section>
-    </>
+  return (
+    <BottomSheet open={open} onClose={close} sheetKey="panel" label="Panel">
+      <PanelHeader onClose={close} closeLabel="Close panel" />
+      <PanelTabs />
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <TabBody />
+      </div>
+    </BottomSheet>
   );
 }

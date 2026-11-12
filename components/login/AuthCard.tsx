@@ -254,7 +254,7 @@ export default function AuthCard({
   return (
     <div
       id="auth-card"
-      className="rse-rise w-full max-w-[420px] rounded-lg border border-border bg-surface p-6 shadow-float"
+      className="rse-rise w-full max-w-[420px] rounded-lg border border-border bg-surface p-6 shadow-float max-sm:p-5"
       style={{ animationDelay: "220ms" }}
     >
       {mode === "sso" ? (
@@ -299,14 +299,14 @@ export default function AuthCard({
                   maxLength={256}
                   required
                   disabled={busy !== null}
-                  className={cn(inputClass, "pr-10")}
+                  className={cn(inputClass, "pr-10 max-lg:pr-12")}
                   placeholder="Your password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((value) => !value)}
                   aria-label={showPassword ? "Hide password" : "Show password"}
-                  className="absolute right-1.5 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded text-muted transition-colors duration-150 hover:text-text"
+                  className="absolute right-1 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded text-muted transition-colors duration-150 hover:text-text max-lg:right-0.5 max-lg:h-11 max-lg:w-11"
                 >
                   {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>

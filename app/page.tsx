@@ -4,7 +4,9 @@ import MapCanvas from "@/components/map/MapCanvas";
 import Panel from "@/components/shell/Panel";
 import Rail from "@/components/shell/Rail";
 import TopBar from "@/components/shell/TopBar";
+import BottomTabBar from "@/components/shell/BottomTabBar";
 import SceneStrip from "@/components/scenes/SceneStrip";
+import ResultsSurface from "@/components/scenes/ResultsSurface";
 import CompareDrawer from "@/components/compare/CompareDrawer";
 import CompareMapController from "@/components/compare/CompareMapController";
 import FieldsMapController from "@/components/fields/FieldsMapController";
@@ -31,8 +33,13 @@ export default function Page() {
         {/* Desktop: resizable right-hand results panel (map keeps the majority of the viewport). */}
         {isDesktop && <CompareDrawer />}
       </div>
-      {/* Mobile: fixed bottom sheet above the map. */}
+      {/* Phone: bottom sheet / tablet: right-edge drawer. */}
       {!isDesktop && <CompareDrawer />}
+      {/* Results outside the desktop docked strip: phone sheet / tablet drawer. */}
+      <ResultsSurface />
+      {/* Phone-only bottom navigation — last of the z-40 layer so it stays
+          tappable through sheet backdrops (sheets themselves are z-50). */}
+      <BottomTabBar />
       <ToastStack />
       <DownloadDialog />
       {/* Renders null: reopens an emailed report from ?a=&l=&A=&B=… links. */}

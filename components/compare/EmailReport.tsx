@@ -313,7 +313,7 @@ function EmailDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[95] grid place-items-center bg-black/40 p-4"
+      className="fixed inset-0 z-[95] grid place-items-center bg-black/40 p-4 max-sm:p-0"
       role="presentation"
       onClick={close}
     >
@@ -323,10 +323,10 @@ function EmailDialog({
         aria-modal="true"
         aria-labelledby="email-report-title"
         tabIndex={-1}
-        className="flex max-h-[90vh] w-full max-w-sm flex-col overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-float focus:outline-none"
+        className="flex max-h-[90vh] w-full max-w-sm flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-float focus:outline-none max-sm:h-full max-sm:max-h-none max-sm:max-w-none max-sm:rounded-none max-sm:border-0"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start gap-2">
+        <div className="flex items-start gap-2 px-4 pt-4">
           <h2 id="email-report-title" className="min-w-0 flex-1 text-sm font-semibold text-text">
             {fixed ? "Send report to mail" : "Email report"}
           </h2>
@@ -341,14 +341,15 @@ function EmailDialog({
           </button>
         </div>
 
-        {config.provider === "console" && (
-          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-            Preview mode — reports are saved to{" "}
-            <code className="mono-nums">.email-preview/</code> instead of being delivered.
-          </p>
-        )}
-
-        <form onSubmit={submit} noValidate className="mt-3 flex flex-col gap-3">
+        <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-3">
+            {config.provider === "console" && (
+              <p className="mb-3 text-[11px] leading-relaxed text-muted">
+                Preview mode — reports are saved to{" "}
+                <code className="mono-nums">.email-preview/</code> instead of being delivered.
+              </p>
+            )}
+            <div className="flex flex-col gap-3">
           {fixed ? (
             <p className="text-xs leading-relaxed text-text">
               This comparison will be emailed to{" "}
@@ -498,9 +499,11 @@ function EmailDialog({
                 You can send another report in {cooldownRemaining}s.
               </p>
             )}
+            </div>
+            </div>
           </div>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2 border-t border-border bg-surface px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             {terminal ? (
               <>
                 <Button

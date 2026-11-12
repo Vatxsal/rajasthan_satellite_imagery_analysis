@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
+import { useFormFactor } from "@/lib/hooks/useMediaQuery";
 import { useAppStore, type ToastItem } from "@/store/useAppStore";
 import { cn } from "@/components/ui/cn";
 
@@ -56,19 +57,30 @@ function ToastRow({ toast }: { toast: ToastItem }) {
 
 /**
  * Transient notifications (download progress/results). Stacks bottom-center,
- * sitting just above the results strip when it is open.
+ * sitting just above the results strip on desktop and above the tab bar /
+ * open sheet on phones.
  */
 export default function ToastStack() {
   const toasts = useAppStore((s) => s.toasts);
   const stripOpen = useAppStore((s) => s.resultsOpen);
   const stripHeightPx = useAppStore((s) => s.stripHeightPx);
+  const searching = useAppStore((s) => s.searching);
+  const hasSearched = useAppStore((s) => s.hasSearched);
+  const factor = useFormFactor();
 
   if (toasts.length === 0) return null;
+
+  const bottom =
+    factor === "desktop"
+      ? stripOpen && (searching || hasSearched)
+        ? stripHeightPx + 12
+        : 12
+      : "calc(var(--tabbar-h, 0px) + var(--sheet-h, 0px) + 12px)";
 
   return (
     <div
       className="fixed left-1/2 z-[90] flex -translate-x-1/2 flex-col items-center gap-2 transition-[bottom] duration-150 ease-out"
-      style={{ bottom: stripOpen ? stripHeightPx + 12 : 12 }}
+      style={{ bottom }}
       role="status"
       aria-live="polite"
     >

@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { BarChart3, Crosshair, Download, Flame, Layers3, Loader2, Mail, MoveHorizontal, Sparkles, X } from "lucide-react";
@@ -10,18 +11,35 @@ import { cn } from "@/components/ui/cn";
 import { downloadOverlayFile } from "@/lib/compare/export";
 import { focusChangeBbox } from "@/lib/compare/bridge";
 import { CLASS, CLASS_DEFS } from "@/lib/analysis/config";
-import { useAppStore } from "@/store/useAppStore";
+import { openSheet } from "@/lib/sheets";
 import {
   useCompareStore,
   PANEL_WIDTH_MAX,
   PANEL_WIDTH_MIN,
   type CompareTab,
 } from "@/store/useCompareStore";
-import { useIsDesktop } from "@/lib/hooks/useMediaQuery";
-import CompareStatsTab from "./CompareStatsTab";
-import CompareSummaryTab from "./CompareSummaryTab";
+import { useFormFactor } from "@/lib/hooks/useMediaQuery";
+import BottomSheet from "@/components/ui/BottomSheet";
 import EmailReport from "./EmailReport";
 import { formatShortDate } from "./CompareBar";
+
+// The statistics/hotspots views are the heaviest compare tabs — load on demand.
+const CompareStatsTab = dynamic(() => import("./CompareStatsTab"), {
+  ssr: false,
+  loading: () => (
+    <p role="status" className="text-xs text-muted">
+      Loading…
+    </p>
+  ),
+});
+const CompareSummaryTabLazy = dynamic(() => import("./CompareSummaryTab"), {
+  ssr: false,
+  loading: () => (
+    <p role="status" className="text-xs text-muted">
+      Loading…
+    </p>
+  ),
+});
 
 const TAB_OPTIONS: Array<{ value: CompareTab; label: string; icon: LucideIcon }> = [
   { value: "swipe", label: "Swipe", icon: MoveHorizontal },
@@ -55,9 +73,10 @@ const CHECKERBOARD: React.CSSProperties = {
 /**
  * Finished-comparison results. Desktop (≥1024px): a resizable right-hand
  * panel sitting next to the map column (the map keeps ≥60% of the viewport
- * after the analysis collapses the left sidebar). Mobile: a bottom sheet
- * capped at 45vh above the scene strip. Both share the single-column layout;
- * the desktop panel is a container so children react to its own width.
+ * after the analysis collapses the left sidebar). Tablet (768–1023px): an
+ * overlay drawer on the right edge. Phone: a snap-point bottom sheet above
+ * the tab bar. The desktop panel is a container so children react to its
+ * own width.
  */
 export default function CompareDrawer() {
   const open = useCompareStore((s) => s.drawerOpen);
@@ -66,17 +85,19 @@ export default function CompareDrawer() {
   const running = useCompareStore((s) => s.running);
   const panelWidth = useCompareStore((s) => s.panelWidth);
   const setPanelWidth = useCompareStore((s) => s.setPanelWidth);
+  const factor = useFormFactor();
 
-  const stripOpen = useAppStore((s) => s.resultsOpen);
-  const searching = useAppStore((s) => s.searching);
-  const hasSearched = useAppStore((s) => s.hasSearched);
-  const stripHeightPx = useAppStore((s) => s.stripHeightPx);
-  const isDesktop = useIsDesktop();
+  // Opening from in-content toggles (CompareBar) must respect sheet/drawer
+  // exclusivity — openSheet closes whichever sibling owns the same slot.
+  useEffect(() => {
+    if (open && factor !== "desktop") openSheet("compare");
+  }, [open, factor]);
 
-  if (!open || !result) return null;
+  if (!result) return null;
   const { metadata } = result.stats;
 
-  if (isDesktop) {
+  if (factor === "desktop") {
+    if (!open) return null;
     return (
       <aside
         aria-label="Change detection results"
@@ -90,18 +111,37 @@ export default function CompareDrawer() {
     );
   }
 
-  const stripActive = searching || hasSearched;
-  const bottom = stripOpen && stripActive ? stripHeightPx : 0;
+  if (factor === "tablet") {
+    return (
+      <aside
+        aria-hidden={!open}
+        aria-label="Change detection results"
+        className={cn(
+          "@container fixed bottom-0 right-0 top-12 z-40 flex w-[clamp(20rem,36vw,24rem)] flex-col border-l border-border bg-surface shadow-float",
+          "transition-[transform,visibility] duration-150 ease-out",
+          open ? "translate-x-0" : "invisible translate-x-full",
+        )}
+      >
+        {open && (
+          <>
+            <DrawerHeader metadata={metadata} />
+            <DrawerBody tab={tab} running={running} />
+          </>
+        )}
+      </aside>
+    );
+  }
 
   return (
-    <section
-      aria-label="Change detection results"
-      className="@container fixed inset-x-0 bottom-0 z-40 flex max-h-[45vh] flex-col border-t border-border bg-surface shadow-float"
-      style={{ bottom }}
+    <BottomSheet
+      open={open}
+      onClose={() => useCompareStore.getState().setDrawerOpen(false)}
+      sheetKey="compare"
+      label="Change detection results"
     >
       <DrawerHeader metadata={metadata} />
       <DrawerBody tab={tab} running={running} />
-    </section>
+    </BottomSheet>
   );
 }
 
@@ -150,7 +190,7 @@ function DrawerHeader({
   );
 }
 
-/** Icon tab bar — never wraps; labels hide only in very narrow panels (<384px = @sm container). */
+/** Icon tab bar — scrolls horizontally instead of squeezing; 44px touch rows. */
 function CompareTabs() {
   const tab = useCompareStore((s) => s.tab);
   const setTab = useCompareStore((s) => s.setTab);
@@ -158,7 +198,7 @@ function CompareTabs() {
     <div
       role="tablist"
       aria-label="Change detection views"
-      className="flex items-stretch gap-0.5 border-b border-border"
+      className="no-scrollbar flex items-stretch gap-0.5 overflow-x-auto border-b border-border"
     >
       {TAB_OPTIONS.map(({ value, label, icon: Icon }) => {
         const active = value === tab;
@@ -168,16 +208,14 @@ function CompareTabs() {
             type="button"
             role="tab"
             aria-selected={active}
-            aria-label={label}
-            title={label}
             onClick={() => setTab(value)}
             className={cn(
-              "-mb-px flex min-w-0 flex-1 items-center justify-center gap-1 whitespace-nowrap border-b-2 px-1 pb-1.5 pt-1 text-[11px] transition-colors duration-150",
+              "-mb-px flex min-h-11 shrink-0 grow items-center justify-center gap-1 whitespace-nowrap border-b-2 px-2.5 pb-1.5 pt-1 text-[11px] transition-colors duration-150",
               active ? "border-accent font-medium text-text" : "border-transparent text-muted hover:text-text",
             )}
           >
             <Icon size={13} className="shrink-0" aria-hidden />
-            <span className="hidden truncate @sm:block">{label}</span>
+            <span className="truncate">{label}</span>
           </button>
         );
       })}
@@ -199,7 +237,7 @@ function DrawerBody({ tab, running }: { tab: CompareTab; running: boolean }) {
       {tab === "change-map" && <ChangeMapTab />}
       {tab === "statistics" && <CompareStatsTab tab="statistics" />}
       {tab === "hotspots" && <CompareStatsTab tab="hotspots" />}
-      {tab === "summary" && <CompareSummaryTab />}
+      {tab === "summary" && <CompareSummaryTabLazy />}
     </div>
   );
 }

@@ -60,7 +60,7 @@ export default function ProductDialog({ scene, onClose }: ProductDialogProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[95] grid place-items-center bg-black/40 p-4"
+      className="fixed inset-0 z-[95] grid place-items-center bg-black/40 p-4 max-sm:p-0"
       role="presentation"
       onClick={(event) => {
         event.stopPropagation();
@@ -71,10 +71,10 @@ export default function ProductDialog({ scene, onClose }: ProductDialogProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="product-dialog-title"
-        className="max-h-[85vh] w-full max-w-xl overflow-hidden rounded-lg border border-border bg-surface shadow-float"
+        className="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-float max-sm:h-full max-sm:max-h-none max-sm:max-w-none max-sm:rounded-none max-sm:border-0"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
           <div className="min-w-0">
             <h2 id="product-dialog-title" className="text-sm font-semibold text-text">
               Full product (.SAFE ZIP)
@@ -90,22 +90,23 @@ export default function ProductDialog({ scene, onClose }: ProductDialogProps) {
           </Button>
         </div>
 
-        <div className="px-4 pt-3">
-          <ol className="space-y-1 text-xs leading-relaxed text-muted">
-            {STEPS.map((step, index) => (
-              <li key={step} className="flex gap-2">
-                <span className="mono-nums text-accent">{index + 1}.</span>
-                <span>{step}</span>
-              </li>
-            ))}
-          </ol>
-          <p className="mt-2 text-[11px] leading-relaxed text-muted">
-            Data Space downloads use your own account and quota — this app never stores your
-            credentials or proxies the ZIP.
-          </p>
-        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="px-4 pt-3">
+            <ol className="space-y-1 text-xs leading-relaxed text-muted">
+              {STEPS.map((step, index) => (
+                <li key={step} className="flex gap-2">
+                  <span className="mono-nums text-accent">{index + 1}.</span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ol>
+            <p className="mt-2 text-[11px] leading-relaxed text-muted">
+              Data Space downloads use your own account and quota — this app never stores your
+              credentials or proxies the ZIP.
+            </p>
+          </div>
 
-        <div className="max-h-[46vh] space-y-2 overflow-y-auto p-4">
+          <div className="space-y-2 p-4">
           {products.length === 0 && (
             <p className="rounded border border-border bg-surface-2 px-3 py-2 text-xs text-muted">
               This scene carries no per-tile catalogue id. Copy the scene id instead:
@@ -160,9 +161,10 @@ export default function ProductDialog({ scene, onClose }: ProductDialogProps) {
               </div>
             );
           })}
+          </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-border px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-surface px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {products.length > 1 && (
             <Button variant="ghost" onClick={() => copy(allIds)}>
               {copied === allIds ? "Copied all" : `Copy ${products.length} ids`}
