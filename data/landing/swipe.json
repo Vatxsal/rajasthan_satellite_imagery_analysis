@@ -1,0 +1,48 @@
+{
+  "site": "Sambhar Lake",
+  "bbox": [
+    74.85,
+    26.8,
+    75.4,
+    27.15
+  ],
+  "credit": "Contains modified Copernicus Sentinel data 2026",
+  "collection": "sentinel-2-l2a",
+  "before": {
+    "slot": "before",
+    "date": "2026-05-26",
+    "cloudCover": 0,
+    "window": "pre-monsoon",
+    "width": 1600,
+    "height": 1142,
+    "bytes": 115734,
+    "quality": 36,
+    "format": "avif",
+    "dark": 0.3998,
+    "file": "/landing/sambhar-before.avif"
+  },
+  "after": {
+    "slot": "after",
+    "date": "2026-11-04",
+    "cloudCover": 0,
+    "window": "post-monsoon",
+    "width": 1600,
+    "height": 1142,
+    "bytes": 102897,
+    "quality": 36,
+    "format": "avif",
+    "dark": 0.912,
+    "file": "/landing/sambhar-after.avif"
+  },
+  "og": {
+    "file": "/landing/og-swipe.jpg",
+    "width": 1200,
+    "height": 630,
+    "bytes": 148708
+  },
+  "metrics": {
+    "darkDeltaPp": 51.2,
+    "meanAbsDiff": 40.8
+  },
+  "generatedAt": "2026-11-12"
+}

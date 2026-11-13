@@ -181,11 +181,11 @@ async function shootSite(page, site) {
   await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 });
   // Wait for either the guest button (login page) or the map canvas (already
   // in); the /login redirect races the initial goto.
-  await page.waitForSelector('button:has-text("Explore the full dashboard"), canvas', {
+  await page.waitForSelector('button:has-text("Continue as guest"), canvas', {
     timeout: 30000,
   });
-  if ((await page.locator('button:has-text("Explore the full dashboard")').count()) > 0) {
-    await page.getByRole("button", { name: /explore the full dashboard/i }).click();
+  if ((await page.locator('button:has-text("Continue as guest")').count()) > 0) {
+    await page.getByRole("button", { name: /continue as guest/i }).click();
   }
   await page.waitForSelector("canvas", { timeout: 30000 });
   await page.waitForFunction(() => window.__rieMaps && window.__rieMaps.main, {
