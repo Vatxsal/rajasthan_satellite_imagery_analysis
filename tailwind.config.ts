@@ -37,6 +37,9 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-public-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-plex-mono)", "ui-monospace", "monospace"],
+        // Fraunces — editorial display face for /login only (variable optical
+        // size; the variable is defined by next/font on the login page root).
+        display: ["var(--font-fraunces)", "Georgia", "ui-serif", "serif"],
       },
       fontSize: {
         xs: ["12px", { lineHeight: "16px" }],

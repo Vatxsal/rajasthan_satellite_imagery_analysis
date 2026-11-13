@@ -3,8 +3,10 @@ import path from "node:path";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import AuthCard from "@/components/login/AuthCard";
-import LoginHero, { type DistrictMarker } from "@/components/login/LoginHero";
+import { Fraunces } from "next/font/google";
+import AccessPanel from "@/components/login/AccessPanel";
+import LandingCopy from "@/components/login/LandingCopy";
+import LandingSwipe from "@/components/login/LandingSwipe";
 import { AUTH_COOKIE, sessionSecret } from "@/lib/auth/config";
 import { nextPathOrFallback, sanitizeNextPath } from "@/lib/auth/nextPath";
 import { verifySession } from "@/lib/auth/session";
@@ -15,6 +17,19 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "");
 const SITE_DESCRIPTION =
   "See Rajasthan change, from space: compare any two dates at 10 m detail and get an AI-written change report in your inbox.";
 
+// Page-scoped display face: only /login pays the extra font request, and the
+// variable lands on the page root so `font-display` utilities resolve.
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  axes: ["opsz"],
+  variable: "--font-fraunces",
+  display: "swap",
+});
+
+/** Sentinel-2 native resolution (m) and nominal revisit (days). */
+const RESOLUTION_M = 10;
+const REVISIT_DAYS = 5;
+
 export const metadata: Metadata = {
   title: "Sign in · Rajasthan Imagery Explorer",
   description: SITE_DESCRIPTION,
@@ -23,212 +38,116 @@ export const metadata: Metadata = {
     description: SITE_DESCRIPTION,
     ...(SITE_URL ? { url: SITE_URL } : {}),
     siteName: "Rajasthan Imagery Explorer",
-    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Rajasthan Imagery Explorer" }],
+    images: [
+      {
+        url: "/landing/og-swipe.jpg",
+        width: 1200,
+        height: 630,
+        alt: "Before/after Sentinel-2 comparison of Sambhar Lake, Rajasthan",
+      },
+    ],
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
     title: "Rajasthan Imagery Explorer",
     description: SITE_DESCRIPTION,
-    images: ["/og.png"],
+    images: ["/landing/og-swipe.jpg"],
   },
 };
 
-/* ------------------------------------------------------------------ map */
+/* ------------------------------------------------------------------ data */
 
-interface RajasthanOutline {
-  /** All district rings in one path (viewBox 0 0 width height). */
-  path: string;
-  width: number;
-  height: number;
-  markers: DistrictMarker[];
+interface GeoJsonFile {
+  features: { properties: { id?: string; name?: string } }[];
+}
+
+interface LandingFacts {
   districtCount: number;
   tehsilCount: number;
 }
 
-interface GeoJsonGeometry {
-  type: string;
-  coordinates: unknown;
+/** District/tehsil counts straight from the boundary files (never hard-coded). */
+let factsCache: LandingFacts | null = null;
+
+function loadLandingFacts(): LandingFacts {
+  if (factsCache) return factsCache;
+  const read = (name: string): GeoJsonFile =>
+    JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), "data", "boundaries", name), "utf8"),
+    ) as GeoJsonFile;
+  factsCache = {
+    districtCount: read("districts.geojson").features.length,
+    tehsilCount: read("tehsils.geojson").features.length,
+  };
+  return factsCache;
 }
 
-interface GeoJsonFeature {
-  properties: { id?: string; name?: string };
-  geometry: GeoJsonGeometry;
+interface SwipeSlot {
+  date: string;
+  file: string;
 }
 
-interface GeoJsonFile {
-  features: GeoJsonFeature[];
+interface SwipeFacts {
+  site: string;
+  bbox: [number, number, number, number];
+  credit: string;
+  before: SwipeSlot;
+  after: SwipeSlot;
+  width: number;
+  height: number;
 }
 
-const OUTLINE_TOLERANCE = 4;
-const MARKER_DISTRICTS = ["Jaipur", "Jodhpur", "Udaipur", "Kota"];
+/** The shipped Sambhar Lake swipe sheet (data/landing/swipe.json). */
+let swipeCache: SwipeFacts | null = null;
 
-type Point = [number, number];
-
-/** Douglas-Peucker simplification in projected space. */
-function simplify(points: Point[], tolerance: number): Point[] {
-  if (points.length < 3) return points;
-  const first = points[0]!;
-  const last = points[points.length - 1]!;
-  const dx = last[0] - first[0];
-  const dy = last[1] - first[1];
-  const length = Math.hypot(dx, dy);
-  let maxDistance = 0;
-  let splitIndex = 0;
-
-  if (length < 1e-9) {
-    // Closed ring: split at the point farthest from the start.
-    for (let index = 1; index < points.length; index += 1) {
-      const point = points[index]!;
-      const distance = Math.hypot(point[0] - first[0], point[1] - first[1]);
-      if (distance > maxDistance) {
-        maxDistance = distance;
-        splitIndex = index;
-      }
-    }
-    if (maxDistance > tolerance && splitIndex > 0) {
-      const left = simplify(points.slice(0, splitIndex + 1), tolerance);
-      const right = simplify(points.slice(splitIndex), tolerance);
-      return left.slice(0, -1).concat(right);
-    }
-    return [first];
-  }
-
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const point = points[index]!;
-    const distance = Math.abs(
-      dy * point[0] - dx * point[1] + last[0] * first[1] - last[1] * first[0],
-    ) / length;
-    if (distance > maxDistance) {
-      maxDistance = distance;
-      splitIndex = index;
-    }
-  }
-
-  if (maxDistance > tolerance && splitIndex > 0) {
-    const left = simplify(points.slice(0, splitIndex + 1), tolerance);
-    const right = simplify(points.slice(splitIndex), tolerance);
-    return left.slice(0, -1).concat(right);
-  }
-  return [first, last];
+function loadSwipeFacts(): SwipeFacts {
+  if (swipeCache) return swipeCache;
+  const raw = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), "data", "landing", "swipe.json"), "utf8"),
+  ) as {
+    site: string;
+    bbox: number[];
+    credit: string;
+    before: { date: string; file: string; width: number; height: number };
+    after: { date: string; file: string; width: number; height: number };
+  };
+  swipeCache = {
+    site: raw.site,
+    bbox: [raw.bbox[0]!, raw.bbox[1]!, raw.bbox[2]!, raw.bbox[3]!],
+    credit: raw.credit,
+    before: { date: raw.before.date, file: raw.before.file },
+    after: { date: raw.after.date, file: raw.after.file },
+    width: raw.after.width,
+    height: raw.after.height,
+  };
+  return swipeCache;
 }
 
-function walkCoordinates(coordinates: unknown, visit: (lon: number, lat: number) => void): void {
-  if (!Array.isArray(coordinates)) return;
-  if (typeof coordinates[0] === "number" && typeof coordinates[1] === "number") {
-    visit(coordinates[0] as number, coordinates[1] as number);
-    return;
-  }
-  for (const child of coordinates) walkCoordinates(child, visit);
-}
+const dateFormat = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
 
-function geometryRings(geometry: GeoJsonGeometry): unknown[][] {
-  const { type, coordinates } = geometry;
-  if (type === "Polygon") return coordinates as unknown[][];
-  if (type === "MultiPolygon") return (coordinates as unknown[][][]).flat();
-  return [];
+function formatDate(iso: string): string {
+  return dateFormat.format(new Date(`${iso}T00:00:00Z`));
 }
 
 /**
- * Memoized per-server-process computation of the hero SVG: projects the
- * district GeoJSON (equirectangular with a cos(26.5°) width correction),
- * simplifies every ring, and derives marker positions for four districts.
- * The path stays a single <path d> so the draw-in animation is one stroke.
+ * Pick a round ground distance (km) whose scale bar lands at 10–35% of the
+ * image width, computed from the swipe bbox at its mid-latitude.
  */
-let outlineCache: RajasthanOutline | null = null;
-
-function loadOutline(): RajasthanOutline {
-  if (outlineCache) return outlineCache;
-
-  const file = path.join(process.cwd(), "data", "boundaries", "districts.geojson");
-  const geo = JSON.parse(fs.readFileSync(file, "utf8")) as GeoJsonFile;
-  const tehsilsFile = path.join(process.cwd(), "data", "boundaries", "tehsils.geojson");
-  const tehsils = JSON.parse(fs.readFileSync(tehsilsFile, "utf8")) as GeoJsonFile;
-
-  let minLon = Infinity;
-  let maxLon = -Infinity;
-  let minLat = Infinity;
-  let maxLat = -Infinity;
-  for (const feature of geo.features) {
-    walkCoordinates(feature.geometry.coordinates, (lon, lat) => {
-      if (lon < minLon) minLon = lon;
-      if (lon > maxLon) maxLon = lon;
-      if (lat < minLat) minLat = lat;
-      if (lat > maxLat) maxLat = lat;
-    });
+function scaleBarFor(bbox: [number, number, number, number]): { km: number; percent: number } {
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+  const midLat = (minLat + maxLat) / 2;
+  const groundKm = (maxLon - minLon) * 111.32 * Math.cos((midLat * Math.PI) / 180);
+  for (const km of [1, 2, 5, 10, 20, 50, 100]) {
+    const percent = (km / groundKm) * 100;
+    if (percent >= 10 && percent <= 35) return { km, percent };
   }
-
-  const k = Math.cos((26.5 * Math.PI) / 180);
-  const spanX = (maxLon - minLon) * k;
-  const spanY = maxLat - minLat;
-  const scale = 1_000 / spanX;
-  const width = Math.round(spanX * scale);
-  const height = Math.round(spanY * scale);
-
-  const project = (lon: number, lat: number): Point => [
-    (lon - minLon) * k * scale,
-    (maxLat - lat) * scale,
-  ];
-
-  let pathData = "";
-  for (const feature of geo.features) {
-    for (const ring of geometryRings(feature.geometry)) {
-      const projected: Point[] = [];
-      for (const position of ring) {
-        const pair = position as [number, number];
-        projected.push(project(pair[0], pair[1]));
-      }
-      // Drop the duplicated closing vertex before simplifying.
-      const open =
-        projected.length > 1 &&
-        Math.hypot(
-          projected[0]![0] - projected[projected.length - 1]![0],
-          projected[0]![1] - projected[projected.length - 1]![1],
-        ) < 1e-9
-          ? projected.slice(0, -1)
-          : projected;
-      const simple = simplify(open, OUTLINE_TOLERANCE);
-      let d = "";
-      let previous: [string, string] | null = null;
-      let drawn = 0;
-      for (const [rawX, rawY] of simple) {
-        const x = rawX.toFixed(1);
-        const y = rawY.toFixed(1);
-        if (previous && previous[0] === x && previous[1] === y) continue;
-        d += drawn === 0 ? `M${x} ${y}` : `L${x} ${y}`;
-        previous = [x, y];
-        drawn += 1;
-      }
-      if (drawn > 2) pathData += `${d}Z`;
-    }
-  }
-
-  const markers: DistrictMarker[] = [];
-  for (const name of MARKER_DISTRICTS) {
-    const feature = geo.features.find((item) => item.properties.name === name);
-    if (!feature) continue;
-    let lonSum = 0;
-    let latSum = 0;
-    let count = 0;
-    walkCoordinates(feature.geometry.coordinates, (lon, lat) => {
-      lonSum += lon;
-      latSum += lat;
-      count += 1;
-    });
-    if (count === 0) continue;
-    const [x, y] = project(lonSum / count, latSum / count);
-    markers.push({ name, x: Math.round(x), y: Math.round(y) });
-  }
-
-  outlineCache = {
-    path: pathData,
-    width,
-    height,
-    markers,
-    districtCount: geo.features.length,
-    tehsilCount: tehsils.features.length,
-  };
-  return outlineCache;
+  return { km: 10, percent: (10 / groundKm) * 100 };
 }
 
 /* ----------------------------------------------------------------- page */
@@ -249,14 +168,19 @@ export default async function LoginPage({
   }
 
   const next = sanitizeNextPath(searchParams.next);
-  const outline = loadOutline();
+  const facts = loadLandingFacts();
+  const swipe = loadSwipeFacts();
+  const scale = scaleBarFor(swipe.bbox);
+  const beforeDate = formatDate(swipe.before.date);
+  const afterDate = formatDate(swipe.after.date);
+
   const guestEnabled = env.GUEST_ENABLED;
   const accessEnabled = Boolean(env.EMAIL_FIXED_RECIPIENT?.trim()) && env.ACCESS_REQUEST_DAILY_CAP > 0;
   const captchaRequired = Boolean(env.TURNSTILE_SECRET_KEY);
   const turnstileSiteKey = env.TURNSTILE_SITE_KEY ?? null;
 
   return (
-    <div className="min-h-dvh bg-bg text-text">
+    <div className={`${fraunces.variable} flex min-h-dvh flex-col bg-bg text-text`}>
       <a
         href="#auth-card"
         className="sr-only rounded bg-accent px-3 py-2 text-sm font-medium text-accent-fg focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50"
@@ -264,32 +188,55 @@ export default async function LoginPage({
         Skip to sign in
       </a>
 
-      <div className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col lg:flex-row">
-        <LoginHero
-          districtsPath={outline.path}
-          mapWidth={outline.width}
-          mapHeight={outline.height}
-          markers={outline.markers}
-          districtCount={outline.districtCount}
-          tehsilCount={outline.tehsilCount}
-        />
+      {/* LCP: the "after" frame is the full-bleed base image — warm it. */}
+      <link rel="preload" as="image" href={swipe.after.file} />
 
-        <div
-          className="flex shrink-0 items-center justify-center border-t border-border px-5 py-10 lg:w-[500px] lg:border-l lg:border-t-0 lg:py-8"
-          style={{ animationDelay: "180ms" }}
-        >
-          <AuthCard
+      <main className="flex flex-1 flex-col lg:grid lg:grid-cols-12">
+        <section className="flex min-w-0 flex-col lg:col-span-7">
+          <LandingSwipe
+            className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-surface-2 lg:aspect-auto lg:min-h-0 lg:flex-1"
+            beforeSrc={swipe.before.file}
+            afterSrc={swipe.after.file}
+            beforeLabel={beforeDate}
+            afterLabel={afterDate}
+            site={swipe.site}
+            bbox={swipe.bbox}
+            imageWidth={swipe.width}
+            imageHeight={swipe.height}
+            scaleKm={scale.km}
+            scalePercent={scale.percent}
+          />
+
+          {/* Paper band: overlaps the image edge (headline sits partly over it).
+              @container makes the @md: facts grid below query band width. */}
+          <div className="@container relative z-10 -mt-4 border-t border-border bg-bg px-5 pb-7 pt-4 lg:-mt-12 lg:px-10 lg:pb-9 lg:pt-5">
+            <p className="rse-rise mono-nums text-[11px] leading-4 text-muted" style={{ animationDelay: "60ms" }}>
+              {swipe.site} · {beforeDate} → {afterDate} · {swipe.credit}
+            </p>
+            <LandingCopy
+              districtCount={facts.districtCount}
+              tehsilCount={facts.tehsilCount}
+              resolutionM={RESOLUTION_M}
+              revisitDays={REVISIT_DAYS}
+            />
+          </div>
+        </section>
+
+        <aside className="flex border-t border-border px-5 py-8 lg:col-span-5 lg:border-l lg:border-t-0 lg:px-10 lg:py-12">
+          <AccessPanel
             next={next}
             guestEnabled={guestEnabled}
             accessEnabled={accessEnabled}
             captchaRequired={captchaRequired}
             turnstileSiteKey={turnstileSiteKey}
+            guestTtlHours={env.SESSION_TTL_GUEST_HOURS}
+            ssoTtlHours={env.SESSION_TTL_SSO_HOURS}
           />
-        </div>
-      </div>
+        </aside>
+      </main>
 
       <footer className="border-t border-border px-5 py-4 text-center text-[11px] text-muted lg:text-left">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-1 sm:flex-row sm:justify-between">
+        <div className="flex flex-col gap-1 sm:flex-row sm:justify-between">
           <span>Contains modified Copernicus Sentinel data.</span>
           <span>
             Guest access uses a first-party session cookie only — no trackers, no third parties.

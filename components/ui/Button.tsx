@@ -3,7 +3,7 @@
 import type { ButtonHTMLAttributes } from "react";
 import { cn } from "./cn";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
+type Variant = "primary" | "secondary" | "ghost" | "danger" | "ink" | "quiet";
 type Size = "sm" | "md" | "icon";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -18,6 +18,9 @@ const variantClasses: Record<Variant, string> = {
     "bg-surface text-text border border-border hover:bg-surface-2",
   ghost: "bg-transparent text-muted border border-transparent hover:bg-surface-2 hover:text-text",
   danger: "bg-surface text-danger border border-border hover:bg-surface-2",
+  // /login editorial sheet: solid ink primary, borderless quiet secondary.
+  ink: "bg-text text-bg border border-text hover:opacity-90 disabled:opacity-50",
+  quiet: "bg-transparent text-text border border-border hover:bg-surface-2",
 };
 
 const sizeClasses: Record<Size, string> = {

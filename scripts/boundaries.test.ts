@@ -7,7 +7,7 @@ import { TARGET_DISTRICTS, THRESHOLDS, validateBoundaries } from "../validation/
 
 /** 41-district boundary dataset: counts, names, geometry, tiling, area vs
  *  official 342,000 km², legacy Census-2011 deltas, tehsil integrity, plus
- *  the README/LoginHero guards that keep counts computed, not hard-coded. */
+ *  the README/login-copy guards that keep counts computed, not hard-coded. */
 
 const root = process.cwd();
 let cached: ReturnType<typeof validateBoundaries> | null = null;
@@ -99,12 +99,12 @@ test("district id aliases resolve to existing ids", () => {
   assert.equal(resolveDistrictId("d-ajmer"), "d-ajmer");
 });
 
-test("login hero has no hard-coded district/tehsil counts", () => {
-  const hero = readFileSync(join(root, "components", "login", "LoginHero.tsx"), "utf8");
-  assert.ok(!/33 districts/.test(hero), "no hard-coded district count");
-  assert.ok(!/\b224\b/.test(hero), "no hard-coded tehsil count");
-  assert.ok(hero.includes("districtCount"), "districtCount prop used");
-  assert.ok(hero.includes("tehsilCount"), "tehsilCount prop used");
+test("login copy has no hard-coded district/tehsil counts", () => {
+  const copy = readFileSync(join(root, "components", "login", "LandingCopy.tsx"), "utf8");
+  assert.ok(!/33 districts/.test(copy), "no hard-coded district count");
+  assert.ok(!/\b224\b/.test(copy), "no hard-coded tehsil count");
+  assert.ok(copy.includes("districtCount"), "districtCount prop used");
+  assert.ok(copy.includes("tehsilCount"), "tehsilCount prop used");
 });
 
 test("README documents the computed district/tehsil counts", () => {

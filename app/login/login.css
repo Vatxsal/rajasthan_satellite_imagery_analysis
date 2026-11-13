@@ -1,8 +1,17 @@
 /* ------------------------------------------------------------------
- * /login page: entrance motion, hero map animation, rotating phrases.
- * All motion is CSS-only and disabled under prefers-reduced-motion —
- * no animation library is loaded for this page (hero JS budget).
+ * /login page: editorial landing motion — swipe sweep, headline line
+ * reveal, graticule/fact settle, panel entrance, view-transition swap.
+ * All motion is CSS-only, disabled under prefers-reduced-motion — no
+ * animation library is loaded for this page (hero JS budget).
  * ------------------------------------------------------------------ */
+
+/* Registered so the sweep keyframes interpolate smoothly; inherited so
+   the clip layer, handle and date chips all track the same value. */
+@property --rse-swipe {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 50%;
+}
 
 @keyframes rse-rise {
   from {
@@ -15,23 +24,23 @@
   }
 }
 
-@keyframes rse-phrase-in {
+@keyframes rse-line-in {
   from {
-    opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(112%);
   }
   to {
-    opacity: 1;
     transform: translateY(0);
   }
 }
 
-@keyframes rse-draw {
+@keyframes rse-settle {
   from {
-    stroke-dashoffset: 1;
+    opacity: 0;
+    transform: translateY(6px);
   }
   to {
-    stroke-dashoffset: 0;
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -44,105 +53,65 @@
   }
 }
 
-@keyframes rse-scan {
+/* One sweep on load: 92% → 50%, then pointer/keyboard takes over
+   (.rse-touched removes the animation and the inline value wins). */
+@keyframes rse-sweep {
   from {
-    top: 0%;
-    opacity: 0;
-  }
-  8% {
-    opacity: 1;
-  }
-  92% {
-    opacity: 1;
+    --rse-swipe: 92%;
   }
   to {
-    top: 100%;
-    opacity: 0;
+    --rse-swipe: 50%;
   }
 }
 
-@keyframes rse-pulse {
-  0% {
-    transform: scale(0.6);
-    opacity: 0.9;
-  }
-  70% {
-    transform: scale(1.6);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1.6);
-    opacity: 0;
-  }
-}
-
-/* Staggered entrance for hero/card blocks. */
 .rse-rise {
   animation: rse-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.rse-phrase-in {
-  animation: rse-phrase-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+/* Headline lines reveal from under the overflow clip, in sequence. */
+.rse-line {
+  animation: rse-line-in 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Map: district outlines draw in, fill fades, scan line sweeps. */
-.rse-map-line {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  animation: rse-draw 2.6s cubic-bezier(0.4, 0, 0.2, 1) 0.3s forwards;
+/* Computed facts settle into place. */
+.rse-settle {
+  animation: rse-settle 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.rse-map-fill {
-  opacity: 0;
-  animation: rse-fade 1.4s ease-out 1.8s forwards;
+/* Graticule ticks, scale bar: staggered fade (see LandingSwipe delays). */
+.rse-tick {
+  animation: rse-fade 0.5s ease-out both;
 }
 
-.rse-scan {
-  animation: rse-scan 5s linear 2.4s infinite;
+.rse-swipe:not(.rse-touched) {
+  animation: rse-sweep 1.5s cubic-bezier(0.65, 0, 0.35, 1) 0.6s both;
 }
 
-.rse-marker-pulse {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: rse-pulse 2.4s ease-out infinite;
+/* ---------------------------------------------------------------- type */
+
+/* Fluid editorial headline — Fraunces, sized between phone and desktop. */
+.text-fluid-landing {
+  font-size: clamp(2rem, 1.3rem + 3vw, 3.75rem);
 }
 
-.rse-counter {
-  font-variant-numeric: tabular-nums;
+/* --------------------------------------------------- view transitions */
+
+/* Panel swap (sign-in ↔ request) crossfades briskly. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 180ms;
 }
+
+/* ------------------------------------------------------ reduced motion */
 
 @media (prefers-reduced-motion: reduce) {
   .rse-rise,
-  .rse-phrase-in {
+  .rse-line,
+  .rse-settle,
+  .rse-tick,
+  .rse-swipe:not(.rse-touched) {
+    /* No transform reset: several of these elements use transforms for
+       positioning (chip centering), which must survive. */
     animation: none;
-    opacity: 1;
-    transform: none;
-  }
-  .rse-map-line {
-    animation: none;
-    stroke-dashoffset: 0;
-  }
-  .rse-map-fill {
-    animation: none;
-    opacity: 1;
-  }
-  .rse-scan {
-    display: none;
-  }
-  .rse-marker-pulse {
-    animation: none;
-    opacity: 0.35;
-  }
-}
-
-/* Phones: drop the two looping decorations (battery + the scan line fights
-   the smaller map anyway). Entrance motion still plays once. */
-@media (max-width: 767px) {
-  .rse-scan {
-    display: none;
-  }
-  .rse-marker-pulse {
-    animation: none;
-    opacity: 0.35;
   }
 }
