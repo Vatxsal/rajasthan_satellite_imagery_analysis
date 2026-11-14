@@ -100,7 +100,6 @@ export default function FiltersPanel() {
                 id="filter-district"
                 value={districtId ?? ""}
                 placeholder="All Rajasthan"
-                disabled={lockedDistrict}
                 onChange={(event) => {
                   const value = event.target.value;
                   setDistrict(districts.find((d) => d.id === value) ?? null);
@@ -115,7 +114,8 @@ export default function FiltersPanel() {
             )}
             {lockedDistrict && (
               <p className="mt-1 text-[11px] text-muted">
-                Guests compare at tehsil / ILR level — sign in for districts.
+                Guests pick a district only to reach tehsils / ILRs — district-level compare
+                needs an SSO ID.
               </p>
             )}
           </div>
