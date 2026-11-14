@@ -6,12 +6,15 @@ import { POST } from "../app/api/fields/route";
 import { fieldsCache, fieldsCacheKey } from "../lib/cache";
 import type { BBox } from "../lib/data/types";
 import type { FieldFeature, FieldsRawEntry } from "../lib/fields/query";
+import { ssoCookie, useReadyAuthGate } from "./test-session";
 
 /** Route-level guard flow for POST /api/fields. Every test stops before a real
  *  PMTiles/COG read: guard failures answer first, cache hits answer from the
  *  seeded LRU, and a cache miss hits a fetch stub that records the attempt and
  *  fails immediately — so a regression that reaches the network fails loudly
- *  instead of waiting on data.source.coop. */
+ *  instead of waiting on data.source.coop.
+ *  The auth gate is "ready" and every request carries an SSO session cookie
+ *  (fields are an SSO-only capability — see lib/auth/permissions.ts). */
 
 const FIELDS_URL = "http://localhost/api/fields";
 const REAL_FETCH = globalThis.fetch;
@@ -25,6 +28,7 @@ interface EnvHolder {
 function resetState(): void {
   process.env.RATE_LIMIT_PER_MIN = "1000";
   process.env.NEXT_PUBLIC_SITE_URL = "https://example.org";
+  useReadyAuthGate();
   delete process.env.FIELDS_ENABLED;
   delete process.env.FIELDS_MIN_CONFIDENCE;
   delete process.env.FIELDS_MAX_KM2;
@@ -49,13 +53,14 @@ afterEach(() => {
   globalThis.fetch = REAL_FETCH;
 });
 
-function sendFields(
+async function sendFields(
   payload: Record<string, unknown>,
   headers: Record<string, string> = {},
 ): Promise<{ status: number; body: Record<string, unknown>; headers: Headers }> {
+  const cookie = await ssoCookie();
   const request = new Request(FIELDS_URL, {
     method: "POST",
-    headers: { "content-type": "application/json", ...headers },
+    headers: { "content-type": "application/json", cookie, ...headers },
     body: JSON.stringify(payload),
   });
   return POST(request).then(async (response) => ({
@@ -132,7 +137,7 @@ test("malformed JSON is rejected with INVALID_JSON", async () => {
   enabled();
   const request = new Request(FIELDS_URL, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", cookie: await ssoCookie() },
     body: "not-json{{",
   });
   const response = await POST(request);

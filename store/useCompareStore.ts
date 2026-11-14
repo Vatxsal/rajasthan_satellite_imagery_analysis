@@ -8,6 +8,7 @@ import { normalizeComparePair } from "@/lib/compare/swipe";
 import { streamAnalyze } from "@/lib/compare/run";
 import type { CompositeId } from "@/lib/data";
 import { selectActiveSelection, useAppStore } from "@/store/useAppStore";
+import { selectCan, useSession } from "@/store/useSession";
 
 export type CompareTab = "swipe" | "change-map" | "statistics" | "hotspots" | "summary";
 export type CompareStage = "fetch-a" | "fetch-b" | "analyze";
@@ -308,6 +309,11 @@ export const useCompareStore = create<CompareState>((set, get) => ({
     if (state.running || !state.dateA || !state.dateB) return;
     if (!selection) {
       toast("error", "Select a district, tehsil or ILR first.");
+      return;
+    }
+    // Guests may use a district only as a parent for tehsil / ILR navigation.
+    if (selection.level === "district" && !selectCan(useSession.getState(), "compare.district")) {
+      toast("error", "Pick a tehsil or ILR — district-level compare needs an SSO ID.");
       return;
     }
 

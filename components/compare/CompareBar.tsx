@@ -3,6 +3,7 @@
 import { ChevronDown, ChevronUp, GitCompare, Loader2, X } from "lucide-react";
 import { cn } from "@/components/ui/cn";
 import Button from "@/components/ui/Button";
+import { QuotaReadout } from "@/components/ui/FeatureLock";
 import { COMPARE_STAGE_LABELS, useCompareStore } from "@/store/useCompareStore";
 
 export function formatShortDate(iso: string): string {
@@ -152,6 +153,7 @@ export default function CompareBar() {
         >
           {running ? "Analyzing…" : "Analyze"}
         </Button>
+        <QuotaReadout kind="compare" className="max-w-[12rem]" />
       </div>
     </div>
   );

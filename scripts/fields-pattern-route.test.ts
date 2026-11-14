@@ -15,13 +15,16 @@ import type { PatternResult } from "../lib/fields/patternRun";
 import { PATTERN_CLASSES } from "../lib/fields/config";
 import type { BBox } from "../lib/data/types";
 import type { FieldFeature, FieldsRawEntry } from "../lib/fields/query";
+import { ssoCookie, useReadyAuthGate } from "./test-session";
 
 /** Route-level guard flow for POST /api/fields/pattern. Every test stops before
  *  a real PMTiles/CDSE read: guard failures answer as JSON, a seeded pattern
  *  cache replays the NDJSON frame sequence, and a cache miss either fails the
  *  PU pre-flight / field build or hits a fetch stub that records the attempt
  *  and fails immediately — so a regression that reaches the network fails
- *  loudly instead of waiting on data.source.coop. */
+ *  loudly instead of waiting on data.source.coop.
+ *  The auth gate is "ready" and every request carries an SSO session cookie
+ *  (fields are an SSO-only capability — see lib/auth/permissions.ts). */
 
 const PATTERN_URL = "http://localhost/api/fields/pattern";
 const REAL_FETCH = globalThis.fetch;
@@ -35,6 +38,7 @@ interface EnvHolder {
 function resetState(): void {
   process.env.RATE_LIMIT_PER_MIN = "1000";
   process.env.NEXT_PUBLIC_SITE_URL = "https://example.org";
+  useReadyAuthGate();
   delete process.env.FIELDS_ENABLED;
   delete process.env.FIELDS_MIN_CONFIDENCE;
   delete process.env.FIELDS_MAX_KM2;
@@ -74,13 +78,14 @@ interface SendResult {
   body: Record<string, unknown> | null;
 }
 
-function send(
+async function send(
   payload: Record<string, unknown> | string,
   headers: Record<string, string> = {},
 ): Promise<SendResult> {
+  const cookie = await ssoCookie();
   const request = new Request(PATTERN_URL, {
     method: "POST",
-    headers: { "content-type": "application/json", ...headers },
+    headers: { "content-type": "application/json", cookie, ...headers },
     body: typeof payload === "string" ? payload : JSON.stringify(payload),
   });
   return POST(request).then(async (response) => {

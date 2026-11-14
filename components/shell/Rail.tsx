@@ -1,29 +1,34 @@
 "use client";
 
-import { Bookmark, Layers, Ruler, SlidersHorizontal, Sprout } from "lucide-react";
+import { Activity, Bookmark, Layers, Ruler, SlidersHorizontal, Sprout } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useCan } from "@/store/useSession";
 import { useAppStore, type SidebarTabId } from "@/store/useAppStore";
 import Tooltip from "@/components/ui/Tooltip";
 import { cn } from "@/components/ui/cn";
 
-const ITEMS: { id: SidebarTabId; label: string; Icon: LucideIcon }[] = [
+const ITEMS: { id: SidebarTabId; label: string; Icon: LucideIcon; ssoOnly?: boolean }[] = [
   { id: "filters", label: "Search & filters", Icon: SlidersHorizontal },
   { id: "layers", label: "Layers", Icon: Layers },
   { id: "fields", label: "Fields & crops", Icon: Sprout },
   { id: "distance", label: "Measure", Icon: Ruler },
   { id: "queries", label: "Saved queries", Icon: Bookmark },
+  { id: "status", label: "System status", Icon: Activity, ssoOnly: true },
 ];
 
 export default function Rail() {
   const activeTab = useAppStore((s) => s.sidebarTab);
   const setSidebarTab = useAppStore((s) => s.setSidebarTab);
+  const canStatus = useCan("system.status");
+
+  const items = ITEMS.filter((item) => !item.ssoOnly || canStatus);
 
   return (
     <nav
       aria-label="Tools"
       className="hidden w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-surface py-2 lg:flex"
     >
-      {ITEMS.map(({ id, label, Icon }) => {
+      {items.map(({ id, label, Icon }) => {
         const active = activeTab === id;
         return (
           <Tooltip key={id} content={label}>

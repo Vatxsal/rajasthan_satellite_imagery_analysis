@@ -27,6 +27,8 @@ interface AccessPanelProps {
   turnstileSiteKey: string | null;
   guestTtlHours: number;
   ssoTtlHours: number;
+  /** Opens directly on the request form (`?mode=request` from lock popovers). */
+  initialMode?: "sso" | "request";
 }
 
 type Mode = "sso" | "request";
@@ -90,8 +92,9 @@ export default function AccessPanel({
   turnstileSiteKey,
   guestTtlHours,
   ssoTtlHours,
+  initialMode = "sso",
 }: AccessPanelProps) {
-  const [mode, setMode] = useState<Mode>("sso");
+  const [mode, setMode] = useState<Mode>(initialMode === "request" && accessEnabled ? "request" : "sso");
   const setSession = useSession((s) => s.setSession);
   const wide = useIsDesktop();
   const sheetMode = mode === "request" && !wide;
@@ -560,7 +563,8 @@ export default function AccessPanel({
     >
       <h2 className="font-display text-[26px] font-semibold leading-8 text-text">Sign in</h2>
       <p className="mt-1.5 text-[13px] leading-5 text-muted">
-        Use your organisation credentials to open the explorer.
+        SSO ID opens full access — full-archive search, district compare, GeoTIFF, AI and email.
+        Guests browse with tighter limits.
       </p>
 
       <form onSubmit={submitLogin} className="mt-6 flex flex-col gap-5" noValidate>
@@ -668,8 +672,9 @@ export default function AccessPanel({
             )}
           </Button>
           <p className="mt-2 text-[12px] leading-5 text-muted">
-            Opens the full dashboard for {formatTtl(guestTtlHours)} — no account needed. Signing
-            in keeps a session for {formatTtl(ssoTtlHours)}.
+            Guest session for {formatTtl(guestTtlHours)} — tehsil / ILR compare, PNG previews and
+            tighter daily limits; no GeoTIFF, AI or email. Sign in for the full SSO session (
+            {formatTtl(ssoTtlHours)}).
           </p>
         </>
       )}

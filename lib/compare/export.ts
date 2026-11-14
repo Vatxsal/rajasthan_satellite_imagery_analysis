@@ -20,14 +20,16 @@ function saveText(text: string, filename: string, mime: string): void {
   saveBlob(new Blob([text], { type: mime }), filename);
 }
 
-/** change_<dateA>_<dateB>.png | .tif — same naming as the overlay route. */
+/** change_<dateA>_<dateB>.png | .tif — same naming as the overlay route.
+ *  `download=1` marks the request as an export so the server can enforce the
+ *  role's exports capability (the plain map <img> source never sends it). */
 export async function downloadOverlayFile(
   overlayUrl: string,
   format: "png" | "geotiff",
   dates: { dateA: string; dateB: string },
 ): Promise<void> {
   const separator = overlayUrl.includes("?") ? "&" : "?";
-  const response = await fetch(`${overlayUrl}${separator}format=${format}`);
+  const response = await fetch(`${overlayUrl}${separator}format=${format}&download=1`);
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { message?: string } | null;
     throw new Error(payload?.message ?? "The change map file is unavailable. Run the analysis again.");

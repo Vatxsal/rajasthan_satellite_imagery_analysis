@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { inflateSync } from "node:zlib";
 import { z } from "zod";
 import { encodeClassGeoTiff } from "@/lib/analysis/tiff";
+import { authorize, requireCapability } from "@/lib/auth/guard";
 import { binaryStreamResponse, errorResponse, rateLimitGuard } from "@/lib/server/api";
 import { entryForKey } from "@/lib/server/compareRun";
 
@@ -12,6 +13,9 @@ export const maxDuration = 60;
 const querySchema = z.object({
   key: z.string().regex(/^[a-f0-9]{64}$/, "key must be a 64-char hex digest"),
   format: z.enum(["png", "geotiff"]).default("png"),
+  /** "1" when the PNG is fetched as a file download (export button) rather
+   *  than as the map's image source — exports need the exports capability. */
+  download: z.enum(["0", "1"]).default("0"),
   // Optional analysis parameters → stateless recompute on a cache miss
   // (same contract as /api/compare/events).
   areaId: z.string().optional(),
@@ -34,16 +38,29 @@ const querySchema = z.object({
  * Past-date pairs are immutable → long-lived cache headers (same rule as tiles).
  * With analysis parameters a cold cache recomputes instead of 404-ing — the
  * map overlay must come back exactly like the markers/list the client holds.
+ *
+ * Exports (GeoTIFF, or PNG with download=1) need the exports.change-map
+ * capability; the plain PNG image source only needs a session.
  */
 export async function GET(request: Request): Promise<Response> {
   const guard = rateLimitGuard(request);
   if (guard) return guard;
 
+  const url = new URL(request.url);
+  const isExport =
+    url.searchParams.get("format") === "geotiff" || url.searchParams.get("download") === "1";
+  if (isExport) {
+    const denied = await requireCapability(request, "exports.change-map");
+    if (denied) return denied;
+  }
+  const auth = await authorize(request);
+  if (auth instanceof NextResponse) return auth;
+
   try {
-    const url = new URL(request.url);
     const query = querySchema.parse({
       key: url.searchParams.get("key"),
       format: url.searchParams.get("format") ?? "png",
+      download: url.searchParams.get("download") ?? undefined,
       areaId: url.searchParams.get("areaId") ?? undefined,
       level: url.searchParams.get("level") ?? undefined,
       dateA: url.searchParams.get("dateA") ?? undefined,
@@ -54,7 +71,7 @@ export async function GET(request: Request): Promise<Response> {
       compositeWindowDays: url.searchParams.get("compositeWindowDays") ?? undefined,
     });
 
-    const entry = await entryForKey(query.key, query);
+    const entry = await entryForKey(query.key, query, { role: auth.role });
 
     const today = new Date().toISOString().slice(0, 10);
     const { dateA, dateB } = entry.stats.metadata;

@@ -51,8 +51,9 @@ export default function LandingCopy({
         className="rse-rise max-w-[54ch] text-[15px] leading-6 text-muted"
         style={{ animationDelay: "420ms" }}
       >
-        Compare any two dates across the state at {resolutionM} m detail, and get an AI-written
-        change report in your inbox.
+        Compare any two dates across the state at {resolutionM} m detail. Guests browse with
+        tighter limits — an SSO ID unlocks full-archive search, GeoTIFF exports, AI briefings and
+        emailed reports.
       </p>
 
       <ol

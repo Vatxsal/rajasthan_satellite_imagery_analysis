@@ -8,6 +8,7 @@ import {
   sameOriginGuard,
 } from "@/lib/server/api";
 import { getServerEnv } from "@/lib/env";
+import { requireCapability } from "@/lib/auth/guard";
 import { bboxAreaKm2 } from "@/lib/cdse/geometry";
 import { fieldsCache, fieldsCacheKey, FIELDS_CACHE_TTL_SECONDS } from "@/lib/cache";
 import { readConfidenceWindow } from "@/lib/fields/confidence";
@@ -63,6 +64,10 @@ export async function POST(request: Request): Promise<Response> {
     if (!env.FIELDS_ENABLED) {
       throw apiError(404, "FIELDS_DISABLED", "Field boundaries are not enabled on this deployment.");
     }
+
+    // SSO-only capability (401 without a session, 403 FORBIDDEN_ROLE for guests).
+    const locked = await requireCapability(request, "fields.pattern");
+    if (locked) return locked;
 
     const body = await readJsonBody(request, (raw) => fieldsRequestSchema.parse(raw));
     const bbox = body.bbox;

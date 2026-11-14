@@ -13,6 +13,7 @@ import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import Segmented from "@/components/ui/Segmented";
 import Slider from "@/components/ui/Slider";
+import FeatureLock, { useLocked } from "@/components/ui/FeatureLock";
 import { cn } from "@/components/ui/cn";
 import { bboxAreaKm2 } from "@/lib/cdse/geometry";
 import {
@@ -109,6 +110,7 @@ export default function FieldsPanel() {
   const runPattern = useFieldsStore((s) => s.runPattern);
   const selectedFieldId = useFieldsStore((s) => s.selectedFieldId);
   const selectField = useFieldsStore((s) => s.selectField);
+  const lockedPattern = useLocked("fields.pattern");
 
   const [pendingArea, setPendingArea] = useState<number | null>(null);
 
@@ -139,7 +141,7 @@ export default function FieldsPanel() {
     void loadFields(bbox);
   };
 
-  const canRunPattern = Boolean(fields && count > 0 && !patternRunning && !loading);
+  const canRunPattern = Boolean(fields && count > 0 && !patternRunning && !loading && !lockedPattern);
   const areaTooLarge = pendingArea !== null && pendingArea > 25 && !fields;
 
   return (
@@ -276,20 +278,28 @@ export default function FieldsPanel() {
               </label>
             </div>
 
-            <Button
-              variant="primary"
-              size="sm"
-              className="w-full"
-              onClick={() => void runPattern()}
-              disabled={!canRunPattern}
-            >
-              {patternRunning ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Play size={14} />
-              )}
-              {pattern ? "Re-run cropping pattern" : "Run cropping pattern"}
-            </Button>
+            <div className="flex items-center justify-between gap-2">
+              <Button
+                variant="primary"
+                size="sm"
+                className="w-full"
+                onClick={() => void runPattern()}
+                disabled={!canRunPattern}
+              >
+                {patternRunning ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Play size={14} />
+                )}
+                {pattern ? "Re-run cropping pattern" : "Run cropping pattern"}
+              </Button>
+              <FeatureLock capability="fields.pattern" label="Cropping pattern" />
+            </div>
+            {lockedPattern && (
+              <p className="text-[11px] text-muted">
+                Cropping-pattern analysis is part of the full-access SSO session.
+              </p>
+            )}
 
             {stageLabel && (
               <div className="space-y-1">

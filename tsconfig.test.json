@@ -12,6 +12,7 @@
   },
   "include": [
     "scripts/*.test.ts",
+    "scripts/test-session.ts",
     "scripts/validate.ts",
     "scripts/validate-fields.ts",
     "scripts/phase6.ts",
@@ -21,6 +22,7 @@
     "scripts/sharpen-measure.ts",
     "scripts/auth-hash.ts",
     "scripts/auth-new-user.ts",
+    "scripts/docs-permissions.ts",
     "scripts/validate-boundaries.ts",
     "validation/**/*.ts",
     "types/*.d.ts"

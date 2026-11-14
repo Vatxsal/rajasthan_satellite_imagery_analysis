@@ -28,6 +28,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import FeatureLock, { useLocked } from "@/components/ui/FeatureLock";
 import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
 import TurnstileWidget from "@/components/ui/TurnstileWidget";
@@ -118,6 +119,7 @@ export default function EmailReport() {
   // Cooldown lives here (not in the dialog) so it survives close/reopen.
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const handleClose = useCallback(() => setOpen(false), []);
+  const locked = useLocked("email.report");
 
   useEffect(() => {
     if (configCache) {
@@ -132,6 +134,10 @@ export default function EmailReport() {
       alive = false;
     };
   }, []);
+
+  if (locked) {
+    return <FeatureLock capability="email.report" label="Email report" />;
+  }
 
   if (!config?.enabled) return null;
 

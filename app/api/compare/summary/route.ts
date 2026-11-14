@@ -12,6 +12,9 @@ import {
 } from "@/lib/analysis/prompt";
 import { aiSummaryCache, summaryCacheKey } from "@/lib/cache";
 import { getServerEnv } from "@/lib/env";
+import { authorize, consumeRoleQuota, forbiddenRoleResponse } from "@/lib/auth/guard";
+import { bumpGlobalCounter } from "@/lib/auth/quota";
+import { can } from "@/lib/auth/permissions";
 import {
   assertGeminiKey,
   codedError,
@@ -89,11 +92,21 @@ export async function POST(request: Request): Promise<Response> {
   const guard = rateLimitGuard(request, "ai");
   if (guard) return guard;
 
+  // SSO-only capability (403 for guests) + daily AI quota (429), both before
+  // any Gemini work so locked/exhausted requests never touch the API key.
+  const auth = await authorize(request);
+  if (auth instanceof NextResponse) return auth;
+  if (!can(auth.role, "ai.summary")) return forbiddenRoleResponse("ai.summary");
+
   try {
     const env = getServerEnv();
-    const apiKey = assertGeminiKey(env.GEMINI_API_KEY);
 
     const body = await readJsonBody(request, (raw) => summaryBodySchema.parse(raw), SUMMARY_BODY_LIMIT);
+
+    const quotaDenied = consumeRoleQuota(auth, "aiSummary");
+    if (quotaDenied) return quotaDenied;
+
+    const apiKey = assertGeminiKey(env.GEMINI_API_KEY);
 
     const model = env.GEMINI_MODEL || SUMMARY_MODEL_FALLBACK;
     const cacheKey = summaryCacheKey(body);
@@ -108,7 +121,7 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ summary, cached: true, model, imageCount: 0, imagesFallback });
     }
 
-    const artifact = await entryForKey(body.analysisKey, body);
+    const artifact = await entryForKey(body.analysisKey, body, { role: auth.role });
 
     let images: GeminiImagePart[] = [];
     if (body.includeImages) {
@@ -159,6 +172,7 @@ export async function POST(request: Request): Promise<Response> {
       Buffer.from(JSON.stringify({ summary, imagesFallback }), "utf8"),
       SUMMARY_TTL_SECONDS,
     );
+    bumpGlobalCounter("ai");
     return NextResponse.json({ summary, cached: false, model, imageCount: images.length, imagesFallback });
   } catch (error) {
     return errorResponse(error);

@@ -21,7 +21,8 @@
     "email:test": "tsc -p tsconfig.test.json && node .test-build/scripts/send-test-report.js",
     "sharpen:measure": "tsc -p tsconfig.test.json && node .test-build/scripts/sharpen-measure.js",
     "auth:hash": "tsc -p tsconfig.test.json && node .test-build/scripts/auth-hash.js",
-    "auth:new-user": "tsc -p tsconfig.test.json && node .test-build/scripts/auth-new-user.js"
+    "auth:new-user": "tsc -p tsconfig.test.json && node .test-build/scripts/auth-new-user.js",
+    "docs:permissions": "tsc -p tsconfig.test.json && node .test-build/scripts/docs-permissions.js"
   },
   "engines": {
     "node": ">=20.9.0"

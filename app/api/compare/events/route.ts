@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { EVENTS_PAGE_LIMIT_DEFAULT, EVENTS_PAGE_LIMIT_MAX, pageEvents } from "@/lib/analysis/events";
+import { authorize, forbiddenRoleResponse } from "@/lib/auth/guard";
+import { can } from "@/lib/auth/permissions";
 import { errorResponse, rateLimitGuard } from "@/lib/server/api";
 import { entryForKey } from "@/lib/server/compareRun";
 
@@ -51,11 +53,15 @@ export async function GET(request: Request): Promise<Response> {
   const guard = rateLimitGuard(request);
   if (guard) return guard;
 
+  const auth = await authorize(request);
+  if (auth instanceof NextResponse) return auth;
+  if (!can(auth.role, "compare.view")) return forbiddenRoleResponse("compare.view");
+
   try {
     const url = new URL(request.url);
     const query = querySchema.parse(Object.fromEntries(url.searchParams));
 
-    const entry = await entryForKey(query.key, query);
+    const entry = await entryForKey(query.key, query, { role: auth.role });
 
     const page = pageEvents(entry.events.features, {
       limit: query.limit,
