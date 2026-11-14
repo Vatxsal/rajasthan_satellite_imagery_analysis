@@ -7,6 +7,7 @@ import { BarChart3, Crosshair, Download, Flame, Layers3, Loader2, Mail, MoveHori
 import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
 import Slider from "@/components/ui/Slider";
+import FeatureLock from "@/components/ui/FeatureLock";
 import { cn } from "@/components/ui/cn";
 import { downloadOverlayFile } from "@/lib/compare/export";
 import { focusChangeBbox } from "@/lib/compare/bridge";
@@ -576,7 +577,10 @@ function ChangeMapTab() {
 
       {/* ---------------------------------------------------- exports */}
       <section className="flex flex-col gap-2">
-        <p className="section-label">Export</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="section-label">Export</p>
+          <FeatureLock capability="exports.change-map" label="Change-map export" />
+        </div>
         <Button size="sm" className="w-full" disabled={exporting !== null} onClick={() => void doExport("png")}>
           <Download size={13} />
           {exporting === "png" ? (exportSlow ? "Re-running analysis…" : "Preparing…") : "Change map PNG"}
@@ -586,7 +590,8 @@ function ChangeMapTab() {
           {exporting === "geotiff" ? (exportSlow ? "Re-running analysis…" : "Preparing…") : "GeoTIFF"}
         </Button>
         <p className="text-[10px] leading-relaxed text-muted">
-          GeoTIFF is uint8 with nodata 255 outside the polygon — opens directly in QGIS.
+          GeoTIFF is uint8 with nodata 255 outside the polygon — opens directly in QGIS. Change-map
+          exports (PNG + GeoTIFF) require an SSO ID.
         </p>
         {exportError && <p className="text-[11px] text-danger">{exportError}</p>}
       </section>

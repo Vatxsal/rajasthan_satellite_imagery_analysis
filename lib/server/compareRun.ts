@@ -30,9 +30,10 @@ import { dataSource, getServerEnv, resolveChangeRules } from "@/lib/env";
 import { tehsilsFc } from "@/lib/data/boundaries";
 import { apiError } from "@/lib/server/api";
 import { resolveArea, type ResolvedArea } from "@/lib/server/areas";
-// Relative import: test builds compile lib files with commonjs, where the
+// Relative imports: test builds compile lib files with commonjs, where the
 // "@/lib/…" alias does not resolve at runtime.
 import { sharedInstance } from "../singleton";
+import { clampCompareTuning, type Role } from "../auth/permissions";
 
 /** Catalogue fetch cap per date — only existence + best-tile metadata needed. */
 const CATALOG_LIMIT = 50;
@@ -131,14 +132,23 @@ export function districtZones(area: ResolvedArea): Array<{
  * Parses + normalises the request into a cache-key-deriving plan.
  * Throws the same HTTP errors the analyze route used to throw pre-stream
  * (mock source, unknown area, oversized AOI), so failures stay plain HTTP.
+ *
+ * When `options.role` is passed, sensitivity/minPatchHa are clamped to the
+ * role's defaults BEFORE the cache key is derived — so a guest can never
+ * recompute an artifact with tuning their role may not set (the requested
+ * key would then mismatch and answer 400 KEY_PARAMS_MISMATCH).
  */
-export function resolveCompareParams(rawBody: unknown): ResolvedCompareParams {
+export function resolveCompareParams(
+  rawBody: unknown,
+  options: { role?: Role } = {},
+): ResolvedCompareParams {
   const env = getServerEnv();
   if (dataSource === "mock") {
     throw apiError(400, "CDSE_CONFIG", MOCK_SOURCE_MESSAGE);
   }
 
-  const body = compareParamsSchema.parse(rawBody);
+  const parsed = compareParamsSchema.parse(rawBody);
+  const body = options.role ? clampCompareTuning(options.role, parsed) : parsed;
   // Normalise order: A is always the earlier date.
   const [dateA, dateB] =
     body.dateA < body.dateB ? [body.dateA, body.dateB] : [body.dateB, body.dateA];
@@ -348,6 +358,7 @@ export async function ensureCompare(
 export async function entryForKey(
   requestedKey: string,
   rawParams: unknown,
+  options: { role?: Role } = {},
 ): Promise<CompareArtifactEntry> {
   const hasParams =
     !!rawParams &&
@@ -356,7 +367,7 @@ export async function entryForKey(
     (rawParams as { areaId: string }).areaId.length > 0;
 
   if (hasParams) {
-    const resolved = resolveCompareParams(rawParams);
+    const resolved = resolveCompareParams(rawParams, options);
     assertKeyMatches(requestedKey, resolved.key);
     const { entry } = await ensureCompare(resolved);
     return entry;

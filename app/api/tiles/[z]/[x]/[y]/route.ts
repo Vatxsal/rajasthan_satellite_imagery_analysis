@@ -14,6 +14,8 @@ import {
 } from "@/lib/cdse/tiles";
 import { diskCacheGet, diskCacheSet, imageryCache, tileCache, tileCacheKey } from "@/lib/cache";
 import { getServerEnv } from "@/lib/env";
+import { authorize, forbiddenZoomResponse } from "@/lib/auth/guard";
+import { bumpGlobalCounter } from "@/lib/auth/quota";
 import { errorResponse, rateLimitGuard } from "@/lib/server/api";
 import { resolveArea } from "@/lib/server/areas";
 
@@ -62,6 +64,7 @@ function tileResponse(buffer: Buffer, cacheStatus: string, date: string): NextRe
   const today = new Date().toISOString().slice(0, 10);
   // Past dates are immutable — cache aggressively (browsers + CDNs).
   const maxAge = date < today ? 31_536_000 : 3_600;
+  bumpGlobalCounter("render");
   return new NextResponse(new Uint8Array(buffer), {
     status: 200,
     headers: {
@@ -79,6 +82,11 @@ export async function GET(
 ): Promise<NextResponse> {
   const guard = rateLimitGuard(request, "tiles");
   if (guard) return guard;
+
+  // Role context first: every tile request needs a session (or the ambient
+  // guest when the auth gate is off), and the role's zoom cap applies below.
+  const auth = await authorize(request);
+  if (auth instanceof NextResponse) return auth;
 
   try {
     const url = new URL(request.url);
@@ -110,6 +118,7 @@ export async function GET(
           { status: 400 },
         );
       }
+      if (zLegacy > auth.limits.tileZoomMax) return forbiddenZoomResponse(zLegacy);
       const key = `wmtstile:${zLegacy}:${xLegacy}:${yLegacy}`;
       const cached = imageryCache.get(key);
       if (cached) return tileResponse(cached, "hit", "1970-01-01");
@@ -134,6 +143,9 @@ export async function GET(
     if (z < TILE_MIN_ZOOM || z > TILE_MAX_ZOOM) {
       return emptyTileResponse({ "X-Tile-Skip": "zoom-out-of-range" });
     }
+    // Role zoom cap (guest z≤12, SSO z≤14): refused like a missing
+    // capability so the client can set its source maxzoom from limits.
+    if (z > auth.limits.tileZoomMax) return forbiddenZoomResponse(z);
     const maxIndex = 2 ** z;
     if (x < 0 || y < 0 || x >= maxIndex || y >= maxIndex) {
       return NextResponse.json(

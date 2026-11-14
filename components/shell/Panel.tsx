@@ -2,11 +2,12 @@
 
 import dynamic from "next/dynamic";
 import { useEffect } from "react";
-import { Bookmark, Layers, PanelLeftClose, Ruler, SlidersHorizontal, Sprout, X } from "lucide-react";
+import { Activity, Bookmark, Layers, PanelLeftClose, Ruler, SlidersHorizontal, Sprout, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import FiltersPanel from "@/components/filters/FiltersPanel";
 import LayersPanel from "@/components/layers/LayersPanel";
 import { useFormFactor } from "@/lib/hooks/useMediaQuery";
+import { useCan } from "@/store/useSession";
 import { useAppStore, type SidebarTabId } from "@/store/useAppStore";
 import Button from "@/components/ui/Button";
 import BottomSheet from "@/components/ui/BottomSheet";
@@ -25,6 +26,10 @@ const SavedQueriesPanel = dynamic(() => import("@/components/filters/SavedQuerie
   ssr: false,
   loading: () => <PanelLoading />,
 });
+const StatusPanel = dynamic(() => import("@/components/system/StatusPanel"), {
+  ssr: false,
+  loading: () => <PanelLoading />,
+});
 
 const TITLES: Record<SidebarTabId, string> = {
   filters: "Search & filters",
@@ -32,14 +37,16 @@ const TITLES: Record<SidebarTabId, string> = {
   distance: "Measure",
   queries: "Saved queries",
   fields: "Fields & crops",
+  status: "System status",
 };
 
-const TAB_ITEMS: { id: SidebarTabId; label: string; Icon: LucideIcon }[] = [
+const TAB_ITEMS: { id: SidebarTabId; label: string; Icon: LucideIcon; ssoOnly?: boolean }[] = [
   { id: "filters", label: "Filters", Icon: SlidersHorizontal },
   { id: "layers", label: "Layers", Icon: Layers },
   { id: "fields", label: "Fields", Icon: Sprout },
   { id: "distance", label: "Measure", Icon: Ruler },
   { id: "queries", label: "Saved", Icon: Bookmark },
+  { id: "status", label: "Status", Icon: Activity, ssoOnly: true },
 ];
 
 function PanelLoading() {
@@ -61,6 +68,8 @@ function TabBody() {
       return <MeasurePanel />;
     case "queries":
       return <SavedQueriesPanel />;
+    case "status":
+      return <StatusPanel />;
     default:
       return <FiltersPanel />;
   }
@@ -76,13 +85,15 @@ function isTypingTarget(target: EventTarget | null): boolean {
 function PanelTabs() {
   const tab = useAppStore((s) => s.sidebarTab);
   const setSidebarTab = useAppStore((s) => s.setSidebarTab);
+  const canStatus = useCan("system.status");
+  const items = TAB_ITEMS.filter((item) => !item.ssoOnly || canStatus);
   return (
     <div
       role="tablist"
       aria-label="Panel sections"
       className="flex gap-1 border-b border-border px-2 pb-2 pt-1 max-lg:overflow-x-auto"
     >
-      {TAB_ITEMS.map(({ id, label, Icon }) => {
+      {items.map(({ id, label, Icon }) => {
         const active = tab === id;
         return (
           <button

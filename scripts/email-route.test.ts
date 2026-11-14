@@ -6,12 +6,15 @@ import { GET as getConfig } from "../app/api/compare/email/config/route";
 import { POST } from "../app/api/compare/email/route";
 import { emailHash } from "../lib/email";
 import { emailMarkSent, emailSendKey } from "../lib/email/dedupe";
+import { ssoCookie, useReadyAuthGate } from "./test-session";
 
 /** Route-level guard flow for POST /api/compare/email and the public
  *  capability endpoint. Every test stops before real analysis: the mock
  *  data-source guard (400 CDSE_CONFIG) is the "all guards passed" sentinel,
  *  Turnstile is exercised against a mocked siteverify endpoint, and quota
- *  state lives on globalThis so it can be reset between tests. */
+ *  state lives on globalThis so it can be reset between tests.
+ *  The auth gate is "ready" and every request carries an SSO session cookie
+ *  (the email report is an SSO-only capability — lib/auth/permissions.ts). */
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 const EMAIL_URL = "http://localhost/api/compare/email";
@@ -56,6 +59,7 @@ function resetState(): void {
   delete process.env.EMAIL_ALLOW_ANY_RECIPIENT;
   delete process.env.CHANGE_RULES; // schema default "fused" → route resolves engine v2
   setNodeEnv(ORIGINAL_NODE_ENV);
+  useReadyAuthGate();
 
   const holder = globalThis as unknown as EnvHolder;
   if (holder["rse.serverEnv"]) holder["rse.serverEnv"].cached = null;
@@ -67,13 +71,14 @@ function resetState(): void {
 
 beforeEach(resetState);
 
-function sendEmail(
+async function sendEmail(
   payload: Record<string, unknown>,
   headers: Record<string, string> = {},
 ): Promise<{ status: number; body: Record<string, unknown>; headers: Headers }> {
+  const cookie = await ssoCookie();
   const request = new Request(EMAIL_URL, {
     method: "POST",
-    headers: { "content-type": "application/json", ...headers },
+    headers: { "content-type": "application/json", cookie, ...headers },
     body: JSON.stringify(payload),
   });
   return POST(request).then(async (response) => ({
@@ -133,7 +138,7 @@ test("same-origin POSTs pass the origin guard", async () => {
 test("malformed JSON is rejected with INVALID_JSON", async () => {
   const request = new Request(EMAIL_URL, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", cookie: await ssoCookie() },
     body: "not-json{{",
   });
   const response = await POST(request);

@@ -8,6 +8,7 @@ import {
   sameOriginGuard,
 } from "@/lib/server/api";
 import { dataSource, getServerEnv } from "@/lib/env";
+import { requireCapability } from "@/lib/auth/guard";
 import { bboxAreaKm2 } from "@/lib/cdse/geometry";
 import {
   fieldsCache,
@@ -126,9 +127,10 @@ function sendCached(result: PatternResult, send: SendFrame): void {
  *   {"type":"month","index":0..11,"label":"YYYY-MM"}     (one per month)
  *   {"type":"result", …PatternResult}                    (final)
  *   {"type":"error","code","message"}                    (mid-stream failure)
- * Guard order: origin → rate limit → enabled → schema → area → cache →
- * PU pre-flight → fields build → no-fields → mock source. Errors before the
- * stream is open answer as normal { status, code, message } JSON.
+ * Guard order: origin → rate limit → enabled → role capability → schema →
+ * area → cache → PU pre-flight → fields build → no-fields → mock source.
+ * Errors before the stream is open answer as normal { status, code, message }
+ * JSON.
  */
 export async function POST(request: Request): Promise<Response> {
   const originGuard = sameOriginGuard(request);
@@ -141,6 +143,10 @@ export async function POST(request: Request): Promise<Response> {
     if (!env.FIELDS_ENABLED) {
       throw apiError(404, "FIELDS_DISABLED", "Field boundaries are not enabled on this deployment.");
     }
+
+    // SSO-only capability (401 without a session, 403 FORBIDDEN_ROLE for guests).
+    const locked = await requireCapability(request, "fields.pattern");
+    if (locked) return locked;
 
     const body = await readJsonBody(request, (raw) => patternRequestSchema.parse(raw));
     const bbox = body.bbox;

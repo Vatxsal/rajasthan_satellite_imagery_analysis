@@ -3,6 +3,8 @@
 import { Image as ImageIcon, Languages, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
+import FeatureLock, { useLocked } from "@/components/ui/FeatureLock";
+import { QuotaReadout } from "@/components/ui/FeatureLock";
 import { cn } from "@/components/ui/cn";
 import type { SummaryLanguage } from "@/lib/analysis/types";
 import { useCompareStore } from "@/store/useCompareStore";
@@ -28,11 +30,12 @@ export default function CompareSummaryTab() {
   const errorCode = useCompareStore((s) => s.summaryErrorCode);
   const imagesFallback = useCompareStore((s) => s.summaryImagesFallback);
   const fetchSummary = useCompareStore((s) => s.fetchSummary);
+  const lockedAi = useLocked("ai.summary");
 
   if (!result) return null;
 
   const loading = status === "loading";
-  const disabled = !result.aiEnabled;
+  const disabled = !result.aiEnabled || lockedAi;
   // The failure involved the preview images when a 400/bad-output hit while
   // they were attached — offer a statistics-only retry.
   const imagesInvolved =
@@ -100,21 +103,27 @@ export default function CompareSummaryTab() {
           </p>
         )}
         <div className="flex flex-col gap-2">
-          <Button
-            variant="primary"
-            size="sm"
-            className="w-full"
-            disabled={loading || disabled}
-            title={
-              disabled
-                ? "AI summaries are disabled on this deployment (no GEMINI_API_KEY)."
-                : "Ask the AI to explain this result in plain language."
-            }
-            onClick={() => void fetchSummary()}
-          >
-            <Sparkles size={13} />
-            {status === "done" ? "Regenerate summary" : "Generate summary"}
-          </Button>
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              className="w-full"
+              disabled={loading || disabled}
+              title={
+                lockedAi
+                  ? "AI summaries require an SSO ID."
+                  : disabled
+                    ? "AI summaries are disabled on this deployment (no GEMINI_API_KEY)."
+                    : "Ask the AI to explain this result in plain language."
+              }
+              onClick={() => void fetchSummary()}
+            >
+              <Sparkles size={13} />
+              {status === "done" ? "Regenerate summary" : "Generate summary"}
+            </Button>
+            <FeatureLock capability="ai.summary" label="AI summary" />
+          </div>
+          <QuotaReadout kind="aiSummary" className="text-center" />
           {loading && (
             <span className="flex items-center gap-1.5 text-xs text-muted">
               <Loader2 size={13} className="animate-spin" aria-hidden />
@@ -144,7 +153,13 @@ export default function CompareSummaryTab() {
             </Button>
           )}
         </div>
-        {disabled && (
+        {lockedAi && (
+          <p className="text-[11px] text-muted">
+            AI summaries are part of the full-access SSO session — guests browse maps and statistics
+            with tighter limits.
+          </p>
+        )}
+        {disabled && !lockedAi && (
           <p className="text-[11px] text-muted">
             This deployment has no AI key configured — set <code className="mono-nums">GEMINI_API_KEY</code>{" "}
             server-side to enable the summary.

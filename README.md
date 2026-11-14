@@ -29,11 +29,11 @@ Next.js 14 · TypeScript · Tailwind · MapLibre GL JS · Zustand · Radix UI ·
 | :-: | --- | --- |
 | 🔎 | **Filters & scenes** | District → Tehsil → ILR cascade, date presets and a calendar that highlights dates with scenes, cloud slider, true / false colour / NDVI. One card per acquisition day with cloud %, **coverage % of the area**, UTC time and scene id. |
 | 🗺️ | **Map & imagery** | OpenFreeMap basemap (English labels) with an Esri satellite switcher, **native-resolution 512 px tiles** (bicubic upscaling, zoom band up to z15) clipped to the selected area, opacity slider, legends, address search, boundary layers, light / dark themes. |
-| ⬇️ | **Downloads** | PNG preview; **GeoTIFF (visual, 8-bit)** that opens correctly anywhere; **GeoTIFF (analysis, FLOAT32 bands)** for processing; Copernicus Browser deep links with per-tile `.SAFE` ids. Clipped to the selection, up to 2500 px per side with a reduced-resolution option. |
-| 🔍 | **Change detection** | Compare two dates: **Swipe**, classified **Changes** map, **Stats** (by class and tehsil), **Events** list with numbered map markers, **Summary**, and PNG / GeoTIFF / CSV / GeoJSON exports. |
-| 🤖 | **AI summary** | Optional Gemini briefing of a comparison in English or हिन्दी, built only from the computed statistics. |
-| 📧 | **Email report** | One click (**Send report to mail**) emails the top events, stats, AI summary, change-map image, `events.csv` and a link that reopens the analysis. Fixed-recipient mode for production. |
-| 🔐 | **Access gate & landing** | `/login` hero page with shared-credential **Sign in**, **Continue as guest**, and an in-card **Request access** form that emails the admin. Email deep links survive the login bounce. |
+| ⬇️ | **Downloads** | PNG preview for every role; **GeoTIFF (visual, 8-bit)** and **GeoTIFF (analysis, FLOAT32 bands)** for SSO; Copernicus Browser deep links. Clipped to the selection, up to 2500 px per side (guest PNG capped at 1024 px). |
+| 🔍 | **Change detection** | Compare two dates: **Swipe**, classified **Changes** map, **Stats** (by class and tehsil), **Events** list with numbered map markers, **Summary**, and exports. Guests run tehsil / ILR at default tuning (3/day); SSO adds district level, adjustable sensitivity / minimum patch, PNG + GeoTIFF / CSV / GeoJSON exports (50/day). |
+| 🤖 | **AI summary** | SSO-only Gemini briefing of a comparison in English or हिन्दी, built only from the computed statistics (30/day). |
+| 📧 | **Email report** | SSO-only: one click (**Send report to mail**) emails the top events, stats, AI summary, change-map image, `events.csv` and a link that reopens the analysis. Fixed-recipient mode for production. |
+| 🔐 | **Access gate & roles** | `/login` hero page with shared-credential **Sign in**, **Continue as guest** (limited role), and an in-card **Request access** form. Locked features show a padlock popover; the API returns `403 FORBIDDEN_ROLE`. See [Roles & capabilities](#roles--capabilities). |
 
 ---
 
@@ -60,6 +60,7 @@ npm run email:preview  # render email fixtures to .email-preview/
 npm run email:test     # send one test report to EMAIL_TEST_RECIPIENT
 npm run auth:new-user  # mint an SSO entry: password printed once, JSON for SSO_USERS
 npm run auth:hash      # hash a password for an existing SSO_USERS entry (argv or stdin)
+npm run docs:permissions  # regenerate the capability table below from lib/auth/permissions.ts
 npx tsx scripts/fetch-districts-41.ts # refresh district boundaries + re-parent tehsils (not part of the build)
 npm run validate:boundaries           # validate counts, tiling, area and legacy deltas
 node scripts/smoke.browser.cjs      # headless-browser smoke test (needs Chrome)
@@ -237,11 +238,47 @@ Production runs behind a session gate (`middleware.ts`, Edge, jose-verified `rse
 | **ready** (gate on + valid secret) | Unauthenticated pages bounce to `/login?next=…`; unauthenticated APIs answer `401 UNAUTHENTICATED`; signed-in users opening `/login` are redirected home. |
 | **misconfigured** (gate on, secret missing/short) | **Fails closed:** a plain "Authentication is not configured" page (503) for every app route; only `/api/health/*` and static files stay up. |
 
+### Roles & capabilities
+
+Exactly two roles exist — **guest** and **sso**. There is no admin/member tier: every SSO session holds full access. The role is a JWT claim only (`SSO_USERS` carries no role field). Policy lives in `lib/auth/permissions.ts` (single source); routes enforce it through `lib/auth/guard.ts`, the UI mirrors it from `GET /api/auth/session`, and the table below is generated from the same file.
+
+<!-- BEGIN:capabilities -->
+| Capability | Guest | SSO |
+| --- | :-: | :-: |
+| Scene search | ✅ | ✅ |
+| View comparisons | ✅ | ✅ |
+| Run comparisons | ✅ | ✅ |
+| District-level compare | 🔒 | ✅ |
+| Adjust sensitivity | 🔒 | ✅ |
+| Adjust minimum patch | 🔒 | ✅ |
+| PNG preview download | ✅ | ✅ |
+| GeoTIFF download | 🔒 | ✅ |
+| Copernicus Browser links | ✅ | ✅ |
+| Change-map export (PNG/GeoTIFF) | 🔒 | ✅ |
+| CSV export | 🔒 | ✅ |
+| GeoJSON export | 🔒 | ✅ |
+| Imagery GeoTIFF export | 🔒 | ✅ |
+| AI summary | 🔒 | ✅ |
+| Email report | 🔒 | ✅ |
+| Fields / cropping pattern | 🔒 | ✅ |
+| System status panel | 🔒 | ✅ |
+
+**Guest limits:** 90-day window · tiles z≤12 · 30/day searches · 3/day analyses · 0/day AI · PNG ≤1024 px.
+
+**SSO limits:** full archive · tiles z≤14 · 300/day searches · 50/day analyses · 30/day AI · PNG ≤2500 px.
+
+🔒 = not available for that role (the API answers `403 FORBIDDEN_ROLE`; the UI shows a lock popover).
+Daily quotas are counted per session **and** per client IP for each UTC day.
+Generated from `lib/auth/permissions.ts` — run `npm run docs:permissions` after editing that file.
+<!-- END:capabilities -->
+
 **Sign-in options** on the landing page:
 
 - **Sign in** — shared credentials from `SSO_USERS` (scrypt-hashed; verified with a dummy-hash path so timing cannot enumerate users; 5 failures / 15 min per IP *and* per username → `429` + `Retry-After`). Every bad password answers the same `401 INVALID_CREDENTIALS`.
-- **Continue as guest** — a limited session (`guest:<uuid>` subject, `GUEST_ENABLED`, `AUTH_GUEST_PER_IP_PER_HOUR` quota) for people who just want the dashboard.
+- **Continue as guest** — a limited session (`guest:<uuid>` subject, `GUEST_ENABLED`, `AUTH_GUEST_PER_IP_PER_HOUR` quota). Guests get the guest column above: tighter search window, z≤12 tiles, tehsil/ILR compare only, default tuning, PNG ≤1024 px, no GeoTIFF / change-map export / AI / email / fields / system status.
 - **Request access** — posts to `/api/access-request`; the admin mailbox (`EMAIL_FIXED_RECIPIENT`) receives a formatted table (name, company, Reply-To = requester, reason, IST time, request id) plus a **how to create this user** hint. Nothing is stored, nothing is auto-replied.
+
+Locked UI controls show a padlock popover (Sign in / Request access); the API still returns the `403 FORBIDDEN_ROLE` contract if anything bypasses the UI.
 
 **Granting access to someone:**
 

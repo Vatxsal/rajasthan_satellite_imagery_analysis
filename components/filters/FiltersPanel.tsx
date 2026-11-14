@@ -9,6 +9,8 @@ import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
 import Select from "@/components/ui/Select";
 import Slider from "@/components/ui/Slider";
+import FeatureLock, { useLocked } from "@/components/ui/FeatureLock";
+import { QuotaReadout } from "@/components/ui/FeatureLock";
 import DateCalendar from "./DateCalendar";
 
 type DatePresetId = "30d" | "90d" | "6m" | "custom";
@@ -51,6 +53,7 @@ export default function FiltersPanel() {
   const runSearch = useAppStore((s) => s.runSearch);
   const clearFilters = useAppStore((s) => s.clearFilters);
   const setCalendarMonth = useAppStore((s) => s.setCalendarMonth);
+  const lockedDistrict = useLocked("compare.district");
 
   const tehsilsState = useTehsils(districtId);
   const ilrsState = useIlrs(tehsilId);
@@ -84,9 +87,12 @@ export default function FiltersPanel() {
           <h3 className="section-label">Area</h3>
 
           <div>
-            <label className="mb-1 block text-sm text-muted" htmlFor="filter-district">
-              District
-            </label>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <label className="text-sm text-muted" htmlFor="filter-district">
+                District
+              </label>
+              <FeatureLock capability="compare.district" label="District-level compare" />
+            </div>
             {districtsState.loading ? (
               <Select disabled placeholder="Loading…" value="" onChange={() => undefined} />
             ) : (
@@ -94,6 +100,7 @@ export default function FiltersPanel() {
                 id="filter-district"
                 value={districtId ?? ""}
                 placeholder="All Rajasthan"
+                disabled={lockedDistrict}
                 onChange={(event) => {
                   const value = event.target.value;
                   setDistrict(districts.find((d) => d.id === value) ?? null);
@@ -105,6 +112,11 @@ export default function FiltersPanel() {
                   </option>
                 ))}
               </Select>
+            )}
+            {lockedDistrict && (
+              <p className="mt-1 text-[11px] text-muted">
+                Guests compare at tehsil / ILR level — sign in for districts.
+              </p>
             )}
           </div>
 
@@ -304,6 +316,7 @@ export default function FiltersPanel() {
             Reset
           </Button>
         </div>
+        <QuotaReadout kind="search" className="mt-2" />
       </div>
     </div>
   );

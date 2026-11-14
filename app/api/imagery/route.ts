@@ -5,6 +5,9 @@ import { bboxFromGeometry, bboxAreaKm2, type ClipGeometry } from "@/lib/cdse/geo
 import { districtsFc, ilrsFc, resolveDistrictId, tehsilsFc } from "@/lib/data/boundaries";
 import { imageryCache, imageryCacheKey } from "@/lib/cache";
 import { getServerEnv } from "@/lib/env";
+import { authorize, forbiddenRoleResponse } from "@/lib/auth/guard";
+import { bumpGlobalCounter } from "@/lib/auth/quota";
+import { can, type Capability } from "@/lib/auth/permissions";
 import { binaryStreamResponse, errorResponse, rateLimitGuard, readJsonBody, sameOriginGuard } from "@/lib/server/api";
 
 export const runtime = "nodejs";
@@ -46,8 +49,10 @@ const postSchema = z.object({
   format: z.enum(["png", "tiff", "analysis"]).default("png"),
 });
 
-/** Downloads larger than this are blocked with a friendly message. */
-const MAX_DOWNLOAD_PX = 2500;
+/** PNG is open to every role; GeoTIFF renders (visual + analysis) are SSO. */
+function formatCapability(format: "png" | "tiff" | "analysis"): Capability {
+  return format === "png" ? "downloads.png" : "downloads.geotiff";
+}
 
 function geometryFromIds(params: {
   districtId?: string | null;
@@ -81,6 +86,7 @@ async function renderCached(
   const env = getServerEnv();
   const key = imageryCacheKey({ geometry, date, composite, size, format });
   const contentType = format === "png" ? "image/png" : "image/tiff";
+  bumpGlobalCounter("render");
 
   const cached = imageryCache.get(key);
   if (cached) {
@@ -122,12 +128,12 @@ function tooLargeResponse(geometry: ClipGeometry): NextResponse | null {
   return null;
 }
 
-function downloadTooLargeResponse(size: number): NextResponse | null {
-  if (size <= MAX_DOWNLOAD_PX) return null;
+function downloadTooLargeResponse(size: number, limit: number): NextResponse | null {
+  if (size <= limit) return null;
   return NextResponse.json(
     {
       code: "DOWNLOAD_TOO_LARGE",
-      message: `This download would be ${size}×${size} px (limit ${MAX_DOWNLOAD_PX}×${MAX_DOWNLOAD_PX} px). Select a tehsil or ILR area, or a smaller district.`,
+      message: `This download would be ${size}×${size} px (limit ${limit}×${limit} px). Select a tehsil or ILR area, or a smaller district.`,
     },
     { status: 400 },
   );
@@ -137,6 +143,9 @@ function downloadTooLargeResponse(size: number): NextResponse | null {
 export async function GET(request: Request): Promise<Response> {
   const guard = rateLimitGuard(request);
   if (guard) return guard;
+
+  const auth = await authorize(request);
+  if (auth instanceof NextResponse) return auth;
 
   try {
     const url = new URL(request.url);
@@ -150,6 +159,9 @@ export async function GET(request: Request): Promise<Response> {
       size: url.searchParams.get("size") ?? undefined,
       format: url.searchParams.get("format") ?? undefined,
     });
+
+    const capability = formatCapability(params.format);
+    if (!can(auth.role, capability)) return forbiddenRoleResponse(capability);
 
     let geometry: ClipGeometry | null = null;
     if (params.geometry) {
@@ -173,7 +185,7 @@ export async function GET(request: Request): Promise<Response> {
 
     const tooLarge = tooLargeResponse(geometry);
     if (tooLarge) return tooLarge;
-    const dlTooLarge = downloadTooLargeResponse(params.size);
+    const dlTooLarge = downloadTooLargeResponse(params.size, auth.limits.downloadMaxPx);
     if (dlTooLarge) return dlTooLarge;
 
     return await renderCached(geometry, params.date, params.composite, params.size, params.format);
@@ -189,8 +201,14 @@ export async function POST(request: Request): Promise<Response> {
   const guard = rateLimitGuard(request);
   if (guard) return guard;
 
+  const auth = await authorize(request);
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const body = await readJsonBody(request, (raw) => postSchema.parse(raw));
+
+    const capability = formatCapability(body.format);
+    if (!can(auth.role, capability)) return forbiddenRoleResponse(capability);
 
     const geometry: ClipGeometry | null = body.geometry
       ? (body.geometry as ClipGeometry)
@@ -204,7 +222,7 @@ export async function POST(request: Request): Promise<Response> {
 
     const tooLarge = tooLargeResponse(geometry);
     if (tooLarge) return tooLarge;
-    const dlTooLarge = downloadTooLargeResponse(body.size);
+    const dlTooLarge = downloadTooLargeResponse(body.size, auth.limits.downloadMaxPx);
     if (dlTooLarge) return dlTooLarge;
 
     return await renderCached(geometry, body.date, body.composite, body.size, body.format);

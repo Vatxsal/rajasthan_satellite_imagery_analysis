@@ -155,7 +155,7 @@ function scaleBarFor(bbox: [number, number, number, number]): { km: number; perc
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: { next?: string };
+  searchParams: { next?: string; mode?: string };
 }) {
   const env = getServerEnv();
   const secret = sessionSecret(env);
@@ -231,6 +231,7 @@ export default async function LoginPage({
             turnstileSiteKey={turnstileSiteKey}
             guestTtlHours={env.SESSION_TTL_GUEST_HOURS}
             ssoTtlHours={env.SESSION_TTL_SSO_HOURS}
+            initialMode={searchParams.mode === "request" ? "request" : "sso"}
           />
         </aside>
       </main>

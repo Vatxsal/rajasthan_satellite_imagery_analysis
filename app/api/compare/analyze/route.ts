@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import {
   apiError,
   errorResponse,
@@ -5,6 +6,9 @@ import {
   readJsonBody,
   sameOriginGuard,
 } from "@/lib/server/api";
+import { authorize, consumeRoleQuota, forbiddenRoleResponse } from "@/lib/auth/guard";
+import { bumpGlobalCounter } from "@/lib/auth/quota";
+import { can, clampCompareTuning } from "@/lib/auth/permissions";
 import { dataSource } from "@/lib/env";
 import {
   compareParamsQueryString,
@@ -42,13 +46,31 @@ export async function POST(request: Request): Promise<Response> {
   const guard = rateLimitGuard(request, "compare");
   if (guard) return guard;
 
+  const auth = await authorize(request);
+  if (auth instanceof NextResponse) return auth;
+
   try {
+    const body = await readJsonBody(request, (raw) => compareParamsSchema.parse(raw));
+
+    // Level gate: guests compare at tehsil/ILR only (raw requests included).
+    if (body.level === "district" && !can(auth.role, "compare.district")) {
+      return forbiddenRoleResponse("compare.district");
+    }
+
+    // Tuning clamp: roles without adjust capabilities run the defaults; the
+    // clamp happens before key derivation so every recompute path agrees.
+    const tuned = clampCompareTuning(auth.role, body);
+
+    // Daily analysis quota (per session AND per IP, UTC day) — consumed after
+    // validation so a malformed body never burns a unit.
+    const quotaDenied = consumeRoleQuota(auth, "compare");
+    if (quotaDenied) return quotaDenied;
+
     if (dataSource === "mock") {
       throw apiError(400, "CDSE_CONFIG", MOCK_SOURCE_MESSAGE);
     }
 
-    const body = await readJsonBody(request, (raw) => compareParamsSchema.parse(raw));
-    const resolved = resolveCompareParams(body);
+    const resolved = resolveCompareParams(tuned, { role: auth.role });
 
     // Cache hit → skip the catalogue entirely (strictly faster than before);
     // miss → validate scenes pre-stream so COMPARE_NO_SCENE stays an HTTP
@@ -84,6 +106,7 @@ export async function POST(request: Request): Promise<Response> {
             stats: entry.stats,
             events: entry.events.features.slice(0, ANALYZE_EVENTS_CAP),
           });
+          bumpGlobalCounter("analyze");
           controller.close();
         } catch (error) {
           console.error("[compare:analyze] failed:", error instanceof Error ? `${error.name}: ${error.message}` : error);

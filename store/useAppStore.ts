@@ -27,7 +27,7 @@ export interface AreaSelection {
   bbox: BBox;
 }
 
-export type SidebarTabId = "filters" | "layers" | "distance" | "queries" | "fields";
+export type SidebarTabId = "filters" | "layers" | "distance" | "queries" | "fields" | "status";
 
 /** Which bottom sheet owns the phone viewport (exactly one at a time). */
 export type SheetKey = "panel" | "results" | "compare";

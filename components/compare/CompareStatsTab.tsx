@@ -6,6 +6,7 @@ import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
 import Slider from "@/components/ui/Slider";
 import Tooltip from "@/components/ui/Tooltip";
+import FeatureLock, { useLocked } from "@/components/ui/FeatureLock";
 import { cn } from "@/components/ui/cn";
 import { focusHotspot, focusTehsil } from "@/lib/compare/bridge";
 import { eventsViewState, selectVisibleEvents } from "@/lib/compare/eventList";
@@ -123,6 +124,8 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const setInputMode = useCompareStore((s) => s.setInputMode);
   const setSensitivity = useCompareStore((s) => s.setSensitivity);
   const setMinPatchHa = useCompareStore((s) => s.setMinPatchHa);
+  const lockedSensitivity = useLocked("compare.adjust-sensitivity");
+  const lockedMinPatch = useLocked("compare.adjust-min-patch");
   const running = useCompareStore((s) => s.running);
   const stage = useCompareStore((s) => s.stage);
   const run = useCompareStore((s) => s.run);
@@ -755,19 +758,28 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                 </div>
               )}
               <div className="flex flex-col gap-1">
-                <p className="text-[11px] text-muted">Sensitivity</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-muted">Sensitivity</p>
+                  <FeatureLock capability="compare.adjust-sensitivity" label="Adjust sensitivity" />
+                </div>
                 <Segmented
                   ariaLabel="Change detection sensitivity"
                   value={sensitivity}
-                  onChange={(value) => setSensitivity(value as Sensitivity)}
+                  onChange={(value) => {
+                    if (lockedSensitivity) return;
+                    setSensitivity(value as Sensitivity);
+                  }}
                   options={[
                     { value: "low", label: "Low" },
                     { value: "medium", label: "Medium" },
                     { value: "high", label: "High" },
                   ]}
+                  className={lockedSensitivity ? "pointer-events-none opacity-50" : undefined}
                 />
                 <p className="text-[10px] text-muted">
-                  Low = fewer, stronger changes · Medium = balanced · High = more, weaker changes
+                  {lockedSensitivity
+                    ? "Guests run at the default sensitivity — sign in to adjust."
+                    : "Low = fewer, stronger changes · Medium = balanced · High = more, weaker changes"}
                 </p>
               </div>
               <div className="flex flex-col gap-1.5">
@@ -781,15 +793,20 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                       type="text"
                       inputMode="decimal"
                       value={patchDraft ?? minPatchHa.toFixed(2)}
-                      onChange={(event) => setPatchDraft(event.target.value)}
+                      onChange={(event) => {
+                        if (lockedMinPatch) return;
+                        setPatchDraft(event.target.value);
+                      }}
                       onBlur={commitPatchDraft}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") commitPatchDraft();
                       }}
+                      disabled={lockedMinPatch}
                       aria-label="Minimum patch size in hectares"
-                      className="mono-nums w-16 rounded border border-border bg-surface px-1.5 py-0.5 text-right text-[11px] text-text focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                      className="mono-nums w-16 rounded border border-border bg-surface px-1.5 py-0.5 text-right text-[11px] text-text focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-50"
                     />
                     <span className="text-[11px] text-muted">ha</span>
+                    <FeatureLock capability="compare.adjust-min-patch" label="Adjust minimum patch" />
                   </span>
                 </div>
                 <Slider
@@ -798,7 +815,11 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                   max={10}
                   step={0.01}
                   value={minPatchHa}
-                  onChange={(event) => setMinPatchHa(Number(event.target.value))}
+                  disabled={lockedMinPatch}
+                  onChange={(event) => {
+                    if (lockedMinPatch) return;
+                    setMinPatchHa(Number(event.target.value));
+                  }}
                 />
               </div>
               <Button

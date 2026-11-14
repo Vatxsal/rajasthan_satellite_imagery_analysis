@@ -12,6 +12,9 @@ import {
 } from "@/lib/analysis/prompt";
 import { aiSummaryCache, summaryCacheKey, type CompareArtifactEntry } from "@/lib/cache";
 import { buildShareUrl } from "@/lib/compare/shareLink";
+import { authorize, forbiddenRoleResponse } from "@/lib/auth/guard";
+import { bumpGlobalCounter } from "@/lib/auth/quota";
+import { can } from "@/lib/auth/permissions";
 import { dataSource, getServerEnv, resolveChangeRules } from "@/lib/env";
 import {
   assertEmailReady,
@@ -95,6 +98,12 @@ export async function POST(request: Request): Promise<Response> {
   if (apiGuard) return apiGuard;
   const compareGuard = rateLimitGuard(request, "compare");
   if (compareGuard) return compareGuard;
+
+  // SSO-only capability: guests never send reports (checked on raw requests
+  // too, before the honeypot/turnstile/quota machinery below).
+  const auth = await authorize(request);
+  if (auth instanceof NextResponse) return auth;
+  if (!can(auth.role, "email.report")) return forbiddenRoleResponse("email.report");
 
   const started = Date.now();
   try {
@@ -189,7 +198,7 @@ export async function POST(request: Request): Promise<Response> {
       throw apiError(400, "CDSE_CONFIG", MOCK_SOURCE_MESSAGE);
     }
 
-    const resolved = resolveCompareParams(body.params);
+    const resolved = resolveCompareParams(body.params, { role: auth.role });
 
     let entry: CompareArtifactEntry;
     try {
@@ -366,6 +375,7 @@ export async function POST(request: Request): Promise<Response> {
           `durationMs=${Date.now() - started}`,
       );
       emailMarkSent(sendKey);
+      bumpGlobalCounter("email");
       return NextResponse.json({ ok: true }, { status: 202 });
     } catch (error) {
       if (error instanceof EmailSendError) throw error;

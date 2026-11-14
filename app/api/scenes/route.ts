@@ -6,6 +6,8 @@ import { bboxAreaKm2, bboxFromGeometry, type ClipGeometry } from "@/lib/cdse/geo
 import { districtsFc, ilrsFc, resolveDistrictId, tehsilsFc } from "@/lib/data/boundaries";
 import type { Scene, SceneProduct } from "@/lib/data";
 import { getServerEnv } from "@/lib/env";
+import { authorize, consumeRoleQuota } from "@/lib/auth/guard";
+import { exceedsSearchWindow } from "@/lib/auth/permissions";
 import { errorResponse, rateLimitGuard, readJsonBody, sameOriginGuard } from "@/lib/server/api";
 
 export const runtime = "nodejs";
@@ -168,9 +170,29 @@ export async function POST(request: Request): Promise<NextResponse> {
   const guard = rateLimitGuard(request);
   if (guard) return guard;
 
+  const auth = await authorize(request);
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const env = getServerEnv();
     const body = await readJsonBody(request, (raw) => searchBodySchema.parse(raw));
+
+    // Role limit: guest searches span at most 90 days (rejected, not clamped,
+    // so the UI can constrain its date pickers instead of silently re-dating).
+    if (exceedsSearchWindow(auth.role, body.fromDate, body.toDate)) {
+      const window = auth.limits.searchWindowDays;
+      return NextResponse.json(
+        {
+          code: "SEARCH_WINDOW_EXCEEDED",
+          message: `Scene search is limited to a ${window}-day window here. Sign in with an SSO ID for the full archive.`,
+        },
+        { status: 400 },
+      );
+    }
+
+    // Daily search quota (per session AND per IP, UTC day).
+    const quotaDenied = consumeRoleQuota(auth, "search");
+    if (quotaDenied) return quotaDenied;
 
     const resolved = findGeometry(body);
     if (!resolved) {

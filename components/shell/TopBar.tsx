@@ -5,12 +5,13 @@ import { FileImage, FileSpreadsheet, Loader2, LogIn, LogOut, PanelLeft, Moon, Su
 import { isDemoData } from "@/lib/data";
 import { togglePanelSheet } from "@/lib/sheets";
 import { useActiveScene, useActiveSelection, useAppStore } from "@/store/useAppStore";
-import { useSession } from "@/store/useSession";
+import { useSession, useLocked } from "@/store/useSession";
 import { useTheme } from "@/store/useTheme";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/Menu";
 import Tooltip from "@/components/ui/Tooltip";
+import { QuotaReadout } from "@/components/ui/FeatureLock";
 
 function Breadcrumb() {
   const districtSel = useAppStore((s) => s.districtSel);
@@ -96,6 +97,7 @@ function UserMenu() {
   const role = useSession((s) => s.role);
   const name = useSession((s) => s.name);
   const fetchSession = useSession((s) => s.fetchSession);
+  const lockedGeoTiff = useLocked("downloads.geotiff");
   const signOut = useSession((s) => s.signOut);
 
   useEffect(() => {
@@ -193,12 +195,18 @@ function UserMenu() {
           {downloadBusy === "png" ? "Preparing…" : "PNG (visual)"}
         </MenuItem>
         <MenuItem
-          disabled={!activeScene || !selection || downloadBusy !== null}
+          disabled={!activeScene || !selection || downloadBusy !== null || lockedGeoTiff}
+          title={lockedGeoTiff ? "GeoTIFF download requires an SSO ID" : undefined}
           onSelect={() => handleDownload("tiff")}
         >
           {downloadBusy === "tiff" ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
-          {downloadBusy === "tiff" ? "Preparing…" : "GeoTIFF (10 m)"}
+          {downloadBusy === "tiff" ? "Preparing…" : lockedGeoTiff ? "GeoTIFF (SSO only)" : "GeoTIFF (10 m)"}
         </MenuItem>
+        <MenuSeparator />
+        <MenuLabel>
+          <QuotaReadout kind="search" />
+          <QuotaReadout kind="compare" className="mt-0.5" />
+        </MenuLabel>
         <MenuSeparator />
         {role === "guest" && (
           <MenuItem onSelect={goSignIn}>
