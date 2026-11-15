@@ -14,7 +14,7 @@ const TONE_ICONS = {
 
 function ToastRow({ toast }: { toast: ToastItem }) {
   const dismissToast = useAppStore((s) => s.dismissToast);
-  const { id, tone, message, duration } = toast;
+  const { id, tone, message, duration, action } = toast;
   const Icon = TONE_ICONS[tone];
 
   useEffect(() => {
@@ -43,6 +43,18 @@ function ToastRow({ toast }: { toast: ToastItem }) {
         aria-hidden
       />
       <span className="min-w-0 flex-1 text-text">{message}</span>
+      {action && (
+        <button
+          type="button"
+          className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent transition-colors duration-150 hover:bg-surface-2"
+          onClick={() => {
+            dismissToast(id);
+            action.onClick();
+          }}
+        >
+          {action.label}
+        </button>
+      )}
       <button
         type="button"
         aria-label="Dismiss notification"
@@ -70,16 +82,17 @@ export default function ToastStack() {
 
   if (toasts.length === 0) return null;
 
+  const ATTRIBUTION_CLEARANCE_PX = 32;
   const bottom =
     factor === "desktop"
       ? stripOpen && (searching || hasSearched)
-        ? stripHeightPx + 12
-        : 12
-      : "calc(var(--tabbar-h, 0px) + var(--sheet-h, 0px) + 12px)";
+        ? stripHeightPx + ATTRIBUTION_CLEARANCE_PX
+        : ATTRIBUTION_CLEARANCE_PX
+      : `calc(var(--tabbar-h, 0px) + var(--sheet-h, 0px) + ${ATTRIBUTION_CLEARANCE_PX}px)`;
 
   return (
     <div
-      className="fixed left-1/2 z-[90] flex -translate-x-1/2 flex-col items-center gap-2 transition-[bottom] duration-150 ease-out"
+      className="pointer-events-auto fixed left-1/2 z-[90] flex -translate-x-1/2 flex-col items-center gap-2 transition-[bottom] duration-150 ease-out"
       style={{ bottom }}
       role="status"
       aria-live="polite"

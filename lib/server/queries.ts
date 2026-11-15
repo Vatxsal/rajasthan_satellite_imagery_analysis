@@ -6,6 +6,7 @@ import { queriesRepositoryFor, resolveQueriesStore } from "@/lib/server/supabase
 import { resolveArea } from "@/lib/server/areas";
 import {
   isQueryRepoError,
+  STATE_AREA_ID,
   type QueryAreaLevel,
   type QueryRepository,
 } from "@/lib/queries/repository";
@@ -13,8 +14,8 @@ import {
 /** Body cap for saved-query payloads (largest legit body: 200-char description). */
 export const MAX_QUERY_BODY_BYTES = 16_384;
 
-/** Whole-state queries reserve areaId "rj" — no boundary feature exists for it. */
-export const STATE_AREA_ID = "rj";
+/** Re-exported from the shared contract (the client save dialog uses it too). */
+export { STATE_AREA_ID };
 
 export interface QueriesContext {
   auth: AuthzContext;

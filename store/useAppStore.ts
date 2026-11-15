@@ -46,6 +46,8 @@ export interface ToastItem {
   message: string;
   /** ms until auto-dismiss; null = stays until dismissed or updated. */
   duration: number | null;
+  /** Optional inline action (e.g. Undo); clicking dismisses the toast first. */
+  action?: { label: string; onClick: () => void };
 }
 
 /** Reduced-resolution download the user must confirm before it runs. */
@@ -171,7 +173,12 @@ interface AppState {
 
   // toasts ------------------------------------------------------------------
   toasts: ToastItem[];
-  pushToast: (toast: { tone: ToastTone; message: string; duration?: number | null }) => number;
+  pushToast: (toast: {
+    tone: ToastTone;
+    message: string;
+    duration?: number | null;
+    action?: { label: string; onClick: () => void };
+  }) => number;
   updateToast: (
     id: number,
     patch: { tone?: ToastTone; message?: string; duration?: number | null },
@@ -411,9 +418,9 @@ export const useAppStore = create<AppState>((set, get) => {
   setImageryError: (message) => set({ imageryError: message }),
 
   toasts: [],
-  pushToast: ({ tone, message, duration = 6000 }) => {
+  pushToast: ({ tone, message, duration = 6000, action }) => {
     const id = ++toastSeq;
-    set((s) => ({ toasts: [...s.toasts, { id, tone, message, duration }] }));
+    set((s) => ({ toasts: [...s.toasts, { id, tone, message, duration, action }] }));
     return id;
   },
   updateToast: (id, patch) =>

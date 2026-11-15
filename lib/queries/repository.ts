@@ -29,6 +29,9 @@ export type QueryStore = "local" | "supabase";
 export const QUERY_AREA_LEVELS = ["district", "tehsil", "ilr", "state"] as const;
 export type QueryAreaLevel = (typeof QUERY_AREA_LEVELS)[number];
 
+/** Whole-state queries reserve areaId "rj" — no boundary feature exists for it. */
+export const STATE_AREA_ID = "rj";
+
 export const QUERIES_STORAGE_PREFIX = "rie:queries:v1:";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

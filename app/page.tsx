@@ -11,6 +11,7 @@ import CompareDrawer from "@/components/compare/CompareDrawer";
 import CompareMapController from "@/components/compare/CompareMapController";
 import FieldsMapController from "@/components/fields/FieldsMapController";
 import DownloadDialog from "@/components/scenes/DownloadDialog";
+import SaveQueryDialog from "@/components/filters/SaveQueryDialog";
 import ShareLinkLoader from "@/components/ShareLinkLoader";
 import ToastStack from "@/components/ui/ToastStack";
 import { useIsDesktop } from "@/lib/hooks/useMediaQuery";
@@ -42,6 +43,8 @@ export default function Page() {
       <BottomTabBar />
       <ToastStack />
       <DownloadDialog />
+      {/* Saved-query save/edit dialog (opened from Filters or the Saved tab). */}
+      <SaveQueryDialog />
       {/* Renders null: reopens an emailed report from ?a=&l=&A=&B=… links. */}
       <ShareLinkLoader />
     </div>

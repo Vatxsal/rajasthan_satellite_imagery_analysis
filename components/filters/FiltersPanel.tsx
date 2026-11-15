@@ -1,11 +1,12 @@
 "use client";
 
-import { RotateCcw, Search } from "lucide-react";
+import { Bookmark, RotateCcw, Search } from "lucide-react";
 import type { CompositeId } from "@/lib/data";
 import { COMPOSITE_OPTIONS } from "@/lib/data/composites";
 import { useDistricts, useIlrs, useTehsils } from "@/lib/hooks/useAreas";
 import { DATE_RANGE_DAYS, type DateRangePresetId } from "@/lib/prefs/range";
 import { useAppStore } from "@/store/useAppStore";
+import { useQueriesStore } from "@/store/useQueriesStore";
 import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
 import Select from "@/components/ui/Select";
@@ -315,6 +316,15 @@ export default function FiltersPanel() {
           <Button variant="ghost" onClick={clearFilters} aria-label="Reset filters">
             <RotateCcw size={14} />
             Reset
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Save current filters as a query"
+            title="Save query"
+            onClick={() => useQueriesStore.getState().openSave()}
+          >
+            <Bookmark size={14} />
           </Button>
         </div>
         <QuotaReadout kind="search" className="mt-2" />
