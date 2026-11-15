@@ -178,7 +178,19 @@ export class QueryRepoError extends Error {
     super(message);
     this.name = "QueryRepoError";
     this.code = code;
+    // ES5-downlevelled `class extends Error` (the tsc test build) returns a
+    // plain Error whose prototype chain is lost — restore it so instanceof holds.
+    Object.setPrototypeOf(this, QueryRepoError.prototype);
   }
+}
+
+/** Target-safe guard: also holds if a bundler ever loads this module twice. */
+export function isQueryRepoError(error: unknown): error is QueryRepoError {
+  return (
+    error instanceof Error &&
+    error.name === "QueryRepoError" &&
+    typeof (error as { code?: unknown }).code === "string"
+  );
 }
 
 /**
@@ -251,9 +263,11 @@ export interface LocalRepositoryOptions {
 /**
  * In-memory mirror of every storage key written this session: hosts node/test
  * sessions outright and keeps data alive when a localStorage write fails
- * (quota/private mode) mid-session.
+ * (quota/private mode) mid-session. Reads prefer the real storage (a cleared
+ * entry stays cleared) unless a write failed — then the mirror is authoritative.
  */
 const memoryStore = new Map<string, string>();
+const memoryAuthoritative = new Set<string>();
 
 /** Storage probe that tolerates privacy modes (access can throw). */
 function probeLocalStorage(): StorageLike | null {
@@ -295,9 +309,10 @@ export function localRepository(
 
   function readText(): string | null {
     if (storage) {
+      if (memoryAuthoritative.has(key)) return memoryStore.get(key) ?? null;
       try {
-        const text = storage.getItem(key);
-        if (text !== null) return text;
+        // null here is authoritative: the entry was never written or was cleared.
+        return storage.getItem(key);
       } catch {
         // Unreadable storage — fall through to the session mirror.
       }
@@ -311,8 +326,10 @@ export function localRepository(
     if (storage) {
       try {
         storage.setItem(key, text);
+        memoryAuthoritative.delete(key);
       } catch {
         // Quota/full: the mirror keeps this session working.
+        memoryAuthoritative.add(key);
       }
     }
   }
@@ -490,7 +507,7 @@ export function supabaseRepository(
 ): QueryRepository {
   const fetchImpl: typeof fetch = options.fetchImpl ?? fetch;
   const base = `${connection.url.replace(/\/+$/, "")}/rest/v1/${SAVED_QUERIES_TABLE}`;
-  const scope = `owner=${encodeURIComponent(owner)}`;
+  const scope = `owner=eq.${encodeURIComponent(owner)}`;
   const headers: Record<string, string> = {
     apikey: connection.serviceRoleKey,
     Authorization: `Bearer ${connection.serviceRoleKey}`,
