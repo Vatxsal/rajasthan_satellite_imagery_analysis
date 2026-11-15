@@ -263,9 +263,9 @@ Exactly two roles exist — **guest** and **sso**. There is no admin/member tier
 | Fields / cropping pattern | 🔒 | ✅ |
 | System status panel | 🔒 | ✅ |
 
-**Guest limits:** 90-day window · tiles z≤12 · 30/day searches · 3/day analyses · 0/day AI · PNG ≤1024 px.
+**Guest limits:** 90-day window · tiles z≤12 · 30/day searches · 3/day analyses · 0/day AI · PNG ≤1024 px · 5 saved queries.
 
-**SSO limits:** full archive · tiles z≤14 · 300/day searches · 50/day analyses · 30/day AI · PNG ≤2500 px.
+**SSO limits:** full archive · tiles z≤14 · 300/day searches · 50/day analyses · 30/day AI · PNG ≤2500 px · 50 saved queries.
 
 🔒 = not available for that role (the API answers `403 FORBIDDEN_ROLE`; the UI shows a lock popover).
 Daily quotas are counted per session **and** per client IP for each UTC day.

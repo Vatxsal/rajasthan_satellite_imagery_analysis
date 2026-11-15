@@ -109,6 +109,8 @@ export interface RoleLimits {
   aiSummariesPerDay: number;
   /** Max edge length in px for /api/imagery renders. */
   downloadMaxPx: number;
+  /** Max saved queries per user (guests: this browser only, SSO: profile). */
+  savedQueriesMax: number;
 }
 
 export interface RolePolicy {
@@ -124,7 +126,8 @@ export interface RolePolicy {
  *
  * Quota note: guest compares are 3/day, SSO 50/day; guest has no AI summary,
  * email, exports, fields or system status at all. Guest search is capped at a
- * 90-day window, z12 tiles and 1024 px PNG previews.
+ * 90-day window, z12 tiles and 1024 px PNG previews. Saved queries follow the
+ * same split: 5 kept in the guest's browser, 50 per SSO profile.
  */
 export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
   guest: {
@@ -157,6 +160,7 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       comparePerDay: 3,
       aiSummariesPerDay: 0,
       downloadMaxPx: 1024,
+      savedQueriesMax: 5,
     },
   },
   sso: {
@@ -189,6 +193,7 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       comparePerDay: 50,
       aiSummariesPerDay: 30,
       downloadMaxPx: 2500,
+      savedQueriesMax: 50,
     },
   },
 };
