@@ -36,6 +36,7 @@ import { cn } from "@/components/ui/cn";
 import type { SummaryLanguage } from "@/lib/analysis/types";
 import { analysisParamsFromMetadata } from "@/lib/compare/params";
 import { isValidEmail, maskEmail } from "@/lib/email/addressCore";
+import { IN_FLIGHT, beginInFlight } from "@/lib/inFlight";
 import { useCompareStore } from "@/store/useCompareStore";
 
 interface EmailConfig {
@@ -277,10 +278,12 @@ function EmailDialog({
     setStatus("sending");
     setErrorCode(null);
     setServerMessage(null);
+    const controller = beginInFlight(IN_FLIGHT.email);
     try {
       const response = await fetch("/api/compare/email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           // Fixed mode must never carry an email field — the server rejects it.
           ...(fixed ? {} : { email: recipient }),
@@ -292,12 +295,15 @@ function EmailDialog({
           ...(website ? { website } : {}),
         }),
       });
+      // Aborted (home reset closed the drawer) — leave state to the reset.
+      if (controller.signal.aborted) return;
       const payload = (await response.json().catch(() => null)) as {
         ok?: boolean;
         alreadySent?: boolean;
         code?: string;
         message?: string;
       } | null;
+      if (controller.signal.aborted) return;
       if (response.ok && payload?.ok) {
         setStatus(payload.alreadySent ? "alreadySent" : "success");
         if (!fixed) setSentTo(recipient);
@@ -309,6 +315,7 @@ function EmailDialog({
       setErrorCode(typeof payload?.code === "string" ? payload.code : `HTTP_${response.status}`);
       setServerMessage(typeof payload?.message === "string" ? payload.message : null);
     } catch {
+      if (controller.signal.aborted) return;
       setStatus("error");
       setErrorCode("NETWORK");
       setServerMessage("Couldn't reach the server. Check your connection and try again.");

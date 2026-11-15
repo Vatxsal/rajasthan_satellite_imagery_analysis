@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FileImage, FileSpreadsheet, Loader2, LogIn, LogOut, PanelLeft, Moon, Sun } from "lucide-react";
 import { isDemoData } from "@/lib/data";
+import { WORDMARK_LABEL, WORDMARK_TEXT } from "@/lib/brand";
+import { goSignIn } from "@/lib/auth/nav";
 import { togglePanelSheet } from "@/lib/sheets";
 import { useActiveScene, useActiveSelection, useAppStore } from "@/store/useAppStore";
 import { useSession, useLocked } from "@/store/useSession";
@@ -12,6 +16,8 @@ import Chip from "@/components/ui/Chip";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/Menu";
 import Tooltip from "@/components/ui/Tooltip";
 import { QuotaReadout } from "@/components/ui/FeatureLock";
+import ProfileDialog from "@/components/shell/ProfileDialog";
+import PreferencesDialog from "@/components/shell/PreferencesDialog";
 
 function Breadcrumb() {
   const districtSel = useAppStore((s) => s.districtSel);
@@ -88,6 +94,24 @@ function ThemeToggle() {
   );
 }
 
+/**
+ * Open/close the dialog fragment (`#profile` / `#preferences`) with
+ * replaceState — deep links work without adding a history entry per toggle,
+ * and a foreign fragment is never cleared by closing our dialog.
+ */
+function setDialogFragment(hash: string | null, own: string): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (hash) {
+    if (url.hash === hash) return;
+    url.hash = hash;
+    window.history.replaceState(null, "", url);
+    return;
+  }
+  if (url.hash !== own) return;
+  window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+}
+
 function UserMenu() {
   const activeScene = useActiveScene();
   const selection = useActiveSelection();
@@ -99,6 +123,35 @@ function UserMenu() {
   const fetchSession = useSession((s) => s.fetchSession);
   const lockedGeoTiff = useLocked("downloads.geotiff");
   const signOut = useSession((s) => s.signOut);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  const profileSynced = useRef(false);
+  const prefsSynced = useRef(false);
+
+  // Deep links: /#profile or /#preferences opens that dialog on load.
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash === "#preferences") setPrefsOpen(true);
+    else if (hash === "#profile") setProfileOpen(true);
+  }, []);
+
+  // Keep the fragment in step with the dialogs: open → set, close → clear
+  // (only our own fragment). replaceState keeps history unpolluted; the first
+  // run of each effect belongs to the deep-link check above, so it is skipped.
+  useEffect(() => {
+    if (!profileSynced.current) {
+      profileSynced.current = true;
+      return;
+    }
+    setDialogFragment(profileOpen ? "#profile" : null, "#profile");
+  }, [profileOpen]);
+  useEffect(() => {
+    if (!prefsSynced.current) {
+      prefsSynced.current = true;
+      return;
+    }
+    setDialogFragment(prefsOpen ? "#preferences" : null, "#preferences");
+  }, [prefsOpen]);
 
   useEffect(() => {
     if (status === "unknown") void fetchSession();
@@ -140,12 +193,8 @@ function UserMenu() {
     ]),
   ].join(" ");
 
-  const goSignIn = () => {
-    const next = `${window.location.pathname}${window.location.search}`;
-    window.location.assign(next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`);
-  };
-
   return (
+    <>
     <Menu>
       <MenuTrigger asChild>
         <button
@@ -181,8 +230,8 @@ function UserMenu() {
               : "Checking session…"}
         </MenuLabel>
         <MenuSeparator />
-        <MenuItem>Profile</MenuItem>
-        <MenuItem>Preferences</MenuItem>
+        <MenuItem onSelect={() => setProfileOpen(true)}>Profile</MenuItem>
+        <MenuItem onSelect={() => setPrefsOpen(true)}>Preferences</MenuItem>
         <MenuSeparator />
         <MenuLabel>
           {activeScene ? `Download ${activeScene.date}` : "Download active scene"}
@@ -226,7 +275,10 @@ function UserMenu() {
           </MenuItem>
         )}
       </MenuContent>
-    </Menu>
+      </Menu>
+      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
+      <PreferencesDialog open={prefsOpen} onOpenChange={setPrefsOpen} />
+    </>
   );
 }
 
@@ -239,6 +291,44 @@ function DataChip() {
     <Chip tone="success" className="hidden text-[11px] sm:inline-flex" aria-label="Live Copernicus data">
       Live data
     </Chip>
+  );
+}
+
+/**
+ * Top-left wordmark → home. Left clicks run the SPA home reset (abort
+ * requests, clear selections, fly the map home, strip deep-link params) and
+ * push "/" through the Next router — no reload, the session is untouched.
+ * Modified/middle clicks return early so the native link takes over
+ * (new tab/window, download, …).
+ */
+function Wordmark() {
+  const router = useRouter();
+  const resetToHome = useAppStore((s) => s.resetToHome);
+
+  const onWordmarkClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    resetToHome({ replaceUrl: (url) => router.replace(url) });
+  };
+
+  return (
+    <Link
+      href="/"
+      aria-label={WORDMARK_LABEL}
+      onClick={onWordmarkClick}
+      className="truncate font-semibold tracking-tight text-text"
+    >
+      {WORDMARK_TEXT}
+    </Link>
   );
 }
 
@@ -264,8 +354,8 @@ export default function TopBar() {
         {selection ? (
           <Breadcrumb />
         ) : (
-          <h1 className="truncate text-base font-semibold tracking-tight text-text">
-            Rajasthan Explorer
+          <h1 className="min-w-0 text-base">
+            <Wordmark />
           </h1>
         )}
         <DataChip />
@@ -273,8 +363,8 @@ export default function TopBar() {
 
       {/* Desktop: full wordmark left, selection path centered. */}
       <div className="hidden min-w-0 items-center gap-2 lg:flex">
-        <h1 className="truncate text-base font-semibold tracking-tight text-text">
-          Rajasthan Imagery Explorer
+        <h1 className="min-w-0 text-base">
+          <Wordmark />
         </h1>
         <DataChip />
       </div>

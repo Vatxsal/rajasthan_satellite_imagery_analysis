@@ -17,6 +17,11 @@ interface BottomSheetProps {
   className?: string;
   /** Snap index the sheet opens at (0 = 30%, 1 = 60%, 2 = 90%). */
   initialSnap?: number;
+  /**
+   * Bumped by resetToHome: each new value returns the sheet to its collapsed
+   * (30%) snap and cancels any in-progress drag height. 0/undefined = idle.
+   */
+  collapsedSnapNonce?: number;
 }
 
 /**
@@ -34,6 +39,7 @@ export default function BottomSheet({
   children,
   className,
   initialSnap = 1,
+  collapsedSnapNonce = 0,
 }: BottomSheetProps) {
   const [snapIndex, setSnapIndex] = useState(initialSnap);
   const [dragHeight, setDragHeight] = useState<number | null>(null);
@@ -42,6 +48,14 @@ export default function BottomSheet({
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const lastHeightRef = useRef(0);
   const didDragRef = useRef(false);
+
+  // Home reset: collapse back to the smallest snap (works whether or not
+  // the sheet is mounted/open at that moment).
+  useEffect(() => {
+    if (!collapsedSnapNonce) return;
+    setSnapIndex(0);
+    setDragHeight(null);
+  }, [collapsedSnapNonce]);
 
   // Publish the measured height while open; clear on close (only if this
   // sheet still owns the slot — sheets are mutually exclusive).

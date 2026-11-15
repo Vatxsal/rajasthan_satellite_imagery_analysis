@@ -303,6 +303,18 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 
 ---
 
+## 🏠 Home, profile and preferences
+
+The top bar ties the app together:
+
+- **Home link** — the wordmark *Rajasthan Imagery Explorer* (top-left) returns to a clean home state: selections, scenes, compare results and in-flight requests are cleared, the preferred filters are re-applied, and the URL becomes `/`. Modified or middle clicks keep the browser's native open-in-new-tab behaviour.
+- **Profile** (user menu) — identity, role, session issued/expires times (in your preferred time zone), today's binding quotas, and every capability with an available/locked chip. SSO sessions sign out here; guests get **Sign in with SSO** / **Request access**. Passwords are managed by the administrator, never in the dialog.
+- **Preferences** (user menu) — six sections, **instantly applied, no Save button**: Appearance (theme, text size, reduced motion), Map defaults (basemap, composite, date range, cloud cover, overlay, visibility boost — applied at app start or Home), Units and format (area, coordinates, time zone, date format), Change detection and Reports (SSO-only; guests see the locked sections), and Data (Reset to defaults / Clear saved data).
+
+Preferences are stored **per account, in this browser only** (`rie:prefs:v1:<subject>` — no secrets, never uploaded) and sync across open tabs. Unit and format choices change the interface only — statistics, exports and emails always use canonical hectares and UTC. Opening `/#profile` or `/#preferences` lands directly on that dialog; closing it clears the fragment.
+
+---
+
 ## ⚠️ Known Limitations
 
 | Area | Limitation |

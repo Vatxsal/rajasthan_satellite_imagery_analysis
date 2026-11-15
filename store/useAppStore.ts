@@ -9,7 +9,10 @@ import type {
   Tehsil,
 } from "@/lib/data";
 import { dataAdapter } from "@/lib/data";
+import { IN_FLIGHT, beginInFlight, abortInFlightAll } from "@/lib/inFlight";
 import type { BasemapId } from "@/lib/map/constants";
+import { rangeToDates } from "@/lib/prefs/range";
+import { runHomeResetHooks } from "@/lib/homeReset";
 import {
   DOWNLOAD_FORMAT_LABELS,
   downloadScene,
@@ -18,6 +21,7 @@ import {
   type DownloadPlan,
   type DownloadTarget,
 } from "@/lib/downloads";
+import { usePreferencesStore } from "@/store/usePreferencesStore";
 
 export interface AreaSelection {
   level: AreaLevel;
@@ -103,6 +107,10 @@ interface AppState {
   toDate: string;
   maxCloudCover: number;
   composite: CompositeId;
+  /** User edited a preference-backed filter this session (seed skips it). */
+  filtersTouched: boolean;
+  /** User picked a basemap this session (seed skips it). */
+  basemapTouched: boolean;
   /** Viewport month of the available-dates calendar (null = anchor on scenes). */
   calendarMonth: { year: number; month: number } | null;
   setCalendarMonth: (value: { year: number; month: number } | null) => void;
@@ -133,6 +141,18 @@ interface AppState {
   locateNonce: number;
   requestHome: () => void;
   requestLocate: () => void;
+  /** Bumped by resetToHome so the phone filter sheet reopens at its collapsed snap. */
+  panelSnapReset: number;
+  /**
+   * Full home reset: aborts in-flight requests, clears selection/results/
+   * compare layers/dialogs (via registered cross-store hooks), reapplies the
+   * user's preferred filter defaults, returns the map to the default
+   * Rajasthan view, reopens the Filters panel and strips deep-link query/hash
+   * parameters with `replaceUrl` (router.replace from the wordmark link,
+   * history.replaceState otherwise — never a full reload). Session, theme and
+   * basemap preference are kept. Idempotent when already home.
+   */
+  resetToHome: (opts?: { replaceUrl?: (url: string) => void }) => void;
 
   // results ---------------------------------------------------------------
   scenes: Scene[];
@@ -193,6 +213,11 @@ export const useAppStore = create<AppState>((set, get) => {
     }
   };
 
+  // Preference-backed defaults applied at app start (and re-applied by
+  // resetToHome / seedFromPreferences for fields the user hasn't touched).
+  const initialPrefs = usePreferencesStore.getState().values;
+  const initialRange = rangeToDates(initialPrefs.map.dateRange);
+
   return {
   sidebarOpen: false,
   sidebarCollapsed: false,
@@ -245,16 +270,18 @@ export const useAppStore = create<AppState>((set, get) => {
       ilrSel: ilr ? toSelection("ilr", ilr) : null,
     }),
 
-  fromDate: isoDay(-90),
-  toDate: isoDay(0),
-  maxCloudCover: 20,
-  composite: "true-color",
+  fromDate: initialRange.from,
+  toDate: initialRange.to,
+  maxCloudCover: initialPrefs.map.maxCloudCover,
+  composite: initialPrefs.map.composite,
+  filtersTouched: false,
+  basemapTouched: false,
   calendarMonth: null,
   setCalendarMonth: (value) => set({ calendarMonth: value }),
-  setFromDate: (value) => set({ fromDate: value }),
-  setToDate: (value) => set({ toDate: value }),
-  setMaxCloudCover: (value) => set({ maxCloudCover: value }),
-  setComposite: (value) => set({ composite: value }),
+  setFromDate: (value) => set({ fromDate: value, filtersTouched: true }),
+  setToDate: (value) => set({ toDate: value, filtersTouched: true }),
+  setMaxCloudCover: (value) => set({ maxCloudCover: value, filtersTouched: true }),
+  setComposite: (value) => set({ composite: value, filtersTouched: true }),
   clearFilters: () =>
     set({
       districtId: null,
@@ -273,8 +300,8 @@ export const useAppStore = create<AppState>((set, get) => {
       activeSceneId: null,
     }),
 
-  basemap: "streets",
-  setBasemap: (value) => set({ basemap: value }),
+  basemap: initialPrefs.map.basemap,
+  setBasemap: (value) => set({ basemap: value, basemapTouched: true }),
   adminLayers: { districts: true, tehsils: false, ilrs: false },
   toggleAdminLayer: (layer) =>
     set((s) => ({ adminLayers: { ...s.adminLayers, [layer]: !s.adminLayers[layer] } })),
@@ -294,6 +321,45 @@ export const useAppStore = create<AppState>((set, get) => {
   locateNonce: 0,
   requestHome: () => set((s) => ({ homeNonce: s.homeNonce + 1 })),
   requestLocate: () => set((s) => ({ locateNonce: s.locateNonce + 1 })),
+  panelSnapReset: 0,
+  resetToHome: (opts) => {
+    abortInFlightAll([IN_FLIGHT.search, IN_FLIGHT.summary, IN_FLIGHT.email]);
+    runHomeResetHooks();
+    const prefs = usePreferencesStore.getState().values;
+    const range = rangeToDates(prefs.map.dateRange);
+    set((s) => ({
+      districtId: null,
+      tehsilId: null,
+      ilrId: null,
+      districtSel: null,
+      tehsilSel: null,
+      ilrSel: null,
+      scenes: [],
+      activeSceneId: null,
+      hoveredSceneId: null,
+      hasSearched: false,
+      searchError: null,
+      searching: false,
+      calendarMonth: null,
+      resultsOpen: false,
+      downloadDialog: null,
+      fromDate: range.from,
+      toDate: range.to,
+      maxCloudCover: prefs.map.maxCloudCover,
+      composite: prefs.map.composite,
+      sidebarTab: "filters",
+      sidebarOpen: true,
+      sidebarCollapsed: false,
+      panelSnapReset: s.panelSnapReset + 1,
+    }));
+    get().requestHome();
+    const replace =
+      opts?.replaceUrl ??
+      ((url: string) => {
+        if (typeof window !== "undefined") window.history.replaceState(null, "", url);
+      });
+    replace("/");
+  },
 
   scenes: [],
   searching: false,
@@ -321,10 +387,15 @@ export const useAppStore = create<AppState>((set, get) => {
       searchError: null,
       ...(phone ? { sidebarOpen: false } : {}),
     });
+    const controller = beginInFlight(IN_FLIGHT.search);
     try {
-      const scenes = await dataAdapter.searchScenes(params);
+      const scenes = await dataAdapter.searchScenes(params, { signal: controller.signal });
+      // Superseded by a newer run or aborted by a home reset — the owner of
+      // `searching` (the new run, or resetToHome) finishes the state.
+      if (controller.signal.aborted) return;
       set({ scenes, searching: false, searchError: null });
     } catch (error) {
+      if (controller.signal.aborted) return;
       const message =
         error instanceof Error && error.message
           ? error.message
@@ -381,3 +452,24 @@ export const useActiveSelection = (): AreaSelection | null =>
 
 export const useActiveScene = (): Scene | null =>
   useAppStore((s) => s.scenes.find((scene) => scene.id === s.activeSceneId) ?? null);
+
+/**
+ * Re-apply preference-backed filter/basemap defaults for fields the user has
+ * not overridden this session (called after the prefs subject changes on
+ * login/logout so each account starts from its own saved defaults).
+ */
+export function seedFromPreferences(): void {
+  const prefs = usePreferencesStore.getState().values;
+  const range = rangeToDates(prefs.map.dateRange);
+  useAppStore.setState((s) => ({
+    ...(s.filtersTouched
+      ? {}
+      : {
+          fromDate: range.from,
+          toDate: range.to,
+          maxCloudCover: prefs.map.maxCloudCover,
+          composite: prefs.map.composite,
+        }),
+    ...(s.basemapTouched ? {} : { basemap: prefs.map.basemap }),
+  }));
+}

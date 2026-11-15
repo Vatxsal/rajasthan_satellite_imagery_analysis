@@ -226,10 +226,17 @@ function TabletPanelDrawer() {
 /** Phone (<768px): snap-point bottom sheet owned by the bottom tab bar. */
 function PhonePanelSheet() {
   const open = useAppStore((s) => s.sidebarOpen);
+  const panelSnapReset = useAppStore((s) => s.panelSnapReset);
   const close = () => useAppStore.setState({ sidebarOpen: false });
 
   return (
-    <BottomSheet open={open} onClose={close} sheetKey="panel" label="Panel">
+    <BottomSheet
+      open={open}
+      onClose={close}
+      sheetKey="panel"
+      label="Panel"
+      collapsedSnapNonce={panelSnapReset}
+    >
       <PanelHeader onClose={close} closeLabel="Close panel" />
       <PanelTabs />
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">

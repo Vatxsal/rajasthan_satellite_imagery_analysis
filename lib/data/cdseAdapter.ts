@@ -10,11 +10,12 @@ interface ApiErrorBody {
   message?: string;
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
+async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!response.ok) {
@@ -51,8 +52,8 @@ export const cdseAdapter: DataAdapter = {
   getTehsils: (districtId) => mockAdapter.getTehsils(districtId),
   getIlrs: (tehsilId) => mockAdapter.getIlrs(tehsilId),
 
-  async searchScenes(params: SearchParams): Promise<Scene[]> {
-    const { scenes } = await postJson<ScenesResponse>("/scenes", params);
+  async searchScenes(params: SearchParams, opts?: { signal?: AbortSignal }): Promise<Scene[]> {
+    const { scenes } = await postJson<ScenesResponse>("/scenes", params, opts?.signal);
     return scenes;
   },
 
