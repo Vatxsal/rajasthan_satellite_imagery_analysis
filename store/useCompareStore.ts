@@ -7,7 +7,10 @@ import { analysisParamsFromMetadata, analysisParamsQuery } from "@/lib/compare/p
 import { normalizeComparePair } from "@/lib/compare/swipe";
 import { streamAnalyze } from "@/lib/compare/run";
 import type { CompositeId } from "@/lib/data";
+import { IN_FLIGHT, beginInFlight } from "@/lib/inFlight";
+import { registerHomeResetHook } from "@/lib/homeReset";
 import { selectActiveSelection, useAppStore } from "@/store/useAppStore";
+import { usePreferencesStore } from "@/store/usePreferencesStore";
 import { selectCan, useSession } from "@/store/useSession";
 
 export type CompareTab = "swipe" | "change-map" | "statistics" | "hotspots" | "summary";
@@ -211,6 +214,10 @@ function summaryIdle() {
   };
 }
 
+// Preferences apply at app start: map controls (overlay/boost) and the
+// sensitivity / summary defaults saved on a previous visit.
+const initialPrefs = usePreferencesStore.getState().values;
+
 export const useCompareStore = create<CompareState>((set, get) => ({
   compareMode: false,
   dateA: null,
@@ -221,10 +228,10 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   result: null,
   tab: "change-map",
   drawerOpen: false,
-  overlayOpacity: 0.85,
+  overlayOpacity: initialPrefs.map.overlayOpacity,
   classVisible: { 1: true, 2: true, 3: true, 4: true, 5: true, 6: true },
-  sensitivity: "medium",
-  minPatchHa: 0.2,
+  sensitivity: initialPrefs.change.sensitivity,
+  minPatchHa: initialPrefs.change.minPatchHa,
   inputMode: "composite",
   confidenceFilter: "medium",
   eventsItems: [],
@@ -237,15 +244,15 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   swipeComposite: "true-color",
   swipeMode: "dates",
   swipeOutline: true,
-  boostVisibility: true,
+  boostVisibility: initialPrefs.map.boostVisibility,
   stripExpanded: false,
   panelWidth: 420,
   choropleth: false,
   hoveredHotspot: null,
   selectedHotspot: null,
   tehsilHighlight: null,
-  summaryLanguage: "en",
-  summaryIncludeImages: true,
+  summaryLanguage: initialPrefs.reports.language,
+  summaryIncludeImages: initialPrefs.reports.includeImage,
   summaryStatus: "idle",
   summaryPhase: null,
   summaryData: null,
@@ -539,6 +546,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       summaryImagesFallback: false,
       summaryPhase: "ensure",
     });
+    const controller = beginInFlight(IN_FLIGHT.summary);
     try {
       // Probe with analysis params: warms/verifies the artifact first so the
       // caption can say "re-running the analysis" instead of silently hanging
@@ -549,10 +557,13 @@ export const useCompareStore = create<CompareState>((set, get) => ({
         probe.set("key", result.key);
         probe.set("limit", "1");
         probe.set("offset", "0");
-        await fetch(`/api/compare/events?${probe}`);
+        await fetch(`/api/compare/events?${probe}`, { signal: controller.signal });
       } catch {
         // Network hiccup — the POST below surfaces real failures.
       }
+      // Aborted (home reset / superseded): the reset already restored idle
+      // state — do not write "write" or any later state over it.
+      if (controller.signal.aborted) return;
       set({ summaryPhase: "write" });
       const response = await fetch("/api/compare/summary", {
         method: "POST",
@@ -563,6 +574,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
           includeImages: summaryIncludeImages,
           ...analysisParamsFromMetadata(metadata),
         }),
+        signal: controller.signal,
       });
       const body = (await response.json().catch(() => null)) as {
         summary?: SummaryData;
@@ -575,6 +587,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
           code: typeof body?.code === "string" ? body.code : null,
         });
       }
+      if (controller.signal.aborted) return;
       set({
         summaryStatus: "done",
         summaryData: body.summary,
@@ -582,6 +595,8 @@ export const useCompareStore = create<CompareState>((set, get) => ({
         summaryPhase: null,
       });
     } catch (error) {
+      // Aborted by a home reset: idle state is already restored — swallow.
+      if (controller.signal.aborted) return;
       set({
         summaryStatus: "error",
         summaryError: error instanceof Error && error.message ? error.message : "AI summary failed.",
@@ -622,4 +637,30 @@ useAppStore.subscribe((prev, next) => {
       ...summaryIdle(),
     });
   }
+});
+
+/**
+ * Home reset (wordmark link): abort the run, discard in-flight event pages
+ * and restore the compare surface to "nothing selected", then re-apply the
+ * user's overlay/visibility preferences. Registered at module load so the app
+ * store never imports this store (it subscribes to app — direct calls would
+ * cycle the import graph).
+ */
+registerHomeResetHook(() => {
+  resetRunState();
+  eventsSeq += 1;
+  const prefs = usePreferencesStore.getState().values;
+  useCompareStore.setState({
+    compareMode: false,
+    dateA: null,
+    dateB: null,
+    running: false,
+    stage: null,
+    error: null,
+    stripExpanded: false,
+    overlayOpacity: prefs.map.overlayOpacity,
+    boostVisibility: prefs.map.boostVisibility,
+    ...RESULT_BOUND_RESET,
+    ...summaryIdle(),
+  });
 });

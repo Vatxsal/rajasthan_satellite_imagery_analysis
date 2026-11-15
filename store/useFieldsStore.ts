@@ -9,6 +9,7 @@ import {
   type PatternClientResult,
   type PatternStage,
 } from "@/lib/fields/client";
+import { registerHomeResetHook } from "@/lib/homeReset";
 
 /**
  * Fields & cropping-pattern demo state (Phase 3). The panel drives loads and
@@ -65,6 +66,9 @@ function toError(error: unknown): FieldsError {
   return { code: "UNKNOWN", message: "Unexpected failure. Try again shortly." };
 }
 
+/** Bumped by the home reset so late field/pattern responses are discarded. */
+let fieldsEpoch = 0;
+
 export const useFieldsStore = create<FieldsState>((set, get) => ({
   visible: true,
   year: 2024,
@@ -107,6 +111,7 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
   loadFields: async (bbox) => {
     if (get().loading) return;
     const { year, minConfidence } = get();
+    const epoch = fieldsEpoch;
     set({
       loading: true,
       error: null,
@@ -119,6 +124,7 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
     });
     try {
       const result = await fetchFields({ bbox, year, minConfidence });
+      if (epoch !== fieldsEpoch) return; // superseded by a home reset
       set({
         loading: false,
         bbox: result.bbox,
@@ -132,6 +138,7 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
         visible: true,
       });
     } catch (error) {
+      if (epoch !== fieldsEpoch) return;
       set({
         loading: false,
         error: toError(error),
@@ -153,6 +160,7 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
   runPattern: async () => {
     const state = get();
     if (state.patternRunning || !state.bbox || !state.fields) return;
+    const epoch = fieldsEpoch;
     set({
       patternRunning: true,
       patternError: null,
@@ -170,11 +178,16 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
           grouping: state.grouping,
         },
         {
-          onStage: (stage) => set({ patternStage: stage }),
-          onMonth: () =>
-            set((s) => ({ patternMonthsDone: Math.min(12, s.patternMonthsDone + 1) })),
+          onStage: (stage) => {
+            if (epoch === fieldsEpoch) set({ patternStage: stage });
+          },
+          onMonth: () => {
+            if (epoch !== fieldsEpoch) return;
+            set((s) => ({ patternMonthsDone: Math.min(12, s.patternMonthsDone + 1) }));
+          },
         },
       );
+      if (epoch !== fieldsEpoch) return;
       set({
         patternRunning: false,
         patternStage: null,
@@ -182,6 +195,7 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
         patternMonthsDone: 12,
       });
     } catch (error) {
+      if (epoch !== fieldsEpoch) return;
       set({
         patternRunning: false,
         patternStage: null,
@@ -190,6 +204,32 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
     }
   },
 }));
+
+/**
+ * Home reset: drop the loaded fields and any pattern run (the selection they
+ * belong to is gone). View settings — visibility, year, confidence, grouping
+ * — are kept; they are not part of the area selection.
+ */
+registerHomeResetHook(() => {
+  fieldsEpoch += 1;
+  useFieldsStore.setState({
+    loading: false,
+    error: null,
+    bbox: null,
+    selectedAreaKm2: null,
+    confidenceAvailable: false,
+    count: 0,
+    truncated: false,
+    totalAreaM2: 0,
+    fields: null,
+    patternRunning: false,
+    patternStage: null,
+    patternMonthsDone: 0,
+    patternError: null,
+    pattern: null,
+    selectedFieldId: null,
+  });
+});
 
 /** Pattern field rows keyed by feature id (map fill + panel list). */
 export function patternById(

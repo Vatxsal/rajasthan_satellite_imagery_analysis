@@ -26,8 +26,10 @@ import {
   presentPatternClasses,
 } from "@/lib/fields/colors";
 import { getMainMap } from "@/lib/compare/bridge";
+import { formatArea, type AreaUnit } from "@/lib/format";
 import type { BBox } from "@/lib/data";
 import { useFieldsStore } from "@/store/useFieldsStore";
+import { usePreferencesStore } from "@/store/usePreferencesStore";
 
 /** Viewport bbox from the main map (null before the map is ready). */
 function viewportBBox(): BBox | null {
@@ -37,10 +39,10 @@ function viewportBBox(): BBox | null {
   return [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
 }
 
-function formatHa(m2: number): string {
+function formatHa(m2: number, unit: AreaUnit): string {
   const ha = m2 / 10_000;
-  if (ha >= 100) return `${Math.round(ha).toLocaleString("en")} ha`;
-  return `${ha.toLocaleString("en", { maximumFractionDigits: 1 })} ha`;
+  const opts = unit === "ha" ? { maximumFractionDigits: ha >= 100 ? 0 : 1 } : {};
+  return formatArea(ha, unit, opts);
 }
 
 /** Tiny 12-point NDVI sparkline (no chart library). */
@@ -83,6 +85,7 @@ function SeriesSparkline({ series }: { series: number[] }) {
  * inspect per-field curves. Everything stops at ≤25 km² (PU budget).
  */
 export default function FieldsPanel() {
+  const areaUnit = usePreferencesStore((s) => s.values.units.areaUnit);
   const year = useFieldsStore((s) => s.year);
   const minConfidence = useFieldsStore((s) => s.minConfidence);
   const grouping = useFieldsStore((s) => s.grouping);
@@ -246,7 +249,7 @@ export default function FieldsPanel() {
 
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
             <dt className="text-muted">Total area</dt>
-            <dd className="mono-nums text-right text-text">{formatHa(totalAreaM2)}</dd>
+            <dd className="mono-nums text-right text-text">{formatHa(totalAreaM2, areaUnit)}</dd>
             <dt className="text-muted">Viewport</dt>
             <dd className="mono-nums text-right text-text">
               {selectedAreaKm2 !== null ? `${selectedAreaKm2.toFixed(2)} km²` : "—"}

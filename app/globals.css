@@ -486,3 +486,24 @@ h4 {
     display: none;
   }
 }
+
+/* Preferences -> Appearance -> Reduce animations (store/usePreferencesStore).
+   "on" kills all CSS motion; "system" defers to the OS only when the user has
+   not forced animations "off" (which the :not() exclusion below honours). */
+[data-reduce-animations="on"] *,
+[data-reduce-animations="on"] *::before,
+[data-reduce-animations="on"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-animations="off"]) *,
+  :root:not([data-reduce-animations="off"]) *::before,
+  :root:not([data-reduce-animations="off"]) *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

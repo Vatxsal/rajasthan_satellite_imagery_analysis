@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import { cn } from "@/components/ui/cn";
+import { formatCoords } from "@/lib/format";
+import { usePreferencesStore } from "@/store/usePreferencesStore";
 
 interface CursorCoordsProps {
   mapRef: React.MutableRefObject<MapLibreMap | null>;
@@ -11,6 +13,7 @@ interface CursorCoordsProps {
 }
 
 export default function CursorCoords({ mapRef, className, style }: CursorCoordsProps) {
+  const coordFormat = usePreferencesStore((s) => s.values.units.coordinates);
   const [coords, setCoords] = useState<[number, number] | null>(null);
 
   useEffect(() => {
@@ -39,8 +42,10 @@ export default function CursorCoords({ mapRef, className, style }: CursorCoordsP
     <div className={cn("z-10", className)} style={style} aria-live="polite">
       <span className="mono-nums rounded border border-border bg-surface/90 px-2 py-1 text-[11px] text-muted">
         {coords
-          ? `${coords[1].toFixed(4)}° N  ${coords[0].toFixed(4)}° E`
-          : "—.————° N  —.————° E"}
+          ? formatCoords(coords[0], coords[1], coordFormat)
+          : coordFormat === "dms"
+            ? "—° —' —.—\" N  —° —' —.—\" E"
+            : "—.————° N  —.————° E"}
       </span>
     </div>
   );

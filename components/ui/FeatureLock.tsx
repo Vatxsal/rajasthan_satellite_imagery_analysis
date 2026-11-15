@@ -3,24 +3,13 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Lock, LogIn, Send } from "lucide-react";
 import { CAPABILITY_LABELS, type Capability, type QuotaKind } from "@/lib/auth/permissions";
+import { goRequestAccess, goSignIn } from "@/lib/auth/nav";
 import { useLocked, useQuotaToday } from "@/store/useSession";
 import Button from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 
 /** True when the current session may not use `capability` (server still enforces). */
 export { useLocked };
-
-function goSignIn(): void {
-  const next = `${window.location.pathname}${window.location.search}`;
-  window.location.assign(next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`);
-}
-
-function goRequestAccess(): void {
-  const next = `${window.location.pathname}${window.location.search}`;
-  window.location.assign(
-    next === "/" ? "/login?mode=request" : `/login?mode=request&next=${encodeURIComponent(next)}`,
-  );
-}
 
 export interface FeatureLockProps {
   capability: Capability;

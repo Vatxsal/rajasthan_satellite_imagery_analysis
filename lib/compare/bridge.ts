@@ -9,10 +9,12 @@ import { bboxFromGeometry, type ClipGeometry } from "@/lib/cdse/geometry";
 import { CLASS_DEFS, classColor } from "@/lib/analysis/config";
 import type { Hotspot } from "@/lib/analysis/types";
 import { selectVisibleEvents } from "@/lib/compare/eventList";
+import { formatArea } from "@/lib/format";
 import { bboxToBounds } from "@/lib/map/geojson";
 import { MAP_PALETTES } from "@/lib/map/palette";
 import { useAppStore } from "@/store/useAppStore";
 import { useCompareStore } from "@/store/useCompareStore";
+import { usePreferencesStore } from "@/store/usePreferencesStore";
 import { useTheme } from "@/store/useTheme";
 
 /**
@@ -499,7 +501,8 @@ async function syncHotspotMarkers(map: MapLibreMap): Promise<void> {
   if (seq !== markerSyncSeq || mainMap !== map) return; // superseded mid-load
 
   const events = visibleEvents();
-  const nextSig = `${result.key}|${state.confidenceFilter ?? "all"}|${state.eventsLimit}|${events.length}`;
+  const areaUnit = usePreferencesStore.getState().values.units.areaUnit;
+  const nextSig = `${result.key}|${state.confidenceFilter ?? "all"}|${state.eventsLimit}|${events.length}|${areaUnit}`;
   if (markerSig !== nextSig) {
     removeHotspotMarkers();
     markerSig = nextSig;
@@ -520,7 +523,7 @@ async function syncHotspotMarkers(map: MapLibreMap): Promise<void> {
       el.style.setProperty("--hs-fg", markerTextColor(color));
       el.setAttribute(
         "aria-label",
-        `Change event ${rank}: ${classLabel}, ${areaHa.toLocaleString("en", { maximumFractionDigits: 1 })} hectares`,
+        `Change event ${rank}: ${classLabel}, ${formatArea(areaHa, areaUnit)}`,
       );
       el.addEventListener("mouseenter", () => useCompareStore.getState().setHoveredHotspot(rank));
       el.addEventListener("mouseleave", () => useCompareStore.getState().setHoveredHotspot(null));
@@ -557,6 +560,7 @@ function hotspotPopupHtml(
   const lon = hotspot?.centroid[0] ?? 0;
   const lat = hotspot?.centroid[1] ?? 0;
   const coords = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  const areaUnit = usePreferencesStore.getState().values.units.areaUnit;
   return (
     `<div class="hs-pop">` +
     `<div class="hs-pop-top">` +
@@ -564,7 +568,7 @@ function hotspotPopupHtml(
     `<span class="hs-pop-name">${escapeHtml(label)}</span>` +
     `<span class="hs-pop-rank">#${rank}</span>` +
     `</div>` +
-    `<p class="hs-pop-area">${areaHa.toLocaleString("en", { maximumFractionDigits: 1 })} ha</p>` +
+    `<p class="hs-pop-area">${formatArea(areaHa, areaUnit)}</p>` +
     `<div class="hs-pop-rows">` +
     (tehsil
       ? `<div class="hs-pop-row"><span class="k">Tehsil</span><span class="v">${escapeHtml(tehsil)}</span></div>`

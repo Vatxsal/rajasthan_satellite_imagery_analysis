@@ -4,6 +4,7 @@ import { RotateCcw, Search } from "lucide-react";
 import type { CompositeId } from "@/lib/data";
 import { COMPOSITE_OPTIONS } from "@/lib/data/composites";
 import { useDistricts, useIlrs, useTehsils } from "@/lib/hooks/useAreas";
+import { DATE_RANGE_DAYS, type DateRangePresetId } from "@/lib/prefs/range";
 import { useAppStore } from "@/store/useAppStore";
 import Button from "@/components/ui/Button";
 import Segmented from "@/components/ui/Segmented";
@@ -13,13 +14,13 @@ import FeatureLock, { useLocked } from "@/components/ui/FeatureLock";
 import { QuotaReadout } from "@/components/ui/FeatureLock";
 import DateCalendar from "./DateCalendar";
 
-type DatePresetId = "30d" | "90d" | "6m" | "custom";
+type DatePresetId = DateRangePresetId | "custom";
 
-const DATE_PRESETS: { id: Exclude<DatePresetId, "custom">; label: string; days: number }[] = [
-  { id: "30d", label: "30d", days: 30 },
-  { id: "90d", label: "90d", days: 90 },
-  { id: "6m", label: "6m", days: 182 },
-];
+// Day counts come from the shared presets so the buttons and the home reset
+// (resetToHome reapplies the preferred date range) can never drift apart.
+const DATE_PRESETS: { id: DateRangePresetId; label: string; days: number }[] = (
+  Object.keys(DATE_RANGE_DAYS) as DateRangePresetId[]
+).map((id) => ({ id, label: id, days: DATE_RANGE_DAYS[id] }));
 
 function isoDayAgo(days: number): string {
   const d = new Date();

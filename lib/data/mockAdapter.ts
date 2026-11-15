@@ -202,8 +202,11 @@ export const mockAdapter: DataAdapter = {
     return ilrs.filter((i) => i.tehsilId === tehsilId).map((i) => ({ ...i }));
   },
 
-  async searchScenes(params: SearchParams): Promise<Scene[]> {
+  async searchScenes(params: SearchParams, opts?: { signal?: AbortSignal }): Promise<Scene[]> {
     await delay();
+    if (opts?.signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
 
     const days = daysBetween(params.fromDate, params.toDate);
     const area = resolveArea(params);

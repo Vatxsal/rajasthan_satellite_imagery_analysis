@@ -20,7 +20,7 @@ export interface DataAdapter {
   getDistricts(): Promise<District[]>;
   getTehsils(districtId: string): Promise<Tehsil[]>;
   getIlrs(tehsilId: string): Promise<Ilr[]>;
-  searchScenes(params: SearchParams): Promise<Scene[]>;
+  searchScenes(params: SearchParams, opts?: { signal?: AbortSignal }): Promise<Scene[]>;
   /**
    * Optional: request for a scene clipped to a polygon (used by the map to
    * overlay live imagery). When absent, the map keeps the mock placeholder.

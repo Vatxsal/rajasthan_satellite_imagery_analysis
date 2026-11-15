@@ -6,6 +6,8 @@ import {
   type RoleLimits,
 } from "@/lib/auth/permissions";
 import type { QuotaUsage } from "@/lib/auth/quota";
+import { seedFromPreferences } from "@/store/useAppStore";
+import { usePreferencesStore } from "@/store/usePreferencesStore";
 
 /**
  * Session state for the UI: filled from GET /api/auth/session
@@ -20,6 +22,13 @@ export type SessionRole = "guest" | "sso";
 export interface SessionInfo {
   role: SessionRole;
   name: string;
+  /** Explicit alias of `name` from the session endpoint (profile dialog). */
+  displayName?: string;
+  /** SSO account identifier (used as the preferences storage subject). */
+  username?: string;
+  /** Session JWT epoch seconds (null for the cookie-less ambient guest). */
+  issuedAt?: number | null;
+  expiresAt?: number | null;
   capabilities?: Partial<Record<Capability, boolean>>;
   limits?: RoleLimits;
   usageToday?: Partial<Record<QuotaKind, QuotaUsage>>;
@@ -30,6 +39,9 @@ interface SessionState {
   status: "unknown" | "signed-out" | "signed-in";
   role: SessionRole | null;
   name: string | null;
+  username: string | null;
+  issuedAt: number | null;
+  expiresAt: number | null;
   capabilities: Partial<Record<Capability, boolean>> | null;
   limits: RoleLimits | null;
   usageToday: Partial<Record<QuotaKind, QuotaUsage>> | null;
@@ -41,11 +53,25 @@ interface SessionState {
 
 function applyInfo(
   info: SessionInfo,
-): Pick<SessionState, "status" | "role" | "name" | "capabilities" | "limits" | "usageToday"> {
+): Pick<
+  SessionState,
+  | "status"
+  | "role"
+  | "name"
+  | "username"
+  | "issuedAt"
+  | "expiresAt"
+  | "capabilities"
+  | "limits"
+  | "usageToday"
+> {
   return {
     status: "signed-in",
     role: info.role,
-    name: info.name,
+    name: info.displayName ?? info.name,
+    username: info.username ?? null,
+    issuedAt: info.issuedAt ?? null,
+    expiresAt: info.expiresAt ?? null,
     capabilities: info.capabilities ?? PERMISSIONS[info.role].capabilities,
     limits: info.limits ?? PERMISSIONS[info.role].limits,
     usageToday: info.usageToday ?? null,
@@ -56,15 +82,35 @@ const CLEARED = {
   status: "signed-out" as const,
   role: null,
   name: null,
+  username: null,
+  issuedAt: null,
+  expiresAt: null,
   capabilities: null,
   limits: null,
   usageToday: null,
 };
 
+/** Preferences storage subject: the SSO username (fallback: display name), or "guest". */
+function subjectFor(info: SessionInfo | null): string {
+  if (!info || info.role !== "sso") return "guest";
+  const username = info.username?.trim();
+  if (username) return username;
+  return info.name?.trim() || "sso";
+}
+
+/** Load this account's saved preferences and seed untouched filter/map defaults. */
+function syncPreferencesSubject(info: SessionInfo | null): void {
+  usePreferencesStore.getState().setSubject(subjectFor(info));
+  seedFromPreferences();
+}
+
 export const useSession = create<SessionState>((set) => ({
   status: "unknown",
   role: null,
   name: null,
+  username: null,
+  issuedAt: null,
+  expiresAt: null,
   capabilities: null,
   limits: null,
   usageToday: null,
@@ -74,16 +120,25 @@ export const useSession = create<SessionState>((set) => ({
       if (response.ok) {
         const data = (await response.json()) as SessionInfo;
         set(applyInfo(data));
+        syncPreferencesSubject(data);
         return;
       }
       set(CLEARED);
+      syncPreferencesSubject(null);
     } catch {
       // Network blip: treat as signed-out; middleware still protects routes.
       set(CLEARED);
+      syncPreferencesSubject(null);
     }
   },
-  setSession: (info) => set(applyInfo(info)),
-  clearSession: () => set(CLEARED),
+  setSession: (info) => {
+    set(applyInfo(info));
+    syncPreferencesSubject(info);
+  },
+  clearSession: () => {
+    set(CLEARED);
+    syncPreferencesSubject(null);
+  },
   signOut: async () => {
     try {
       await fetch("/api/auth/logout", {
@@ -96,6 +151,7 @@ export const useSession = create<SessionState>((set) => ({
       // Cookie clearing is best-effort; the redirect below still applies.
     }
     set(CLEARED);
+    syncPreferencesSubject(null);
     window.location.assign("/login");
   },
 }));

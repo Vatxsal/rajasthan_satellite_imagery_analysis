@@ -12,11 +12,13 @@ import { focusHotspot, focusTehsil } from "@/lib/compare/bridge";
 import { eventsViewState, selectVisibleEvents } from "@/lib/compare/eventList";
 import { downloadEventsGeoJson, downloadStatsCsv } from "@/lib/compare/export";
 import { analysisParamsQuery } from "@/lib/compare/params";
+import { formatArea, formatDateTime, type AreaUnit } from "@/lib/format";
 import type { CompareStats, ConfidenceTier } from "@/lib/analysis/types";
 import type { Sensitivity } from "@/lib/analysis/config";
 import { classColor } from "@/lib/analysis/config";
 import { useCompareStore, type CompareInputMode } from "@/store/useCompareStore";
 import { useAppStore } from "@/store/useAppStore";
+import { usePreferencesStore } from "@/store/usePreferencesStore";
 
 /** "Sentinel-2C" from whatever casing the catalogue reported. */
 function satelliteName(raw: string): string {
@@ -31,13 +33,13 @@ function fmtDelta(value: number): string {
   return `${value >= 0 ? "+" : "\u2212"}${Math.abs(value).toFixed(2)}`;
 }
 
-function ha(value: number): string {
-  return `${value.toLocaleString("en", { maximumFractionDigits: 1 })} ha`;
+function ha(value: number, unit: AreaUnit): string {
+  return formatArea(value, unit);
 }
 
-/** Analysed-area formatting per spec: whole hectares, no decimals. */
-function haRound(value: number): string {
-  return `${Math.round(value).toLocaleString("en")} ha`;
+/** Analysed-area formatting per spec: whole units, no decimals. */
+function haRound(value: number, unit: AreaUnit): string {
+  return formatArea(value, unit, { maximumFractionDigits: 0 });
 }
 
 function rgb(color: [number, number, number]): string {
@@ -116,6 +118,8 @@ interface CompareStatsTabProps {
 /** Statistics + events tabs (the drawer renders this for both). */
 export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const result = useCompareStore((s) => s.result);
+  const areaUnit = usePreferencesStore((s) => s.values.units.areaUnit);
+  const timeZone = usePreferencesStore((s) => s.values.units.timeZone);
   const dateA = useCompareStore((s) => s.dateA);
   const dateB = useCompareStore((s) => s.dateB);
   const sensitivity = useCompareStore((s) => s.sensitivity);
@@ -410,7 +414,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                       )}
                     </span>
                     <span className="mono-nums ml-auto shrink-0 whitespace-nowrap text-[11px] text-text">
-                      {areaHa.toLocaleString("en", { maximumFractionDigits: 1 })} ha
+                      {formatArea(areaHa, areaUnit)}
                     </span>
                   </span>
                   <span className="flex items-center gap-2 pl-7 text-[10px] text-muted">
@@ -482,10 +486,10 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
       <div className="grid grid-cols-2 gap-2">
         <Metric
           label="Changed area"
-          value={ha(stats.changedHa)}
+          value={ha(stats.changedHa, areaUnit)}
           hint={`${(stats.changedHa / 100).toFixed(2)} km²`}
         />
-        <Metric label="Valid data" value={`${stats.validPct.toFixed(1)}%`} hint={`of ${ha(stats.areaHa)}`} />
+        <Metric label="Valid data" value={`${stats.validPct.toFixed(1)}%`} hint={`of ${ha(stats.areaHa, areaUnit)}`} />
       </div>
 
       {/* ---------------------------------------------------- class breakdown */}
@@ -512,7 +516,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                     {cls.label}
                   </span>
                 </td>
-                <td className="mono-nums px-2 py-1.5 text-right">{ha(cls.areaHa)}</td>
+                <td className="mono-nums px-2 py-1.5 text-right">{ha(cls.areaHa, areaUnit)}</td>
                 <td className="mono-nums px-2 py-1.5 text-right">{cls.areaKm2.toFixed(2)}</td>
                 <td className="mono-nums px-2 py-1.5 text-right">{cls.pctOfValid.toFixed(1)}%</td>
               </tr>
@@ -600,7 +604,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                       >
                         {row.name}
                       </td>
-                      <td className="mono-nums px-2 py-1.5 text-right">{ha(row.changedHa)}</td>
+                      <td className="mono-nums px-2 py-1.5 text-right">{ha(row.changedHa, areaUnit)}</td>
                       <td className="px-2 py-1.5 text-muted">{dominant}</td>
                     </tr>
                   );
@@ -659,7 +663,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
               )}
             </span>
           </MethodRow>
-          <MethodRow label="Analysed area">{haRound(stats.areaHa)}</MethodRow>
+          <MethodRow label="Analysed area">{haRound(stats.areaHa, areaUnit)}</MethodRow>
           <MethodRow label="Valid data">{stats.validPct.toFixed(1)}% of the area</MethodRow>
           <MethodRow label="Date gap">{metadata.gapDays} days</MethodRow>
           <MethodRow label="Scene A">
@@ -900,7 +904,9 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
 
       {/* ---------------------------------------------------- exports */}
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] text-muted">Generated {new Date(metadata.generatedAt).toLocaleString()}</p>
+        <p className="text-[11px] text-muted">
+          Generated {formatDateTime(Math.floor(Date.parse(metadata.generatedAt) / 1000), { timeZone })}
+        </p>
         <Button size="sm" onClick={() => downloadStatsCsv(stats)}>
           Export CSV
         </Button>

@@ -15,20 +15,14 @@ import type { Scene } from "@/lib/data";
 import { buildCopernicusBrowserUrl } from "@/lib/copernicusBrowser";
 import type { DownloadFormat } from "@/lib/downloads";
 import { useActiveSelection, useAppStore } from "@/store/useAppStore";
+import { usePreferencesStore } from "@/store/usePreferencesStore";
+import { formatDate } from "@/lib/format";
 import { cn } from "@/components/ui/cn";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/Menu";
 import ProductDialog from "@/components/scenes/ProductDialog";
 
 interface SceneCardProps {
   scene: Scene;
-}
-
-function formatDate(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  const month = new Date(Number(y), Number(m) - 1, Number(d)).toLocaleString("en", {
-    month: "short",
-  });
-  return `${d} ${month} ${y}`;
 }
 
 /** "05:41 UTC" — acquisition instant from the STAC datetime. */
@@ -49,6 +43,7 @@ function cloudTone(cloud: number): string {
 
 export default function SceneCard({ scene }: SceneCardProps) {
   const activeSceneId = useAppStore((s) => s.activeSceneId);
+  const dateFormat = usePreferencesStore((s) => s.values.units.dateFormat);
   const setActiveScene = useAppStore((s) => s.setActiveScene);
   const setHoveredScene = useAppStore((s) => s.setHoveredScene);
   const selection = useActiveSelection();
@@ -127,7 +122,7 @@ export default function SceneCard({ scene }: SceneCardProps) {
             className="mono-nums truncate pr-6 text-xs text-text"
             title={scene.platformCode ? `${scene.satellite} (${scene.platformCode})` : scene.satellite}
           >
-            {formatDate(scene.date)}
+            {formatDate(scene.date, dateFormat)}
           </p>
           <p className="mono-nums truncate text-xs text-muted">
             {utcTime ?? scene.satellite}

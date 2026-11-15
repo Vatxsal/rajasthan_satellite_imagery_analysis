@@ -12,6 +12,7 @@ import { cn } from "@/components/ui/cn";
 import { downloadOverlayFile } from "@/lib/compare/export";
 import { focusChangeBbox } from "@/lib/compare/bridge";
 import { CLASS, CLASS_DEFS } from "@/lib/analysis/config";
+import { formatArea } from "@/lib/format";
 import { openSheet } from "@/lib/sheets";
 import {
   useCompareStore,
@@ -19,6 +20,7 @@ import {
   PANEL_WIDTH_MIN,
   type CompareTab,
 } from "@/store/useCompareStore";
+import { usePreferencesStore } from "@/store/usePreferencesStore";
 import { useFormFactor } from "@/lib/hooks/useMediaQuery";
 import BottomSheet from "@/components/ui/BottomSheet";
 import EmailReport from "./EmailReport";
@@ -410,6 +412,7 @@ function SwipeHelp() {
 
 function ChangeMapTab() {
   const result = useCompareStore((s) => s.result);
+  const areaUnit = usePreferencesStore((s) => s.values.units.areaUnit);
   const overlayOpacity = useCompareStore((s) => s.overlayOpacity);
   const setOverlayOpacity = useCompareStore((s) => s.setOverlayOpacity);
   const classVisible = useCompareStore((s) => s.classVisible);
@@ -457,7 +460,7 @@ function ChangeMapTab() {
           if (!def) return null;
           const visible = classVisible[def.code] !== false;
           const cls = stats.classes.find((candidate) => candidate.code === def.code);
-          const area = cls ? cls.areaHa.toLocaleString("en", { maximumFractionDigits: 1 }) : "—";
+          const area = cls ? formatArea(cls.areaHa, areaUnit, { maximumFractionDigits: 1 }) : "—";
           const pct = cls ? `${cls.pctOfValid.toFixed(1)}%` : "—";
           return (
             <li key={def.code}>
