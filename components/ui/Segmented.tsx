@@ -12,6 +12,8 @@ export interface SegmentedProps<T extends string> {
   value: T;
   onChange: (value: T) => void;
   ariaLabel?: string;
+  /** Optional id for the group wrapper (label htmlFor target). */
+  id?: string;
   className?: string;
 }
 
@@ -20,11 +22,13 @@ export default function Segmented<T extends string>({
   value,
   onChange,
   ariaLabel,
+  id,
   className,
 }: SegmentedProps<T>) {
   return (
     <div
       role="group"
+      id={id}
       aria-label={ariaLabel}
       className={cn(
         "inline-flex w-full rounded border border-border bg-surface-2 p-0.5",

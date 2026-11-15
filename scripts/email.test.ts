@@ -87,6 +87,9 @@ function envFixture(overrides: Partial<ServerEnv> = {}): ServerEnv {
     FTW_CONFIDENCE_COG_URL:
       "https://data.source.coop/ftw/global-data/predictions/confidence/confidence/prue_v1_confidence_global.tif",
     FIELDS_GROUPING: false,
+    SAVED_QUERIES_STORE: "auto",
+    SUPABASE_URL: undefined,
+    SUPABASE_SERVICE_ROLE_KEY: undefined,
     ...overrides,
   };
 }

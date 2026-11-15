@@ -40,7 +40,8 @@ function limitSummary(role: Role): string {
   return (
     `${window} · tiles z≤${limits.tileZoomMax} · ` +
     `${limits.searchesPerDay}/day searches · ${limits.comparePerDay}/day analyses · ` +
-    `${limits.aiSummariesPerDay}/day AI · PNG ≤${limits.downloadMaxPx} px`
+    `${limits.aiSummariesPerDay}/day AI · PNG ≤${limits.downloadMaxPx} px · ` +
+    `${limits.savedQueriesMax} saved queries`
   );
 }
 

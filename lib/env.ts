@@ -185,6 +185,14 @@ const baseSchema = z.object({
     ),
   /** Phase 2: group field NDVI curves with k-means in POST /api/fields/pattern. */
   FIELDS_GROUPING: boolEnvDefault(false),
+
+  // ── Saved queries (/api/queries, SavedQueriesPanel) ───────────────────────
+  /** Persistence for saved queries: auto = Supabase when configured, else browser storage. */
+  SAVED_QUERIES_STORE: z.enum(["auto", "local", "supabase"]).default("auto"),
+  /** Supabase project URL (server only — never NEXT_PUBLIC_*). */
+  SUPABASE_URL: optionalString,
+  /** Supabase service-role/secret key (server only, sensitive — never in the browser). */
+  SUPABASE_SERVICE_ROLE_KEY: optionalString,
 });
 
 /** Strict shape used when NEXT_PUBLIC_DATA_SOURCE=cdse — credentials are mandatory. */
@@ -257,6 +265,9 @@ export interface ServerEnv {
   FTW_PMTILES_URL: string;
   FTW_CONFIDENCE_COG_URL: string;
   FIELDS_GROUPING: boolean;
+  SAVED_QUERIES_STORE: "auto" | "local" | "supabase";
+  SUPABASE_URL?: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
 }
 
 /**

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ButtonHTMLAttributes } from "react";
+import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { cn } from "./cn";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "ink" | "quiet";
@@ -29,15 +29,18 @@ const sizeClasses: Record<Size, string> = {
   icon: "h-8 w-8 p-0",
 };
 
-export default function Button({
-  variant = "secondary",
-  size = "sm",
-  className,
-  type = "button",
-  ...props
-}: ButtonProps) {
+/**
+ * forwardRef so Radix Slot composition (`<MenuTrigger asChild><Button>`)
+ * can attach its reference element — without a ref, floating-ui never
+ * positions the anchored overlay.
+ */
+const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = "secondary", size = "sm", className, type = "button", ...props },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       type={type}
       className={cn(
         "inline-flex items-center justify-center gap-1.5 rounded font-medium transition-colors duration-150",
@@ -49,4 +52,6 @@ export default function Button({
       {...props}
     />
   );
-}
+});
+
+export default Button;

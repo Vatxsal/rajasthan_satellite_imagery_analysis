@@ -34,6 +34,7 @@ Next.js 14 · TypeScript · Tailwind · MapLibre GL JS · Zustand · Radix UI ·
 | 🤖 | **AI summary** | SSO-only Gemini briefing of a comparison in English or हिन्दी, built only from the computed statistics (30/day). |
 | 📧 | **Email report** | SSO-only: one click (**Send report to mail**) emails the top events, stats, AI summary, change-map image, `events.csv` and a link that reopens the analysis. Fixed-recipient mode for production. |
 | 🔐 | **Access gate & roles** | `/login` hero page with shared-credential **Sign in**, **Continue as guest** (limited role), and an in-card **Request access** form. Locked features show a padlock popover; the API returns `403 FORBIDDEN_ROLE`. See [Roles & capabilities](#roles--capabilities). |
+| 📌 | **Saved queries** | Save the current filters (area, dates, cloud, composite — plus compare tuning for SSO) as a named query; **Run** re-applies everything in one click. Pin, duplicate, edit, delete with Undo, export/import JSON. Guests keep 5 in this browser, SSO 50 per profile (Supabase or browser storage). See [Saved queries](#-saved-queries). |
 
 ---
 
@@ -96,6 +97,7 @@ All Copernicus, Gemini and email calls are **server-side**; the browser never se
 | OpenFreeMap, Esri World Imagery, Nominatim | browser | basemap, satellite basemap, address search | yes (or self-host) |
 | Google Gemini API | server | AI summary | optional |
 | Your SMTP host or Resend | server | email report | optional |
+| `<project>.supabase.co` | server | saved-query storage | optional |
 | `challenges.cloudflare.com` | browser + server | Turnstile CAPTCHA | optional |
 
 ---
@@ -140,6 +142,9 @@ All Copernicus, Gemini and email calls are **server-side**; the browser never se
 | `SESSION_TTL_GUEST_HOURS` / `SESSION_TTL_SSO_HOURS` | server | `12` / `168` | Session lifetimes |
 | `AUTH_GUEST_PER_IP_PER_HOUR` | server | `20` | Guest sessions per IP per hour |
 | `ACCESS_REQUEST_PER_IP_PER_DAY` / `ACCESS_REQUEST_DAILY_CAP` | server | `3` / `10` | Access-request quotas (UTC day; cap `0` hides the form) |
+| `SAVED_QUERIES_STORE` | server | `auto` | Saved-query storage: `auto` (Supabase when configured, else browser), `local`, or `supabase` (503 `SUPABASE_NOT_CONFIGURED` when unset) |
+| `SUPABASE_URL` | server | unset | Supabase project URL for saved queries (server-only, never `NEXT_PUBLIC_*`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | 🔒 | unset | Service-role key that writes the `saved_queries` table; RLS has no public policies |
 
 🔒 = secret. On Vercel mark secrets **Sensitive**, keep `NEXT_PUBLIC_*` as **Config** (Vercel refuses to hide public values), paste values **without quotes**, and redeploy after every change.
 
@@ -263,9 +268,9 @@ Exactly two roles exist — **guest** and **sso**. There is no admin/member tier
 | Fields / cropping pattern | 🔒 | ✅ |
 | System status panel | 🔒 | ✅ |
 
-**Guest limits:** 90-day window · tiles z≤12 · 30/day searches · 3/day analyses · 0/day AI · PNG ≤1024 px.
+**Guest limits:** 90-day window · tiles z≤12 · 30/day searches · 3/day analyses · 0/day AI · PNG ≤1024 px · 5 saved queries.
 
-**SSO limits:** full archive · tiles z≤14 · 300/day searches · 50/day analyses · 30/day AI · PNG ≤2500 px.
+**SSO limits:** full archive · tiles z≤14 · 300/day searches · 50/day analyses · 30/day AI · PNG ≤2500 px · 50 saved queries.
 
 🔒 = not available for that role (the API answers `403 FORBIDDEN_ROLE`; the UI shows a lock popover).
 Daily quotas are counted per session **and** per client IP for each UTC day.
@@ -315,6 +320,28 @@ Preferences are stored **per account, in this browser only** (`rie:prefs:v1:<sub
 
 ---
 
+## 📌 Saved queries
+
+**Save** (in the Filters panel) captures the current search as a named query: the area (Rajasthan / district / tehsil / ILR), date range, cloud cap and composite — plus the compare tuning (sensitivity and minimum patch) for SSO. The **Saved queries** tab lists them with search, sorting, pinning, an **Add example queries** shortcut (four ready-made district searches) and export / import as JSON.
+
+- **Run** re-applies everything in one click: rolling ranges (`last 90 days`) are recalculated from **today** at run time, the area selects, the stored compare tuning is restored (when unlocked), and `lastRunAt` / `runCount` are recorded.
+- Each row's **⋯ menu** offers Run, Duplicate, Pin, Edit and Delete; deleting shows an **Undo** toast for 10 seconds. Names are unique per user — a clash answers `409 NAME_TAKEN` with a suggested free name. The panel header shows `n of N saved` for the current role's cap.
+- **Export / import** moves queries between browsers as a single JSON file.
+
+**Where they live** — `SAVED_QUERIES_STORE`:
+
+| Mode | Behaviour |
+| --- | --- |
+| `auto` (default) | Supabase when `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are set, otherwise browser storage |
+| `local` | Always this browser |
+| `supabase` | Require Supabase — `503 SUPABASE_NOT_CONFIGURED` when the vars are missing |
+
+- **Guests** are always browser-local (5 max) — clearing site data removes them; nothing leaves the device.
+- **SSO** gets **50 per profile**, synced across devices when Supabase is configured (otherwise this browser).
+- **Supabase setup:** create a project, run `supabase/migrations/20261115000000_saved_queries.sql` in the SQL editor, set the two env vars, redeploy. **RLS is on with no public policies** — only the server's service-role key reads or writes the table, so ids and names are never exposed to other users or the browser. Note that Supabase free tiers **pause after inactivity**: SSO saves then answer `503 STORAGE_UNAVAILABLE` until you resume the project, while guests (browser storage) are unaffected.
+
+---
+
 ## ⚠️ Known Limitations
 
 | Area | Limitation |
@@ -325,6 +352,7 @@ Preferences are stored **per account, in this browser only** (`rie:prefs:v1:<sub
 | **Single-date images** | Residual haze or shadow can create false change; composites are planned. |
 | **Boundaries** | Census 2011: newer districts are missing and some tehsils are renamed. ILR data is a mock. |
 | **Hosting** | No database: sessions, lockout counters, rate limits and quotas are per serverless instance (cold starts reset them); Vercel limits on duration, memory and response size apply. |
+| **Saved queries** | Supabase free projects pause after inactivity — SSO saves answer `503 STORAGE_UNAVAILABLE` until the project resumes; guests keep working in browser storage. |
 | **AI summary** | Can misread images; always check Stats and Changes. |
 
 ---
@@ -332,7 +360,7 @@ Preferences are stored **per account, in this browser only** (`rie:prefs:v1:<sub
 ## ▲ Deploy to Vercel
 
 1. Import the repo (Next.js is auto-detected).
-2. Add the variables from [Configuration](#-configuration). Use **Production** scope for the email variables so preview deployments cannot send mail. Mark `SESSION_SECRET`, `SSO_USERS`, `SMTP_PASS`, `RESEND_API_KEY`, `GEMINI_API_KEY` and the CDSE keys **Sensitive**. Leave `TILE_CACHE_DIR` and `CDSE_WMTS_INSTANCE_ID` unset.
+2. Add the variables from [Configuration](#-configuration). Use **Production** scope for the email variables so preview deployments cannot send mail. Mark `SESSION_SECRET`, `SSO_USERS`, `SMTP_PASS`, `RESEND_API_KEY`, `GEMINI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` and the CDSE keys **Sensitive**. Leave `TILE_CACHE_DIR` and `CDSE_WMTS_INSTANCE_ID` unset. Saved queries need no database config by default (`SAVED_QUERIES_STORE=auto` falls back to browser storage) — add `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` only for cross-device SSO queries.
 3. `vercel.json` pins the region to `fra1` (close to Copernicus); route `maxDuration` is 60 s for renders and analysis.
 4. **Redeploy** after any env change (and untick the build cache when env values changed).
 
@@ -351,6 +379,7 @@ Preferences are stored **per account, in this browser only** (`rie:prefs:v1:<sub
 - [ ] Compare two dates weeks apart: Swipe (dates **and** Satellite basemap modes), Changes, Stats, Events, Summary all work; hovering and clicking events highlights and zooms
 - [ ] **Send report to mail**: the email arrives (check spam), its links reopen the analysis, Gmail "Show original" shows SPF / DKIM / DMARC PASS
 - [ ] **Gate**: signed out → `/login` (with `?next=` preserved); sign in, guest, sign out all work; emailed deep link lands on the right analysis after login; a bad password always says *Invalid username or password*
+- [ ] **Saved queries**: save → Run re-applies area/dates/cloud after a reload (rolling ranges recalc from today); duplicate, pin, edit, delete + Undo work; export → import round-trips; guest stops at 5 with an inline error
 - [ ] Light / dark with the panel open; panel width 360 to 560 px with no overlapping text
 - [ ] No console or CSP errors; no browser calls to `sh.dataspace.copernicus.eu`; secrets absent from page sources
 - [ ] Sentinel Hub dashboard usage looks sane after a session

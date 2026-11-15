@@ -8,6 +8,7 @@ import {
 import type { QuotaUsage } from "@/lib/auth/quota";
 import { seedFromPreferences } from "@/store/useAppStore";
 import { usePreferencesStore } from "@/store/usePreferencesStore";
+import { useQueriesStore } from "@/store/useQueriesStore";
 
 /**
  * Session state for the UI: filled from GET /api/auth/session
@@ -90,7 +91,7 @@ const CLEARED = {
   usageToday: null,
 };
 
-/** Preferences storage subject: the SSO username (fallback: display name), or "guest". */
+/** Preferences + saved-queries subject: the SSO username (fallback: display name), or "guest". */
 function subjectFor(info: SessionInfo | null): string {
   if (!info || info.role !== "sso") return "guest";
   const username = info.username?.trim();
@@ -98,9 +99,15 @@ function subjectFor(info: SessionInfo | null): string {
   return info.name?.trim() || "sso";
 }
 
-/** Load this account's saved preferences and seed untouched filter/map defaults. */
+/**
+ * Load this account's saved preferences and seed untouched filter/map defaults,
+ * and drop any cached saved-query rows from the previous subject (login/logout
+ * must never render one account's list under another's session).
+ */
 function syncPreferencesSubject(info: SessionInfo | null): void {
-  usePreferencesStore.getState().setSubject(subjectFor(info));
+  const subject = subjectFor(info);
+  usePreferencesStore.getState().setSubject(subject);
+  useQueriesStore.getState().setSubject(subject);
   seedFromPreferences();
 }
 
