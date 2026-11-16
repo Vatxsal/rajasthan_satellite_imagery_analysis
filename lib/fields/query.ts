@@ -40,7 +40,9 @@ import { sampleConfidence, type ConfidenceWindow } from "./confidence";
 import { decodeMvt, mvtGeometryToGeoJSON } from "./mvt";
 import { PmtilesReader, type RangeReader } from "./pmtiles";
 
-export type FieldsYear = 2024 | 2025;
+/** FTW archive agri years (layers keyed by year). 2026 is provisional — see
+ *  agriYearInProgress in lib/fields/summary.ts. */
+export type FieldsYear = 2024 | 2025 | 2026;
 
 /** Duck-typed contract error understood by lib/server/api errorResponse(). */
 export function fieldsError(status: number, code: string, message: string): Error {
@@ -57,6 +59,8 @@ export function isContractError(error: unknown): error is { status: number; code
 }
 
 export interface FieldProperties {
+  /** Mirrors Feature.id — the map source promotes this key (maplibre drops non-numeric GeoJSON feature ids). */
+  id?: string;
   /** Source `metrics:area` in m² (merged copies keep the larger value). */
   areaM2: number;
   /** Sampled confidence 0..100; null when unavailable/nodata. */
@@ -389,13 +393,13 @@ export async function buildFieldsRaw(
     });
     const [lng, lat] = point.geometry.coordinates;
     const confidence = sampleConfidence(confidenceWindow, lng, lat);
-    const properties: FieldProperties = { areaM2: candidate.areaM2, confidence };
-    if (candidate.areaM2 < FIELDS_TINY_M2) properties.flag = "tiny";
-    else if (candidate.areaM2 > FIELDS_HUGE_M2) properties.flag = "huge";
     const id = createHash("sha1")
       .update(`${year}:${candidate.areaM2}:${lng.toFixed(5)}:${lat.toFixed(5)}`)
       .digest("hex")
       .slice(0, 12);
+    const properties: FieldProperties = { id, areaM2: candidate.areaM2, confidence };
+    if (candidate.areaM2 < FIELDS_TINY_M2) properties.flag = "tiny";
+    else if (candidate.areaM2 > FIELDS_HUGE_M2) properties.flag = "huge";
     return { type: "Feature", id, geometry: candidate.geometry, properties };
   });
 

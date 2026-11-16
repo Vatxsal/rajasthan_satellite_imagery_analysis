@@ -76,6 +76,12 @@ export interface PatternParams {
   grouping: boolean;
   grid: AnalysisGrid;
   estimatedPu: number;
+  /**
+   * The agri year is still running (rabi/zaid incomplete). Route derives it
+   * from the year so the run demotes fallow/kharif-only labels that would
+   * read unobserved months as fact (see classifySeries).
+   */
+  inProgress?: boolean;
 }
 
 export interface PatternDeps {
@@ -205,7 +211,9 @@ export async function runPattern(params: PatternParams, deps: PatternDeps): Prom
     }
 
     const metrics = seriesMetrics(filled);
-    const cls = classifySeries(smooth3(filled), metrics);
+    const cls = classifySeries(smooth3(filled), metrics, {
+      inProgress: params.inProgress ?? false,
+    });
     classes[cls] += 1;
     results.push({
       id: fieldId(features[field], field),

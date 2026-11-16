@@ -29,6 +29,7 @@ import {
   type FieldsYear,
 } from "@/lib/fields/query";
 import { estimatePatternPu, preparePatternGrid, type PatternMonth } from "@/lib/fields/pattern";
+import { agriYearInProgress } from "@/lib/fields/summary";
 import { runPattern, type PatternResult } from "@/lib/fields/patternRun";
 
 export const runtime = "nodejs";
@@ -52,7 +53,9 @@ const patternRequestSchema = z.object({
   year: z
     .coerce.number()
     .int()
-    .refine((value) => value === 2024 || value === 2025, { message: "year must be 2024 or 2025" }),
+    .refine((value) => value === 2024 || value === 2025 || value === 2026, {
+      message: "year must be 2024, 2025 or 2026",
+    }),
   minConfidence: z.coerce.number().int().min(0).max(100).optional(),
   /** Optional override of the FIELDS_GROUPING default (JSON boolean, no coercion). */
   grouping: z.boolean().optional(),
@@ -120,7 +123,7 @@ function sendCached(result: PatternResult, send: SendFrame): void {
 /**
  * POST /api/fields/pattern — monthly-NDVI cropping pattern per field.
  *
- * Body: { bbox: [west, south, east, north], year: 2024|2025,
+ * Body: { bbox: [west, south, east, north], year: 2024|2025|2026,
  *         minConfidence?: 0..100, grouping?: boolean }.
  * Streams newline-delimited JSON:
  *   {"type":"stage","stage":"fields"|"ndvi"|"analyze"}   (progress, in order)
@@ -251,7 +254,15 @@ export async function POST(request: Request): Promise<Response> {
     return ndjsonResponse(async (send) => {
       send({ type: "stage", stage: "fields" });
       const result = await runPattern(
-        { bbox, year, minConfidence, grouping, grid, estimatedPu },
+        {
+          bbox,
+          year,
+          minConfidence,
+          grouping,
+          grid,
+          estimatedPu,
+          inProgress: agriYearInProgress(year),
+        },
         { fields: filtered, fetchMonth, onEvent: send },
       );
       patternCache.set(resultKey, result, FIELDS_CACHE_TTL_SECONDS);

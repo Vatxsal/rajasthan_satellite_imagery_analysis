@@ -99,6 +99,7 @@ const QUOTA_LABELS: Record<QuotaKind, string> = {
   search: "search",
   compare: "analysis",
   aiSummary: "AI summary",
+  inspectSample: "NDVI sample",
 };
 
 function quotaExceededResponse(kind: QuotaKind, limit: number, retryAfterSeconds: number): NextResponse {

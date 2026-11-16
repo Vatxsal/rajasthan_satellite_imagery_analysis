@@ -128,13 +128,21 @@ test("quota mapping: metered capabilities and their limit keys", () => {
     "scenes.search": "search",
     "compare.analyses": "compare",
     "ai.summary": "aiSummary",
+    "inspect.sample": "inspectSample",
   });
   assert.equal(QUOTA_LIMIT_KEY.search, "searchesPerDay");
   assert.equal(QUOTA_LIMIT_KEY.compare, "comparePerDay");
   assert.equal(QUOTA_LIMIT_KEY.aiSummary, "aiSummariesPerDay");
+  assert.equal(QUOTA_LIMIT_KEY.inspectSample, "inspectSamplesPerDay");
   assert.equal(limitForKind(limitsFor("guest"), "compare"), 3);
   assert.equal(limitForKind(limitsFor("sso"), "aiSummary"), 30);
   assert.equal(limitForKind(limitsFor("guest"), "search"), 30);
+  // Map inspector: guests sample NDVI 10×/day, SSO 100×/day; basic
+  // inspection (location/field/change card) is open to both roles.
+  assert.equal(limitForKind(limitsFor("guest"), "inspectSample"), 10);
+  assert.equal(limitForKind(limitsFor("sso"), "inspectSample"), 100);
+  assert.ok(PERMISSIONS.guest.capabilities["inspect.basic"]);
+  assert.ok(PERMISSIONS.guest.capabilities["inspect.sample"]);
 });
 
 test("rolesWithCapability lists the holders (docs/readout helper)", () => {

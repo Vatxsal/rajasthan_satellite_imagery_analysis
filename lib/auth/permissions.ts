@@ -68,6 +68,10 @@ export const CAPABILITIES = [
   "email.report",
   /** Fields / cropping-pattern analysis. */
   "fields.pattern",
+  /** Map inspector basics: place/field/change info at a clicked point (no network for the local part). */
+  "inspect.basic",
+  /** NDVI spot sample via the Process API (consumes the daily sample quota). */
+  "inspect.sample",
   /** Read-only system status panel. */
   "system.status",
 ] as const;
@@ -92,6 +96,8 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   "ai.summary": "AI summary",
   "email.report": "Email report",
   "fields.pattern": "Fields / cropping pattern",
+  "inspect.basic": "Map inspector",
+  "inspect.sample": "NDVI spot sample",
   "system.status": "System status panel",
 };
 
@@ -111,6 +117,8 @@ export interface RoleLimits {
   downloadMaxPx: number;
   /** Max saved queries per user (guests: this browser only, SSO: profile). */
   savedQueriesMax: number;
+  /** NDVI spot samples per UTC day (per session AND per IP). */
+  inspectSamplesPerDay: number;
 }
 
 export interface RolePolicy {
@@ -151,6 +159,8 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       // Not part of the guest default set — treat as SSO-only until decided
       // otherwise (flip to true here if guests should see cropping patterns).
       "fields.pattern": false,
+      "inspect.basic": true,
+      "inspect.sample": true,
       "system.status": false,
     },
     limits: {
@@ -161,6 +171,7 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       aiSummariesPerDay: 0,
       downloadMaxPx: 1024,
       savedQueriesMax: 5,
+      inspectSamplesPerDay: 10,
     },
   },
   sso: {
@@ -183,6 +194,8 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       "ai.summary": true,
       "email.report": true,
       "fields.pattern": true,
+      "inspect.basic": true,
+      "inspect.sample": true,
       "system.status": true,
     },
     limits: {
@@ -194,12 +207,13 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       aiSummariesPerDay: 30,
       downloadMaxPx: 2500,
       savedQueriesMax: 50,
+      inspectSamplesPerDay: 100,
     },
   },
 };
 
 /** Daily quota buckets. Which capability consumes which bucket: */
-export type QuotaKind = "search" | "compare" | "aiSummary";
+export type QuotaKind = "search" | "compare" | "aiSummary" | "inspectSample";
 
 /**
  * Capability → daily quota. Only these capabilities are metered; calling
@@ -210,6 +224,7 @@ export const QUOTA_BY_CAPABILITY: Readonly<Partial<Record<Capability, QuotaKind>
   "scenes.search": "search",
   "compare.analyses": "compare",
   "ai.summary": "aiSummary",
+  "inspect.sample": "inspectSample",
 };
 
 /** RoleLimits keys that hold a daily counter (excludes nullable limits). */
@@ -222,6 +237,7 @@ export const QUOTA_LIMIT_KEY: Readonly<Record<QuotaKind, CounterLimitKey>> = {
   search: "searchesPerDay",
   compare: "comparePerDay",
   aiSummary: "aiSummariesPerDay",
+  inspectSample: "inspectSamplesPerDay",
 };
 
 /** The policy for a role (throws only on a programming error — roles are a closed union). */

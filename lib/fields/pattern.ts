@@ -240,14 +240,30 @@ function hasDoubleCropDip(smoothed: number[]): boolean {
  *
  * Thresholds/metrics come from the gap-filled series; only step 3 reads the
  * smoothed copy (single-month noise must not fake a second peak).
+ *
+ * `inProgress` (an agri year whose rabi half has not finished yet, e.g. the
+ * 2026–27 year mid-run) demotes the two labels that would read missing
+ * months as fact — `fallow` ("nothing grew" can just mean "not observed
+ * yet") and `kharif-only` (the rabi comparison is incomplete) — to
+ * `unclassified`. The curve is still shipped; only the seasonal claim is
+ * withheld until the year completes.
  */
-export function classifySeries(smoothed: number[], metrics: PatternMetrics): PatternClass {
-  if (metrics.max < PATTERN_GREEN_MIN) return "fallow";
-  if (metrics.min >= PATTERN_EVERGREEN_MIN) return "evergreen";
-  if (hasDoubleCropDip(smoothed)) return "double-cropped";
-  if ((PATTERN_ZAID_PEAK_MONTHS as readonly number[]).includes(metrics.peakMonth)) return "zaid";
-  if (metrics.kharifMean >= metrics.rabiMean) return "kharif-only";
-  return "rabi-only";
+export function classifySeries(
+  smoothed: number[],
+  metrics: PatternMetrics,
+  options: { inProgress?: boolean } = {},
+): PatternClass {
+  let cls: PatternClass;
+  if (metrics.max < PATTERN_GREEN_MIN) cls = "fallow";
+  else if (metrics.min >= PATTERN_EVERGREEN_MIN) cls = "evergreen";
+  else if (hasDoubleCropDip(smoothed)) cls = "double-cropped";
+  else if ((PATTERN_ZAID_PEAK_MONTHS as readonly number[]).includes(metrics.peakMonth))
+    cls = "zaid";
+  else if (metrics.kharifMean >= metrics.rabiMean) cls = "kharif-only";
+  else cls = "rabi-only";
+
+  if (options.inProgress && (cls === "fallow" || cls === "kharif-only")) return "unclassified";
+  return cls;
 }
 
 /** True when a series has enough observed months to be classified at all. */

@@ -9,11 +9,14 @@ import { bboxFromGeometry, type ClipGeometry } from "@/lib/cdse/geometry";
 import { CLASS_DEFS, classColor } from "@/lib/analysis/config";
 import type { Hotspot } from "@/lib/analysis/types";
 import { selectVisibleEvents } from "@/lib/compare/eventList";
+import { basemapWordsAt } from "@/lib/inspect/hits";
 import { formatArea } from "@/lib/format";
 import { bboxToBounds } from "@/lib/map/geojson";
+import { EVENT_LAYERS } from "@/lib/map/constants";
 import { MAP_PALETTES } from "@/lib/map/palette";
 import { useAppStore } from "@/store/useAppStore";
 import { useCompareStore } from "@/store/useCompareStore";
+import { useInspectorStore } from "@/store/useInspectorStore";
 import { usePreferencesStore } from "@/store/usePreferencesStore";
 import { useTheme } from "@/store/useTheme";
 
@@ -48,16 +51,17 @@ const LAYER = {
   overlay: "compare-overlay-layer",
   choropleth: "compare-choropleth",
   tehsilHighlight: "compare-tehsil-highlight",
-  hotspotFill: "compare-hotspot-fill",
-  hotspotLine: "compare-hotspot-line",
-  hotspotHover: "compare-hotspot-hover",
+  hotspotFill: EVENT_LAYERS.fill,
+  hotspotLine: EVENT_LAYERS.line,
+  hotspotHover: EVENT_LAYERS.hover,
 } as const;
 
 /** Legacy canvas-circle/symbol marker artifacts — stripped if a stale map has them. */
 const LEGACY_MARKER_LAYERS = ["compare-hotspot-circle", "compare-hotspot-rank"];
 const LEGACY_MARKER_SRC = "compare-hotspot-points";
 
-const HOTSPOT_LAYERS: string[] = [LAYER.hotspotFill, LAYER.hotspotLine, LAYER.hotspotHover];
+/** Event-polygon layers — the inspector hit-tests these first on map clicks. */
+export const HOTSPOT_LAYERS: string[] = [LAYER.hotspotFill, LAYER.hotspotLine, LAYER.hotspotHover];
 
 /** Anchors just above the basemap/imagery, below boundaries and labels. */
 const ANCHOR_BELOW = "districts-line";
@@ -94,7 +98,6 @@ export function setDebugMap(slot: "main" | "left" | "right", map: MapLibreMap | 
 
 /** Maps whose delegated hotspot events are already bound. */
 const hotspotEventsBound = new WeakSet<MapLibreMap>();
-let hotspotPopup: import("maplibre-gl").Popup | null = null;
 
 /** maplibre image-source coordinates are 4 corner pairs, NW-first. */
 function imageCoords(bbox: [number, number, number, number]): CompareCoords {
@@ -147,14 +150,6 @@ function classColorExpression(fallback: string): ExpressionSpecification {
     stops.push(def.code, rgbCss(def.color));
   }
   return ["match", ["get", "classCode"], ...stops, fallback] as unknown as ExpressionSpecification;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function removeSourceLayer(map: MapLibreMap, sourceId: string, layerIds: string[]): void {
@@ -441,15 +436,13 @@ let markerSig: string | null = null;
 let markerSyncSeq = 0;
 type MapLibreBits = {
   Marker: typeof import("maplibre-gl").Marker;
-  Popup: typeof import("maplibre-gl").Popup;
 };
 let maplibreLoader: Promise<MapLibreBits> | null = null;
-let popupEscBound = false;
 
 function loadMaplibre(): Promise<MapLibreBits> {
   return (maplibreLoader ??= import("maplibre-gl").then((module) => {
-    const { Marker, Popup } = module.default;
-    return { Marker, Popup };
+    const { Marker } = module.default;
+    return { Marker };
   }));
 }
 
@@ -472,13 +465,28 @@ function applyMarkerState(entry: HotspotMarkerEntry): void {
     entry.rank === selectedHotspot ? "selected" : entry.rank === hoveredHotspot ? "hover" : "";
 }
 
+/**
+ * Opens the unified map inspector on a change event: same card as every
+ * other map click (marker, patch, empty spot), pin at the event centroid.
+ */
+function inspectHotspotAt(map: MapLibreMap, rank: number, pin: [number, number]): void {
+  const basemapWords =
+    useAppStore.getState().basemap === "streets" ? basemapWordsAt(map, map.project(pin)) : [];
+  useInspectorStore.getState().openAt({
+    lng: pin[0],
+    lat: pin[1],
+    hit: { kind: "event", rank, centroid: pin },
+    basemapWords,
+  });
+}
+
 function onMarkerClick(rank: number): void {
   const hotspot = selectedHotspotAt(rank);
   const map = mainMap;
   if (!hotspot || !map) return;
   useCompareStore.getState().setSelectedHotspot(rank);
   map.flyTo({ center: hotspot.centroid, zoom: Math.max(map.getZoom(), 15), duration: 500 });
-  void openHotspotPopup(rank);
+  inspectHotspotAt(map, rank, hotspot.centroid);
 }
 
 /**
@@ -543,58 +551,7 @@ async function syncHotspotMarkers(map: MapLibreMap): Promise<void> {
 }
 
 
-const POPUP_COPY_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`;
-const POPUP_CHECK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
-const POPUP_ZOOM_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/></svg>`;
-
-function hotspotPopupHtml(
-  properties: Record<string, unknown>,
-  options: { showZoom: boolean },
-): string {
-  const rank = Number(properties.rank ?? 0);
-  const label = String(properties.classLabel ?? "Change");
-  const color = classColor(Number(properties.classCode ?? -1));
-  const areaHa = Number(properties.areaHa ?? 0);
-  const tehsil = String(properties.tehsilName ?? "");
-  const hotspot = selectedHotspotAt(rank);
-  const lon = hotspot?.centroid[0] ?? 0;
-  const lat = hotspot?.centroid[1] ?? 0;
-  const coords = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-  const areaUnit = usePreferencesStore.getState().values.units.areaUnit;
-  return (
-    `<div class="hs-pop">` +
-    `<div class="hs-pop-top">` +
-    `<span class="hs-pop-chip" style="background:rgb(${color[0]},${color[1]},${color[2]})" aria-hidden="true"></span>` +
-    `<span class="hs-pop-name">${escapeHtml(label)}</span>` +
-    `<span class="hs-pop-rank">#${rank}</span>` +
-    `</div>` +
-    `<p class="hs-pop-area">${formatArea(areaHa, areaUnit)}</p>` +
-    `<div class="hs-pop-rows">` +
-    (tehsil
-      ? `<div class="hs-pop-row"><span class="k">Tehsil</span><span class="v">${escapeHtml(tehsil)}</span></div>`
-      : "") +
-    (hotspot?.confidence
-      ? `<div class="hs-pop-row"><span class="k">Confidence</span><span class="v">${escapeHtml(hotspot.confidence)}${
-          typeof hotspot.confidencePct === "number" ? ` · ${hotspot.confidencePct}%` : ""
-        }</span></div>`
-      : "") +
-    (hotspot?.subLabel
-      ? `<div class="hs-pop-row"><span class="k">Note</span><span class="v">${escapeHtml(hotspot.subLabel)}</span></div>`
-      : "") +
-    `<div class="hs-pop-row">` +
-    `<span class="k">Centroid</span><span class="v mono">${coords}</span>` +
-    `<button type="button" class="hs-pop-btn" data-copy-coords="${lat.toFixed(6)}, ${lon.toFixed(6)}" ` +
-    `aria-label="Copy centroid coordinates">${POPUP_COPY_ICON}<span data-copy-label>Copy</span></button>` +
-    `</div>` +
-    `</div>` +
-    (options.showZoom
-      ? `<button type="button" class="hs-pop-btn hs-pop-zoom" data-zoom-in aria-label="Zoom in to this hotspot">${POPUP_ZOOM_ICON}Zoom in</button>`
-      : "") +
-    `</div>`
-  );
-}
-
-/** Hotspot-shaped view of an event feature (the popup/fly-to consumers expect
+/** Hotspot-shaped view of an event feature (fly-to/inspector consumers expect
  *  this shape; the raw properties carry every field the server vectorized). */
 function featureToHotspot(feature: GeoJSON.Feature): Hotspot | null {
   const props = (feature.properties ?? {}) as Record<string, unknown>;
@@ -633,77 +590,6 @@ function selectedHotspotAt(rank: number): Hotspot | null {
   return featureToHotspot(feature);
 }
 
-/** Opens the numbered popup for a hotspot (list click or map click). */
-async function openHotspotPopup(rank: number): Promise<void> {
-  const hotspot = selectedHotspotAt(rank);
-  const map = mainMap;
-  if (!hotspot || !map) return;
-  const maplibregl = await loadMaplibre();
-  if (mainMap !== map) return;
-  if (!hotspotPopup) {
-    hotspotPopup = new maplibregl.Popup({
-      closeButton: true,
-      maxWidth: "260px",
-      offset: 12,
-    });
-    hotspotPopup.on("open", () => {
-      const element = hotspotPopup?.getElement();
-      if (!element) return;
-      element
-        .querySelector(".maplibregl-popup-close-button")
-        ?.setAttribute("aria-label", "Close hotspot details");
-      const copyButton = element.querySelector<HTMLButtonElement>("[data-copy-coords]");
-      copyButton?.addEventListener("click", () => {
-        void navigator.clipboard?.writeText(copyButton.dataset.copyCoords ?? "").then(() => {
-          const label = copyButton.querySelector<HTMLElement>("[data-copy-label]");
-          const icon = copyButton.querySelector("svg");
-          if (label) label.textContent = "Copied";
-          if (icon) icon.outerHTML = POPUP_CHECK_ICON;
-          window.setTimeout(() => {
-            if (label) label.textContent = "Copy";
-            const current = copyButton.querySelector("svg");
-            if (current) current.outerHTML = POPUP_COPY_ICON;
-          }, 1500);
-        });
-      });
-      element.querySelector<HTMLElement>("[data-zoom-in]")?.addEventListener("click", () => {
-        const currentMap = mainMap;
-        const selected = useCompareStore.getState().selectedHotspot;
-        const target = selected ? selectedHotspotAt(selected) : null;
-        if (currentMap && target) {
-          currentMap.flyTo({ center: target.centroid, zoom: Math.max(currentMap.getZoom(), 15), duration: 500 });
-        }
-      });
-    });
-    hotspotPopup.on("close", () => {
-      useCompareStore.getState().setSelectedHotspot(null);
-    });
-  }
-  if (!popupEscBound) {
-    popupEscBound = true;
-    document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape" || !hotspotPopup) return;
-      hotspotPopup.remove();
-    });
-  }
-  hotspotPopup
-    .setLngLat(hotspot.centroid)
-    .setHTML(
-      hotspotPopupHtml(
-        {
-          rank,
-          classLabel: hotspot.classLabel,
-          classCode: hotspot.classCode,
-          areaHa: hotspot.areaHa,
-          tehsilName: hotspot.tehsilName ?? "",
-        },
-        // Only offer the zoom-in shortcut when the view is not already close.
-        { showZoom: map.getZoom() < 14 },
-      ),
-    )
-    .addTo(map);
-}
-
 /** Binds delegated events once per map instance (survives style reloads). */
 function bindHotspotEvents(map: MapLibreMap): void {
   if (hotspotEventsBound.has(map)) return;
@@ -729,11 +615,9 @@ function bindHotspotEvents(map: MapLibreMap): void {
   const click = (event: { features?: MapGeoJSONFeature[] }): void => {
     const rank = rankOf(event);
     if (rank === null) return;
-    const hotspot = selectedHotspotAt(rank);
-    if (!hotspot) return;
+    // Selection + highlight only — the unified inspector opens the card via
+    // the global map-click handler (same card as every other map click).
     useCompareStore.getState().setSelectedHotspot(rank);
-    map.flyTo({ center: hotspot.centroid, zoom: Math.max(map.getZoom(), 15), duration: 500 });
-    void openHotspotPopup(rank);
   };
 
   map.on("mouseenter", LAYER.hotspotFill, enter);
@@ -746,7 +630,6 @@ function bindHotspotEvents(map: MapLibreMap): void {
       hotspotLayerIds.length > 0 &&
       map.queryRenderedFeatures(event.point, { layers: hotspotLayerIds }).length > 0;
     if (ours) return;
-    hotspotPopup?.remove();
     useCompareStore.getState().setSelectedHotspot(null);
   });
 }
@@ -861,8 +744,6 @@ export function unregisterMainMap(map: MapLibreMap): void {
     setDebugMap("main", null);
     mainMap = null;
   }
-  hotspotPopup?.remove();
-  hotspotPopup = null;
   removeHotspotMarkers();
 }
 
@@ -899,11 +780,21 @@ export function setOverlayImage(url: string | null, key: string): void {
   }
 }
 
-/** Hotspot list/map click → select it, frame its patch and open the popup. */
+/** Hotspot list/map click → select it, frame its patch and open the inspector. */
 export function focusHotspot(rank: number, bbox: [number, number, number, number]): void {
   useCompareStore.getState().setSelectedHotspot(rank);
   fitToBbox(bbox, { maxZoom: 14, padding: 80 });
-  void openHotspotPopup(rank);
+  const hotspot = selectedHotspotAt(rank);
+  const map = mainMap;
+  if (!hotspot) return;
+  if (map) inspectHotspotAt(map, rank, hotspot.centroid);
+  else {
+    useInspectorStore.getState().openAt({
+      lng: hotspot.centroid[0],
+      lat: hotspot.centroid[1],
+      hit: { kind: "event", rank, centroid: hotspot.centroid },
+    });
+  }
 }
 
 /** "Zoom to changes" — frames the union of every detected change pixel. */

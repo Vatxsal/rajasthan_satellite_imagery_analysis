@@ -36,14 +36,16 @@ const fieldsRequestSchema = z.object({
   year: z
     .coerce.number()
     .int()
-    .refine((value) => value === 2024 || value === 2025, { message: "year must be 2024 or 2025" }),
+    .refine((value) => value === 2024 || value === 2025 || value === 2026, {
+      message: "year must be 2024, 2025 or 2026",
+    }),
   minConfidence: z.coerce.number().int().min(0).max(100).optional(),
 });
 
 /**
  * POST /api/fields — Field boundaries for a bbox + year.
  *
- * Body: { bbox: [west, south, east, north], year: 2024|2025,
+ * Body: { bbox: [west, south, east, north], year: 2024|2025|2026,
  *         minConfidence?: 0..100 } (defaults to FIELDS_MIN_CONFIDENCE).
  * Response: { bbox, year, minConfidence, selectedAreaKm2, confidenceAvailable,
  *             count, truncated, excluded: { confidence, noConfidence },
