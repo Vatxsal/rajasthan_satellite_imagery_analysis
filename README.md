@@ -69,6 +69,8 @@ npm run validate:boundaries           # validate counts, tiling, area and legacy
 node scripts/smoke.browser.cjs      # headless-browser smoke test (needs Chrome)
 node scripts/sharpness.browser.cjs      # imagery sharpness evidence (bicubic z13–15; needs Chrome)
 node scripts/verify-swipe-basemap.browser.cjs  # Swipe dates/basemap mode harness (needs Chrome)
+node scripts/verify-inspector-fields.browser.cjs  # map inspector + Fields & crops live harness (47 checks; needs Chrome + dev server)
+node scripts/warm-fields.browser.cjs  # warm the server-side fields cache for the harness viewports
 ```
 
 </details>
