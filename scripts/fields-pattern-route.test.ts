@@ -218,7 +218,7 @@ test("an unsupported year fails the schema refine", async () => {
   const { status, body } = await send({ bbox: SELECTION, year: 2023 });
   assert.equal(status, 400);
   assert.equal(body?.code, "INVALID_REQUEST");
-  assert.match(String(body?.message), /2024 or 2025/);
+  assert.match(String(body?.message), /2024, 2025 or 2026/);
   assert.equal(fetchCalls.length, 0);
 });
 

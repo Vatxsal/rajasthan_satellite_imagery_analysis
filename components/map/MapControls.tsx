@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, Crosshair, Home, Maximize2, Minus, MoreHorizontal, Plus } from "lucide-react";
+import { Camera, Crosshair, Home, Info, Maximize2, Minus, MoreHorizontal, Plus } from "lucide-react";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/Menu";
 
 interface MapControlsProps {
@@ -10,6 +10,7 @@ interface MapControlsProps {
   onLocate: () => void;
   onFullscreen: () => void;
   onScreenshot: () => void;
+  onInspectCentre: () => void;
 }
 
 function ControlButton({
@@ -41,6 +42,7 @@ export default function MapControls({
   onLocate,
   onFullscreen,
   onScreenshot,
+  onInspectCentre,
 }: MapControlsProps) {
   return (
     <div className="absolute right-3 top-3 z-20 flex flex-col gap-1.5">
@@ -70,6 +72,12 @@ export default function MapControls({
       </ControlButton>
       <ControlButton label="Locate me" onClick={onLocate}>
         <Crosshair size={15} />
+      </ControlButton>
+      {/* Keyboard path for the unified inspector — the map canvas itself is
+          not tabbable, so this button is the accessible way to open the
+          card at the centre of the current view. */}
+      <ControlButton label="Inspect map centre" onClick={onInspectCentre}>
+        <Info size={15} />
       </ControlButton>
       <ControlButton label="Fullscreen" onClick={onFullscreen}>
         <Maximize2 size={15} />

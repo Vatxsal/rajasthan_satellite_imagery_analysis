@@ -102,6 +102,7 @@ const QUOTA_LABELS: Record<QuotaKind, string> = {
   search: "searches",
   compare: "analyses",
   aiSummary: "AI summaries",
+  inspectSample: "NDVI samples",
 };
 
 /**

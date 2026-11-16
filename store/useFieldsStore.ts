@@ -1,6 +1,9 @@
 import { create } from "zustand";
 import type { BBox } from "@/lib/data";
 import type { FieldsYear } from "@/lib/fields/query";
+import type { PatternClass } from "@/lib/fields/config";
+import type { FieldsColorBy, FieldsRenderMode } from "@/lib/fields/style";
+import type { FieldScope } from "@/lib/fields/summary";
 import {
   FieldsClientError,
   fetchFields,
@@ -16,6 +19,9 @@ import { registerHomeResetHook } from "@/lib/homeReset";
  * the pattern run; the map bridge subscribes to the same store for boundary
  * and class-fill layers. Selection is always a viewport bbox (≤ FIELDS_MAX_KM2)
  * — admin areas are far too large for the 12-render PU budget.
+ *
+ * Phase 2 view state lives here too: colour-by mode, fill/outline render mode
+ * and the legend class filter (empty = show everything).
  */
 
 export interface FieldsError {
@@ -23,11 +29,25 @@ export interface FieldsError {
   message: string;
 }
 
+/** Scope the current fields were loaded for (caption under the card). */
+export interface FieldsLoadedScope {
+  scope: FieldScope;
+  name: string | null;
+}
+
 export interface FieldsState {
   visible: boolean;
   year: FieldsYear;
   minConfidence: number;
   grouping: boolean;
+  colorBy: FieldsColorBy;
+  renderMode: FieldsRenderMode;
+  /** Active legend class filter; empty = every class visible. */
+  filterClasses: PatternClass[];
+  /** Which selection the next "Load fields" uses. */
+  scope: FieldScope;
+  /** What the current fields came from (set on a successful load). */
+  loadedScope: FieldsLoadedScope | null;
 
   loading: boolean;
   error: FieldsError | null;
@@ -52,11 +72,20 @@ export interface FieldsState {
   setYear: (year: FieldsYear) => void;
   setMinConfidence: (value: number) => void;
   setGrouping: (value: boolean) => void;
+  setColorBy: (value: FieldsColorBy) => void;
+  setRenderMode: (value: FieldsRenderMode) => void;
+  setScope: (value: FieldScope) => void;
+  /** Chip toggle: first click isolates a class, later clicks add/remove. */
+  toggleClassFilter: (cls: PatternClass) => void;
+  /** Chip "Only": show exactly this class. */
+  onlyClassFilter: (cls: PatternClass) => void;
+  /** Legend "Show all": clear the filter. */
+  clearClassFilter: () => void;
   toggleVisible: () => void;
   selectField: (id: string | null) => void;
   clearError: () => void;
   clearPattern: () => void;
-  loadFields: (bbox: BBox) => Promise<void>;
+  loadFields: (bbox: BBox, loadedScope?: FieldsLoadedScope) => Promise<void>;
   runPattern: () => Promise<void>;
 }
 
@@ -71,9 +100,14 @@ let fieldsEpoch = 0;
 
 export const useFieldsStore = create<FieldsState>((set, get) => ({
   visible: true,
-  year: 2024,
+  year: 2025,
   minConfidence: 69,
   grouping: false,
+  colorBy: "pattern",
+  renderMode: "fill",
+  filterClasses: [],
+  scope: "viewport",
+  loadedScope: null,
 
   loading: false,
   error: null,
@@ -96,6 +130,21 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
   setYear: (year) => set({ year }),
   setMinConfidence: (minConfidence) => set({ minConfidence }),
   setGrouping: (grouping) => set({ grouping }),
+  setColorBy: (colorBy) => set({ colorBy }),
+  setRenderMode: (renderMode) => set({ renderMode }),
+  setScope: (scope) => set({ scope }),
+  toggleClassFilter: (cls) =>
+    set((s) => {
+      if (s.filterClasses.length === 0) return { filterClasses: [cls] };
+      const has = s.filterClasses.includes(cls);
+      const next = has
+        ? s.filterClasses.filter((entry) => entry !== cls)
+        : [...s.filterClasses, cls];
+      // Removing the last visible class would mute everything — clear instead.
+      return { filterClasses: next.length === 0 ? [] : next };
+    }),
+  onlyClassFilter: (cls) => set({ filterClasses: [cls] }),
+  clearClassFilter: () => set({ filterClasses: [] }),
   toggleVisible: () => set((s) => ({ visible: !s.visible })),
   selectField: (selectedFieldId) => set({ selectedFieldId }),
   clearError: () => set({ error: null }),
@@ -106,9 +155,10 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
       patternStage: null,
       patternMonthsDone: 0,
       selectedFieldId: null,
+      filterClasses: [],
     }),
 
-  loadFields: async (bbox) => {
+  loadFields: async (bbox, loadedScope) => {
     if (get().loading) return;
     const { year, minConfidence } = get();
     const epoch = fieldsEpoch;
@@ -121,6 +171,8 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
       patternStage: null,
       patternMonthsDone: 0,
       selectedFieldId: null,
+      filterClasses: [],
+      loadedScope: loadedScope ?? { scope: "viewport", name: null },
     });
     try {
       const result = await fetchFields({ bbox, year, minConfidence });
@@ -153,6 +205,7 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
         patternStage: null,
         patternMonthsDone: 0,
         selectedFieldId: null,
+        loadedScope: null,
       });
     }
   },
@@ -168,6 +221,7 @@ export const useFieldsStore = create<FieldsState>((set, get) => ({
       patternStage: "fields",
       patternMonthsDone: 0,
       selectedFieldId: null,
+      filterClasses: [],
     });
     try {
       const result = await streamPattern(
@@ -228,6 +282,8 @@ registerHomeResetHook(() => {
     patternError: null,
     pattern: null,
     selectedFieldId: null,
+    filterClasses: [],
+    loadedScope: null,
   });
 });
 

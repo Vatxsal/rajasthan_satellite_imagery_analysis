@@ -29,6 +29,26 @@ export const BOUNDARY_ATTRIBUTION =
   "Districts © OpenStreetMap contributors (ODbL) · Tehsils © Datameet / Census 2011";
 
 export const NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
+export const NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse";
+/** Attribution shown wherever Nominatim data is displayed (ODbL). */
+export const OSM_ATTRIBUTION = "© OpenStreetMap contributors";
+
+/**
+ * Layer ids owned by the compare bridge (change-event polygons) and the
+ * fields bridge (parcel fill/outline). Shared here so the inspector's
+ * click hit-testing can query them without importing either bridge
+ * (bridge → inspector must stay acyclic).
+ */
+export const EVENT_LAYERS = {
+  fill: "compare-hotspot-fill",
+  line: "compare-hotspot-line",
+  hover: "compare-hotspot-hover",
+} as const;
+
+export const FIELDS_LAYERS = {
+  fill: "fields-fill",
+  line: "fields-line",
+} as const;
 
 export function bboxToPolygon(bbox: BBox): GeoJSON.Polygon {
   const [west, south, east, north] = bbox;

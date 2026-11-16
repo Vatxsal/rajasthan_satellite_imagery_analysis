@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authGateState, AUTH_COOKIE, sessionSecret } from "@/lib/auth/config";
-import { PERMISSIONS, limitsFor, type QuotaKind, type Role } from "@/lib/auth/permissions";
+import { PERMISSIONS, limitsFor, QUOTA_LIMIT_KEY, type QuotaKind, type Role } from "@/lib/auth/permissions";
 import { quotaUsage, type QuotaUsage } from "@/lib/auth/quota";
 import { verifySession } from "@/lib/auth/session";
 import { getServerEnv } from "@/lib/env";
@@ -9,7 +9,7 @@ import { jsonError } from "@/lib/server/api";
 
 export const runtime = "nodejs";
 
-const QUOTA_KINDS: QuotaKind[] = ["search", "compare", "aiSummary"];
+const QUOTA_KINDS: QuotaKind[] = ["search", "compare", "aiSummary", "inspectSample"];
 
 /** Session cookie from a plain Request (same parser as lib/auth/guard.ts). */
 function readSessionCookie(request: Request): string | null {
@@ -56,18 +56,7 @@ export async function GET(request: Request): Promise<Response> {
       const limits = limitsFor(role);
       const subject = { sub, ip };
       const usageToday = Object.fromEntries(
-        QUOTA_KINDS.map((kind) => [
-          kind,
-          quotaUsage(
-            kind,
-            subject,
-            kind === "search"
-              ? limits.searchesPerDay
-              : kind === "compare"
-                ? limits.comparePerDay
-                : limits.aiSummariesPerDay,
-          ),
-        ]),
+        QUOTA_KINDS.map((kind) => [kind, quotaUsage(kind, subject, limits[QUOTA_LIMIT_KEY[kind]])]),
       ) as Record<QuotaKind, QuotaUsage>;
       return NextResponse.json(
         {

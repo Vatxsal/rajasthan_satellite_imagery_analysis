@@ -34,7 +34,7 @@ export interface AreaSelection {
 export type SidebarTabId = "filters" | "layers" | "distance" | "queries" | "fields" | "status";
 
 /** Which bottom sheet owns the phone viewport (exactly one at a time). */
-export type SheetKey = "panel" | "results" | "compare";
+export type SheetKey = "panel" | "results" | "compare" | "inspector";
 
 export type AdminLayerId = "districts" | "tehsils" | "ilrs";
 

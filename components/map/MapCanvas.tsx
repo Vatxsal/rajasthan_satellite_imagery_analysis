@@ -22,6 +22,8 @@ import {
 import { buildTileUrlTemplate } from "@/lib/map/tiles";
 import { addCompareLayers, registerMainMap, unregisterMainMap } from "@/lib/compare/bridge";
 import { addFieldsLayers } from "@/lib/fields/mapBridge";
+import { basemapWordsAt } from "@/lib/inspect/hits";
+import { bindInspectorMap } from "@/lib/inspect/mapEvents";
 import {
   EMPTY_FEATURE_COLLECTION,
   bboxToBounds,
@@ -31,6 +33,7 @@ import {
 import { BOUNDARY_LINE_THEMES, MAP_PALETTES, type BoundaryLineStyle } from "@/lib/map/palette";
 import { createPlaceholderImageryUrl } from "@/lib/map/placeholderImagery";
 import { selectActiveSelection, useActiveScene, useActiveSelection, useAppStore } from "@/store/useAppStore";
+import { useInspectorStore } from "@/store/useInspectorStore";
 import { useTheme, type ThemeId } from "@/store/useTheme";
 import { cn } from "@/components/ui/cn";
 import AddressSearch from "./AddressSearch";
@@ -39,6 +42,7 @@ import CompositeLegendBar from "./CompositeLegend";
 import CursorCoords from "./CursorCoords";
 import LegendControl from "./LegendControl";
 import MapControls from "./MapControls";
+import MapInspector from "./MapInspector";
 
 const SRC = {
   satellite: SATELLITE_BASEMAP.id,
@@ -702,6 +706,7 @@ export default function MapCanvas() {
       map.addControl(new maplibregl.ScaleControl({ maxWidth: 100, unit: "metric" }), "bottom-left");
       mapRef.current = map;
       registerMainMap(map);
+      bindInspectorMap(map);
 
       const container = containerRef.current;
       resizeObserver = new ResizeObserver(() => map?.resize());
@@ -982,6 +987,20 @@ export default function MapCanvas() {
   const handleZoomOut = useCallback(() => mapRef.current?.zoomOut({ duration: 250 }), []);
   const handleHome = useCallback(() => useAppStore.getState().requestHome(), []);
   const handleLocate = useCallback(() => useAppStore.getState().requestLocate(), []);
+  // Keyboard-accessible inspector path: inspect whatever sits under the
+  // centre of the current view (streets mode captures basemap words too).
+  const handleInspectCentre = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const center = map.getCenter();
+    const basemapWords =
+      useAppStore.getState().basemap === "streets"
+        ? basemapWordsAt(map, map.project(center))
+        : [];
+    useInspectorStore
+      .getState()
+      .inspectCentre(center.lng, center.lat, basemapWords);
+  }, []);
   const handleFullscreen = useCallback(() => {
     const shell = containerRef.current?.closest(".map-shell");
     if (!shell) return;
@@ -1055,7 +1074,9 @@ export default function MapCanvas() {
             onLocate={handleLocate}
             onFullscreen={handleFullscreen}
             onScreenshot={handleScreenshot}
+            onInspectCentre={handleInspectCentre}
           />
+          <MapInspector mapRef={mapRef} />
           <div
             className="absolute left-3 z-20 flex items-end gap-2 transition-[bottom] duration-150 ease-out"
             style={leftBottomStyle}

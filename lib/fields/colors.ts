@@ -16,15 +16,23 @@ export const PATTERN_CLASS_LABELS: Record<PatternClass, string> = {
   unclassified: "Unclassified",
 };
 
-/** Hex colours aligned with Tailwind-ish ramps (legible on light + dark). */
+/**
+ * Hex colours aligned with the Okabe-Ito colour-blind-safe palette (one hue
+ * per class, pairwise distinguishable under deuteranopia/protanopia; legible
+ * on light and satellite basemaps). The same record colours the map fill, the
+ * legend chips, the field list and the small multiples — one source of truth
+ * so map and legend can never drift. `fallow` and `unclassified` differ in
+ * lightness (dark stone vs light grey) so the safety fallback never reads as
+ * a real cropping pattern.
+ */
 export const PATTERN_CLASS_COLORS: Record<PatternClass, string> = {
-  fallow: "#A8A29E",
-  "kharif-only": "#16A34A",
-  "rabi-only": "#2563EB",
-  "double-cropped": "#9333EA",
-  zaid: "#D97706",
-  evergreen: "#0F766E",
-  unclassified: "#9CA3AF",
+  fallow: "#D55E00", // vermillion — bare / nothing grew
+  "kharif-only": "#009E73", // bluish green — monsoon crop
+  "rabi-only": "#0072B2", // blue — winter crop
+  "double-cropped": "#CC79A7", // reddish purple — two cycles
+  zaid: "#E69F00", // orange — summer crop
+  evergreen: "#56B4E9", // sky blue — green year-round
+  unclassified: "#9CA3AF", // neutral grey — rules could not place it
 };
 
 /** Neutral outline when boundaries are shown without a pattern result. */
