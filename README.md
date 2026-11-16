@@ -31,6 +31,8 @@ Next.js 14 · TypeScript · Tailwind · MapLibre GL JS · Zustand · Radix UI ·
 | 🗺️ | **Map & imagery** | OpenFreeMap basemap (English labels) with an Esri satellite switcher, **native-resolution 512 px tiles** (bicubic upscaling, zoom band up to z15) clipped to the selected area, opacity slider, legends, address search, boundary layers, light / dark themes. |
 | ⬇️ | **Downloads** | PNG preview for every role; **GeoTIFF (visual, 8-bit)** and **GeoTIFF (analysis, FLOAT32 bands)** for SSO; Copernicus Browser deep links. Clipped to the selection, up to 2500 px per side (guest PNG capped at 1024 px). |
 | 🔍 | **Change detection** | Compare two dates: **Swipe**, classified **Changes** map, **Stats** (by class and tehsil), **Events** list with numbered map markers, **Summary**, and exports. Guests run tehsil / ILR at default tuning (3/day); SSO adds district level, adjustable sensitivity / minimum patch, PNG + GeoTIFF / CSV / GeoJSON exports (50/day). |
+| 🧭 | **Map inspector** | Click the map (or focus **Inspect map centre** + Enter) for one Google-Maps-style card: coordinates with copy, *Select this tehsil / district*, field details with an NDVI sparkline, change-event facts, a **Sample NDVI here** spot check, and Copernicus Browser / Google Maps links. Bottom sheet on phones; Esc closes. See [Map inspector](#-map-inspector). |
+| 🌾 | **Fields & crops** | SSO-only: load Fields of the World parcel boundaries for the current view (≤ 25 km²), run a 12-month **cropping pattern** (fallow / kharif / rabi / double-cropped …), paint the map by pattern, curve group or confidence, isolate classes from the legend, and open any parcel in the map inspector. See [Fields & crops on the map](#-fields--crops-on-the-map). |
 | 🤖 | **AI summary** | SSO-only Gemini briefing of a comparison in English or हिन्दी, built only from the computed statistics (30/day). |
 | 📧 | **Email report** | SSO-only: one click (**Send report to mail**) emails the top events, stats, AI summary, change-map image, `events.csv` and a link that reopens the analysis. Fixed-recipient mode for production. |
 | 🔐 | **Access gate & roles** | `/login` hero page with shared-credential **Sign in**, **Continue as guest** (limited role), and an in-card **Request access** form. Locked features show a padlock popover; the API returns `403 FORBIDDEN_ROLE`. See [Roles & capabilities](#roles--capabilities). |
@@ -208,6 +210,42 @@ The model narrates the computed numbers and must not invent places or causes. Yo
 
 ---
 
+## 🧭 Map inspector
+
+One click on the map answers *what is here?* — a Google-Maps-style card on desktop, a bottom sheet on phones. Open it with a click / tap on the map, with the **Inspect map centre** control, or from the keyboard (focus *Inspect map centre*, press Enter); **Esc** closes it. Each click picks the richest hit: a numbered **change event** beats a **field parcel**, which beats an empty spot.
+
+Sections appear only when they have something to say:
+
+- **Location** — coordinates with **Copy coordinates**, reverse-geocoded place, district / tehsil / irrigation block, and **Select this tehsil** / **Select this district** buttons that arm the area filter.
+- **Field** — when *Fields & crops* is loaded and a parcel is hit: area, confidence, cropping class and its 12-month NDVI sparkline, with a jump to the list row.
+- **Change** — the analysis facts for the event under the pointer (or its loading / error state).
+- **Imagery** — **Sample NDVI here**: one spot value with clear / cloudy conditions, against a daily quota.
+- **Open elsewhere** — deep links to Copernicus Browser and Google Maps for the same location.
+
+The inspector only reads what is already on the map — it never changes a selection on its own.
+
+---
+
+## 🌾 Fields & crops on the map
+
+**SSO-only** (guests see the lock). The **Fields & crops** tab loads real field parcels from the [Fields of the World](https://fieldsoftheworld.org/) archive for Rajasthan — PMTiles and confidence COG reads happen **server-side**, the browser never fetches them — and colours them with a derived cropping pattern.
+
+**Use it:** zoom to ≤ 25 km² → choose the **Agri year** (2024–25 / 2025–26 / 2026–27), **Analysis scope** (current view / selected tehsil) and **Min confidence** → **Load fields for scope** → **Run cropping pattern**.
+
+- **Pattern** — 12 monthly NDVI composites per parcel classify it as *Fallow, Kharif only, Rabi only, Double-cropped, Zaid, Evergreen* or *Unclassified*, optionally with curve **groups** (**Group similar curves**), plus a processing-usage estimate (`est. … PU` against `PER_ANALYSIS_PU_LIMIT`).
+- **Map** — parcels are painted from a fixed Okabe–Ito palette. **Colour parcels by** Pattern / Group / Confidence; **Parcel style** Fill + outline / Outline only. Legend chips isolate one class at a time (the list notes *Showing n of N fields*; **Show all** clears it); chips carry each class's count, area and share.
+- **Charts** — *Mean NDVI by pattern* and *Mean NDVI by group* small multiples; the field list gives every parcel a sparkline with area, confidence, mean NDVI, peak month and valid months.
+- **Inspector** — clicking a parcel opens the map inspector's **Field** section (see [Map inspector](#-map-inspector)); hovering a row highlights the parcel on the map.
+
+**Honest limits:**
+
+- The live archive publishes **2024–25 and 2025–26 boundaries only** for Rajasthan — **2026–27 loads 0 fields** and the panel says so (the year stays selectable so the notice is visible).
+- **2026–27 is provisional**: rabi / zaid seasons have not finished, so fallow and kharif-only labels are withheld (shown as *Unclassified*).
+- Classes come from 12 Sentinel-2 NDVI composites — heuristics to explore, not agronomic ground truth. Confidence (0–100) is sampled from the FTW confidence COG; when it is unavailable the panel shows *unavailable* and, at the default threshold, *No fields in this area at ≥ … confidence*.
+- Selections are capped at **25 km²** (`FIELDS_MAX_KM2`), `FIELDS_MAX_COUNT` parcels per load and `PER_ANALYSIS_PU_LIMIT` for the PU pre-flight; built selections are cached server-side for a week. Attribution rides under the legend when confidence is available.
+
+---
+
 ## 📧 Email Report
 
 A button in the results panel header (**Send report to mail** in fixed mode, **Email report** in typed mode) sends one auto-generated email containing: the top events, statistics, optional AI summary, an inline change-map image, an `events.csv` attachment, and a **link that reopens the same analysis** (`?a=…&l=…&A=…&B=…&tab=events`). The email states that it is automatically generated by the Rajasthan Imagery Explorer website and must not be replied to.
@@ -266,6 +304,8 @@ Exactly two roles exist — **guest** and **sso**. There is no admin/member tier
 | AI summary | 🔒 | ✅ |
 | Email report | 🔒 | ✅ |
 | Fields / cropping pattern | 🔒 | ✅ |
+| Map inspector | ✅ | ✅ |
+| NDVI spot sample | ✅ | ✅ |
 | System status panel | 🔒 | ✅ |
 
 **Guest limits:** 90-day window · tiles z≤12 · 30/day searches · 3/day analyses · 0/day AI · PNG ≤1024 px · 5 saved queries.
@@ -354,6 +394,7 @@ Preferences are stored **per account, in this browser only** (`rie:prefs:v1:<sub
 | **Hosting** | No database: sessions, lockout counters, rate limits and quotas are per serverless instance (cold starts reset them); Vercel limits on duration, memory and response size apply. |
 | **Saved queries** | Supabase free projects pause after inactivity — SSO saves answer `503 STORAGE_UNAVAILABLE` until the project resumes; guests keep working in browser storage. |
 | **AI summary** | Can misread images; always check Stats and Changes. |
+| **Fields & crops** | Boundaries come from the Fields of the World archive: Rajasthan publishes 2024–25 and 2025–26 only, so 2026–27 loads 0 parcels (the panel says so) and its classes are provisional (fallow / kharif withheld → *Unclassified*). Pattern classes are NDVI heuristics, not agronomic truth. Selections ≤ 25 km² with parcel-count and PU caps. |
 
 ---
 
@@ -511,7 +552,7 @@ interface DataAdapter {
 
 - **Sentinel-2:** contains modified Copernicus Sentinel data, © ESA / Copernicus, via the [Copernicus Data Space Ecosystem](https://dataspace.copernicus.eu/) (Copernicus licence terms apply; keep the attribution).
 - **Basemaps:** [OpenFreeMap](https://openfreemap.org/) (OpenMapTiles, © OpenStreetMap contributors, ODbL) and Esri World Imagery (Esri, Maxar, Earthstar Geographics; check Esri's terms for commercial use). **Geocoding:** [Nominatim](https://nominatim.org/), © OpenStreetMap contributors.
-- **Boundaries:** districts © [OpenStreetMap](https://www.openstreetmap.org) contributors (ODbL-1.0, via Overpass); tehsils © [Datameet](https://datameet.org) Census 2011 compilations (Census of India open data, upstream has no explicit licence file).
+- **Boundaries:** districts © [OpenStreetMap](https://www.openstreetmap.org) contributors (ODbL-1.0, via Overpass); tehsils © [Datameet](https://datameet.org) Census 2011 compilations (Census of India open data, upstream has no explicit licence file). **Field parcels & confidence:** [Fields of the World](https://fieldsoftheworld.org/) (CC BY 4.0 — Robinson et al. 2026, via data.source.coop).
 - **AI:** Google Gemini API (optional). **Libraries:** MapLibre GL JS, Next.js, zod, turf, Radix UI, Nodemailer, lucide; fonts Public Sans and IBM Plex Mono (SIL OFL).
 
 ---
