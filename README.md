@@ -155,7 +155,7 @@ All Copernicus, Gemini and email calls are **server-side**; the browser never se
 ### Connect Copernicus (free)
 
 1. Register at [dataspace.copernicus.eu](https://dataspace.copernicus.eu/).
-2. Open the **Sentinel Hub dashboard** (<https://shapps.dataspace.copernicus.eu/dashboard/>) → Account Settings → **OAuth clients** → Create.
+2. Open the **Copernicus Data Space Dashboard** (<https://shapps.dataspace.copernicus.eu/dashboard/>) → User settings → **OAuth clients** → Create.
 3. Copy the client ID and secret immediately (the secret is shown once) into `.env.local` and set `NEXT_PUBLIC_DATA_SOURCE=cdse`.
 4. Restart and open `/api/health/cdse`. You want `{"status":"ok"}`.
 
@@ -525,7 +525,8 @@ interface DataAdapter {
 | "Area too large" | `AOI_TOO_LARGE` | Pick a tehsil / ILR or raise `MAX_AOI_KM2` |
 | Download rejected | `DOWNLOAD_TOO_LARGE` | Over 2500 px: pick a smaller area or accept the reduced resolution |
 | Everything 500s in `cdse` mode | `CDSE_CONFIG` | Set `CDSE_CLIENT_ID` / `CDSE_CLIENT_SECRET` |
-| Auth failures | `CDSE_AUTH` / 401 | Recreate the OAuth client in the **Sentinel Hub dashboard**; check whitespace; token URL and API base must match |
+| Auth failures (`invalid_client`) | `CDSE_AUTH` / 401 | Recreate the OAuth client (**Data Space Dashboard > User settings > OAuth clients**); check whitespace/quotes; token URL and API base must match |
+| Search 403 *Invalid or expired account* | `CDSE_AUTH` / 403 | The token works — the **account has no active plan/trial**: renew/activate it in the Data Space Dashboard, then retry (no env changes needed) |
 | Upstream errors | `UPSTREAM_ERROR` (502) | Copernicus outage or timeout: retry |
 | Renders empty / imagery never appears | n/a | Polygon winding must be counter-clockwise (re-run `npx tsx scripts/fetch-districts-41.ts`) |
 | Tiles blank for a date | n/a | No acquisition covers that tile on that day: pick another date |
