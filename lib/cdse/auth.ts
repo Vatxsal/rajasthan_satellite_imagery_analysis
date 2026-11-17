@@ -18,20 +18,41 @@ const tokenState = sharedInstance("rse.cdseAuth", () => ({
 /** Refresh 60s before the reported expiry to avoid using a dying token. */
 const SAFETY_MARGIN_MS = 60_000;
 
+/**
+ * Trim + strip one layer of surrounding quotes from an env-provided credential.
+ * Catches values pasted as `"…"` or `'…'` — those still parse as "set" but the
+ * token endpoint rejects them with invalid_client.
+ */
+export function sanitizeCredential(value: string | undefined): string {
+  const trimmed = (value ?? "").trim();
+  const quoted = /^(["'])([\s\S]*)\1$/.exec(trimmed);
+  return (quoted ? quoted[2] : trimmed).trim();
+}
+
 async function requestToken(): Promise<TokenInfo> {
   const env = getServerEnv();
-  if (!env.CDSE_CLIENT_ID || !env.CDSE_CLIENT_SECRET) {
+  const clientId = sanitizeCredential(env.CDSE_CLIENT_ID);
+  const clientSecret = sanitizeCredential(env.CDSE_CLIENT_SECRET);
+  if (!clientId || !clientSecret) {
+    // "Missing env var" is distinct from "credentials rejected" (401/403 below).
+    const missing = [
+      clientId ? null : "CDSE_CLIENT_ID",
+      clientSecret ? null : "CDSE_CLIENT_SECRET",
+    ]
+      .filter(Boolean)
+      .join(" and ");
     throw new CdseHttpError(
       500,
       "CDSE_CONFIG",
-      "CDSE_CLIENT_ID and CDSE_CLIENT_SECRET are required when NEXT_PUBLIC_DATA_SOURCE=cdse.",
+      `${missing} missing or empty — set ${missing} in the server environment ` +
+        "(required when NEXT_PUBLIC_DATA_SOURCE=cdse).",
     );
   }
 
   const body = new URLSearchParams({
     grant_type: "client_credentials",
-    client_id: env.CDSE_CLIENT_ID,
-    client_secret: env.CDSE_CLIENT_SECRET,
+    client_id: clientId,
+    client_secret: clientSecret,
   });
 
   const response = await fetch(env.CDSE_TOKEN_URL, {
@@ -43,8 +64,27 @@ async function requestToken(): Promise<TokenInfo> {
   });
 
   if (!response.ok) {
-    // Never include the response body or credentials in logs/errors.
-    throw mapCdseStatus(response.status);
+    const text = await response.text().catch(() => "");
+    // Log status + OAuth error only — never the client id/secret (the upstream
+    // body never echoes them either).
+    let oauth: { error?: unknown; error_description?: unknown } = {};
+    try {
+      oauth = JSON.parse(text) as typeof oauth;
+    } catch {
+      /* non-JSON body — mapCdseStatus handles the snippet fallback */
+    }
+    const oauthError = typeof oauth.error === "string" ? oauth.error : undefined;
+    const description =
+      typeof oauth.error_description === "string"
+        ? oauth.error_description.replace(/\s+/g, " ").slice(0, 200)
+        : undefined;
+    console.error(
+      `[cdse:auth] token endpoint HTTP ${response.status}` +
+        (oauthError ? ` error=${oauthError}` : "") +
+        (description ? ` description=${description}` : ""),
+    );
+    // Failed tokens are never cached — ensureToken only stores on success.
+    throw mapCdseStatus(response.status, text);
   }
 
   const json = (await response.json()) as { access_token?: string; expires_in?: number };
