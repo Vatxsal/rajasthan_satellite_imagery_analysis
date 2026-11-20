@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect } from "react";
-import { Activity, Bookmark, Layers, PanelLeftClose, Ruler, SlidersHorizontal, Sprout, X } from "lucide-react";
+import { Activity, Bookmark, Layers, PanelLeftClose, PenTool, Ruler, SlidersHorizontal, Sprout, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import FiltersPanel from "@/components/filters/FiltersPanel";
 import LayersPanel from "@/components/layers/LayersPanel";
@@ -22,6 +22,10 @@ const MeasurePanel = dynamic(() => import("@/components/filters/MeasurePanel"), 
   ssr: false,
   loading: () => <PanelLoading />,
 });
+const DrawPanel = dynamic(() => import("@/components/draw/DrawPanel"), {
+  ssr: false,
+  loading: () => <PanelLoading />,
+});
 const SavedQueriesPanel = dynamic(() => import("@/components/filters/SavedQueriesPanel"), {
   ssr: false,
   loading: () => <PanelLoading />,
@@ -35,6 +39,7 @@ const TITLES: Record<SidebarTabId, string> = {
   filters: "Search & filters",
   layers: "Layers",
   distance: "Measure",
+  draw: "Draw & analyze",
   queries: "Saved queries",
   fields: "Fields & crops",
   status: "System status",
@@ -45,6 +50,7 @@ const TAB_ITEMS: { id: SidebarTabId; label: string; Icon: LucideIcon; ssoOnly?: 
   { id: "layers", label: "Layers", Icon: Layers },
   { id: "fields", label: "Fields", Icon: Sprout },
   { id: "distance", label: "Measure", Icon: Ruler },
+  { id: "draw", label: "Draw", Icon: PenTool },
   { id: "queries", label: "Saved", Icon: Bookmark },
   { id: "status", label: "Status", Icon: Activity, ssoOnly: true },
 ];
@@ -66,6 +72,8 @@ function TabBody() {
       return <FieldsPanel />;
     case "distance":
       return <MeasurePanel />;
+    case "draw":
+      return <DrawPanel />;
     case "queries":
       return <SavedQueriesPanel />;
     case "status":

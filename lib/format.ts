@@ -48,6 +48,13 @@ export function formatArea(
   return `${value.toLocaleString("en", { maximumFractionDigits })} ${suffix}`;
 }
 
+/** Metres → "842 m" / "1,234 m" / "3.18 km" (no length unit preference exists). */
+export function formatLength(metres: number): string {
+  if (!Number.isFinite(metres)) return "—";
+  if (metres < 1000) return `${Math.round(metres).toLocaleString("en")} m`;
+  return `${(metres / 1000).toLocaleString("en", { maximumFractionDigits: 2 })} km`;
+}
+
 function toDms(value: number, positive: string, negative: string): string {
   const hemisphere = value >= 0 ? positive : negative;
   const abs = Math.abs(value);

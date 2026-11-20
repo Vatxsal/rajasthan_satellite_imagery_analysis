@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Bookmark, Layers, Ruler, SlidersHorizontal, Sprout } from "lucide-react";
+import { Activity, Bookmark, Layers, PenTool, Ruler, SlidersHorizontal, Sprout } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCan } from "@/store/useSession";
 import { useAppStore, type SidebarTabId } from "@/store/useAppStore";
@@ -12,6 +12,7 @@ const ITEMS: { id: SidebarTabId; label: string; Icon: LucideIcon; ssoOnly?: bool
   { id: "layers", label: "Layers", Icon: Layers },
   { id: "fields", label: "Fields & crops", Icon: Sprout },
   { id: "distance", label: "Measure", Icon: Ruler },
+  { id: "draw", label: "Draw & analyze", Icon: PenTool },
   { id: "queries", label: "Saved queries", Icon: Bookmark },
   { id: "status", label: "System status", Icon: Activity, ssoOnly: true },
 ];

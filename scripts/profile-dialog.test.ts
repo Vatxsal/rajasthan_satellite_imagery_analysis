@@ -138,7 +138,7 @@ test("profile dialog: capability list, quotas, password note and actions", () =>
 test("capability inventory covers the policy table", () => {
   // The profile dialog iterates CAPABILITIES — keep the count in sync so a
   // new capability can't silently be missing from the access list.
-  assert.equal(CAPABILITIES.length, 19);
+  assert.equal(CAPABILITIES.length, 23);
   for (const id of CAPABILITIES as readonly Capability[]) {
     assert.ok(PERMISSIONS.sso.capabilities[id] === true, `sso holds ${id}`);
     assert.ok(typeof PERMISSIONS.guest.capabilities[id] === "boolean", `guest decides ${id}`);

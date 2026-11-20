@@ -15,6 +15,7 @@ import type { Map as MapLibreMap, MapMouseEvent } from "maplibre-gl";
 import { basemapWordsAt, isDragClick, pickHit } from "@/lib/inspect/hits";
 import { EVENT_LAYERS, FIELDS_LAYERS } from "@/lib/map/constants";
 import { useAppStore } from "@/store/useAppStore";
+import { useDrawStore } from "@/store/useDrawStore";
 import { useInspectorStore } from "@/store/useInspectorStore";
 
 /** Maps whose inspector click handler is already bound. */
@@ -46,6 +47,28 @@ export function bindInspectorMap(map: MapLibreMap): void {
     if (wasDrag) return;
     // The measure tool owns clicks while armed (each click adds a point).
     if (useAppStore.getState().measureActive) return;
+    // Any draw tool owns clicks too — drawing, vertex drags and selection
+    // all stay with Terra Draw while a tool is armed.
+    if (useDrawStore.getState().tool !== null) return;
+
+    // Clicking an existing drawn shape (tool idle) opens its shape card
+    // instead of the inspector — the inspector ignores td- layers.
+    const tdIds = (map.getStyle().layers ?? [])
+      .filter((layer) => layer.id.startsWith("td-"))
+      .map((layer) => layer.id);
+    if (tdIds.length > 0) {
+      const tdFeatures = map.queryRenderedFeatures(event.point, { layers: tdIds });
+      const shapeHit = tdFeatures.find(
+        (feature) =>
+          feature.geometry.type === "Polygon" &&
+          typeof feature.properties?.shapeId === "string",
+      );
+      if (shapeHit) {
+        useDrawStore.getState().selectShape(shapeHit.properties.shapeId as string);
+        useInspectorStore.getState().close();
+        return;
+      }
+    }
 
     const eventIds = existingLayerIds(map, Object.values(EVENT_LAYERS));
     const fieldIds = existingLayerIds(map, [FIELDS_LAYERS.fill]);

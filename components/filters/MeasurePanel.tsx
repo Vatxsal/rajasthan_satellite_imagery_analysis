@@ -2,10 +2,17 @@
 
 import { Ruler } from "lucide-react";
 import { useAppStore } from "@/store/useAppStore";
+import { useDrawStore } from "@/store/useDrawStore";
 
 export default function MeasurePanel() {
   const measureActive = useAppStore((s) => s.measureActive);
   const toggleMeasure = useAppStore((s) => s.toggleMeasure);
+
+  const onToggle = () => {
+    // One click handler owns the map: arming measure disarms draw.
+    if (!measureActive) useDrawStore.getState().setTool(null);
+    toggleMeasure();
+  };
 
   return (
     <div className="space-y-5 p-3">
@@ -21,7 +28,7 @@ export default function MeasurePanel() {
           type="button"
           role="switch"
           aria-checked={measureActive}
-          onClick={toggleMeasure}
+          onClick={onToggle}
           className={`inline-flex h-6 w-11 shrink-0 items-center rounded-full border px-0.5 transition-colors duration-150 ${
             measureActive ? "border-accent bg-accent-soft" : "border-border bg-surface"
           }`}
