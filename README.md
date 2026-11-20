@@ -308,6 +308,10 @@ Exactly two roles exist — **guest** and **sso**. There is no admin/member tier
 | Fields / cropping pattern | 🔒 | ✅ |
 | Map inspector | ✅ | ✅ |
 | NDVI spot sample | ✅ | ✅ |
+| Draw shapes | ✅ | ✅ |
+| Analyze shapes | ✅ | ✅ |
+| Save shapes | ✅ | ✅ |
+| Shapefile download | 🔒 | ✅ |
 | System status panel | 🔒 | ✅ |
 
 **Guest limits:** 90-day window · tiles z≤12 · 30/day searches · 3/day analyses · 0/day AI · PNG ≤1024 px · 5 saved queries.

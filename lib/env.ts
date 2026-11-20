@@ -186,6 +186,14 @@ const baseSchema = z.object({
   /** Phase 2: group field NDVI curves with k-means in POST /api/fields/pattern. */
   FIELDS_GROUPING: boolEnvDefault(false),
 
+  // ── Draw & analyze (/api/shapes/*) ──────────────────────────────────────
+  /** Max drawn-shape area (km²) accepted by validate/analyze/export. */
+  DRAW_MAX_KM2: z.coerce.number().positive().default(100),
+  /** Max longest side of a shape's bounding box (km). */
+  DRAW_MAX_BBOX_KM: z.coerce.number().positive().default(25),
+  /** Max exterior-ring vertices (closing point excluded). */
+  DRAW_MAX_VERTICES: z.coerce.number().int().min(4).default(500),
+
   // ── Saved queries (/api/queries, SavedQueriesPanel) ───────────────────────
   /** Persistence for saved queries: auto = Supabase when configured, else browser storage. */
   SAVED_QUERIES_STORE: z.enum(["auto", "local", "supabase"]).default("auto"),
@@ -265,6 +273,9 @@ export interface ServerEnv {
   FTW_PMTILES_URL: string;
   FTW_CONFIDENCE_COG_URL: string;
   FIELDS_GROUPING: boolean;
+  DRAW_MAX_KM2: number;
+  DRAW_MAX_BBOX_KM: number;
+  DRAW_MAX_VERTICES: number;
   SAVED_QUERIES_STORE: "auto" | "local" | "supabase";
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;

@@ -10,6 +10,7 @@ import ResultsSurface from "@/components/scenes/ResultsSurface";
 import CompareDrawer from "@/components/compare/CompareDrawer";
 import CompareMapController from "@/components/compare/CompareMapController";
 import FieldsMapController from "@/components/fields/FieldsMapController";
+import DrawMapController from "@/components/draw/DrawMapController";
 import DownloadDialog from "@/components/scenes/DownloadDialog";
 import SaveQueryDialog from "@/components/filters/SaveQueryDialog";
 import ShareLinkLoader from "@/components/ShareLinkLoader";
@@ -29,6 +30,7 @@ export default function Page() {
           <MapCanvas />
           <CompareMapController />
           <FieldsMapController />
+          <DrawMapController />
           {isDesktop && <SceneStrip />}
         </main>
         {/* Desktop: resizable right-hand results panel (map keeps the majority of the viewport). */}

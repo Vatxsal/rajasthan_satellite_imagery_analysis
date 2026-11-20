@@ -199,6 +199,7 @@ const CUSTOM_LAYER_PREFIXES = [
   "scene-",
   "state-outline",
   "measure-",
+  "td-",
 ];
 
 export function isCustomLayer(layerId: string): boolean {

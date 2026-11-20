@@ -13,6 +13,7 @@
   "include": [
     "scripts/*.test.ts",
     "scripts/test-session.ts",
+    "scripts/cdse-test-env.ts",
     "scripts/validate.ts",
     "scripts/validate-fields.ts",
     "scripts/phase6.ts",

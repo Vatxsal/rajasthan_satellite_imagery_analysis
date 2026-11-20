@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, Crosshair, Home, Info, Maximize2, Minus, MoreHorizontal, Plus } from "lucide-react";
+import { Camera, Crosshair, Home, Info, Maximize2, Minus, MoreHorizontal, PenTool, Plus } from "lucide-react";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/Menu";
 
 interface MapControlsProps {
@@ -11,6 +11,7 @@ interface MapControlsProps {
   onFullscreen: () => void;
   onScreenshot: () => void;
   onInspectCentre: () => void;
+  onDraw: () => void;
 }
 
 function ControlButton({
@@ -43,6 +44,7 @@ export default function MapControls({
   onFullscreen,
   onScreenshot,
   onInspectCentre,
+  onDraw,
 }: MapControlsProps) {
   return (
     <div className="absolute right-3 top-3 z-20 flex flex-col gap-1.5">
@@ -78,6 +80,9 @@ export default function MapControls({
           card at the centre of the current view. */}
       <ControlButton label="Inspect map centre" onClick={onInspectCentre}>
         <Info size={15} />
+      </ControlButton>
+      <ControlButton label="Draw & analyze" onClick={onDraw}>
+        <PenTool size={15} />
       </ControlButton>
       <ControlButton label="Fullscreen" onClick={onFullscreen}>
         <Maximize2 size={15} />

@@ -46,7 +46,14 @@ if (!patched.__rseAliasHook) {
   patched._load = function (this: unknown, request: string, ...rest: unknown[]): unknown {
     if (request === "geotiff") {
       return {
-        fromArrayBuffer: () => {
+        fromArrayBuffer: (arrayBuffer: ArrayBuffer) => {
+          // Tests may inject a decode (globalThis.__rseGeotiffDecode) to run a
+          // full render→stats pipeline over synthetic rasters; the default
+          // stays a loud failure so no test silently "decodes" real bytes.
+          const custom = (
+            globalThis as { __rseGeotiffDecode?: (ab: ArrayBuffer) => Promise<unknown> }
+          ).__rseGeotiffDecode;
+          if (custom) return custom(arrayBuffer);
           throw new Error("geotiff is stubbed in the test harness");
         },
       };

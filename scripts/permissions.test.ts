@@ -63,6 +63,9 @@ test("guest defaults match the brief", () => {
     "compare.analyses",
     "downloads.png",
     "downloads.copernicus",
+    "draw.basic",
+    "draw.analyze",
+    "draw.save",
   ] as Capability[]) {
     assert.ok(can("guest", capability), capability);
   }
@@ -79,6 +82,7 @@ test("guest defaults match the brief", () => {
     "ai.summary",
     "email.report",
     "fields.pattern",
+    "draw.export.shapefile",
     "system.status",
   ] as Capability[]) {
     assert.equal(can("guest", capability), false, capability);

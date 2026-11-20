@@ -22,8 +22,10 @@ import {
 import { buildTileUrlTemplate } from "@/lib/map/tiles";
 import { addCompareLayers, registerMainMap, unregisterMainMap } from "@/lib/compare/bridge";
 import { addFieldsLayers } from "@/lib/fields/mapBridge";
+import { bindDrawMap, bringDrawLayersTop, unbindDrawMap } from "@/lib/draw/mapBridge";
 import { basemapWordsAt } from "@/lib/inspect/hits";
 import { bindInspectorMap } from "@/lib/inspect/mapEvents";
+import { openSheet } from "@/lib/sheets";
 import {
   EMPTY_FEATURE_COLLECTION,
   bboxToBounds,
@@ -33,6 +35,7 @@ import {
 import { BOUNDARY_LINE_THEMES, MAP_PALETTES, type BoundaryLineStyle } from "@/lib/map/palette";
 import { createPlaceholderImageryUrl } from "@/lib/map/placeholderImagery";
 import { selectActiveSelection, useActiveScene, useActiveSelection, useAppStore } from "@/store/useAppStore";
+import { useDrawStore } from "@/store/useDrawStore";
 import { useInspectorStore } from "@/store/useInspectorStore";
 import { useTheme, type ThemeId } from "@/store/useTheme";
 import { cn } from "@/components/ui/cn";
@@ -43,6 +46,8 @@ import CursorCoords from "./CursorCoords";
 import LegendControl from "./LegendControl";
 import MapControls from "./MapControls";
 import MapInspector from "./MapInspector";
+import DrawHud from "@/components/draw/DrawHud";
+import ShapeCard from "@/components/draw/ShapeCard";
 
 const SRC = {
   satellite: SATELLITE_BASEMAP.id,
@@ -657,6 +662,8 @@ export default function MapCanvas() {
   const sceneFootprintVisible = useAppStore((s) => s.sceneFootprintVisible);
   const hoveredSceneId = useAppStore((s) => s.hoveredSceneId);
   const measureActive = useAppStore((s) => s.measureActive);
+  const drawTool = useDrawStore((s) => s.tool);
+  const drawArmed = drawTool === "polygon" || drawTool === "rectangle" || drawTool === "circle";
   const homeNonce = useAppStore((s) => s.homeNonce);
   const locateNonce = useAppStore((s) => s.locateNonce);
   const stripOpen = useAppStore((s) => s.resultsOpen);
@@ -719,6 +726,11 @@ export default function MapCanvas() {
       const onStyleLoad = () => {
         if (disposed || !mapRef.current) return;
         addAppLayers(mapRef.current);
+        // Bind Terra Draw as soon as the map can host it — arming a tool is
+        // no longer the only trigger (a reload that loads a saved shape
+        // before any tool click must find the runtime already bound).
+        bindDrawMap(mapRef.current);
+        bringDrawLayersTop(mapRef.current);
         setReady(true);
       };
       map.on("style.load", onStyleLoad);
@@ -741,7 +753,10 @@ export default function MapCanvas() {
         window.clearTimeout(mapRuntime.shimmerTimer);
         mapRuntime.shimmerTimer = null;
       }
-      if (map) unregisterMainMap(map);
+      if (map) {
+        unbindDrawMap(map);
+        unregisterMainMap(map);
+      }
       map?.remove();
       mapRef.current = null;
       setReady(false);
@@ -1001,6 +1016,11 @@ export default function MapCanvas() {
       .getState()
       .inspectCentre(center.lng, center.lat, basemapWords);
   }, []);
+  // Open the Draw tab (rail on desktop, panel sheet below it).
+  const handleDraw = useCallback(() => {
+    useAppStore.getState().setSidebarTab("draw");
+    if (factor !== "desktop") openSheet("panel");
+  }, [factor]);
   const handleFullscreen = useCallback(() => {
     const shell = containerRef.current?.closest(".map-shell");
     if (!shell) return;
@@ -1052,7 +1072,9 @@ export default function MapCanvas() {
 
   return (
     <div
-      className={`map-shell relative h-full w-full overflow-hidden bg-surface-2 ${measureActive ? "cursor-crosshair" : ""}`}
+      className={`map-shell relative h-full w-full overflow-hidden bg-surface-2 ${
+        measureActive || drawArmed ? "cursor-crosshair" : ""
+      }`}
       data-strip={dockedStripVisible ? "open" : "closed"}
       style={{ "--strip-h": `${stripHeightPx}px` } as React.CSSProperties}
     >
@@ -1075,8 +1097,11 @@ export default function MapCanvas() {
             onFullscreen={handleFullscreen}
             onScreenshot={handleScreenshot}
             onInspectCentre={handleInspectCentre}
+            onDraw={handleDraw}
           />
           <MapInspector mapRef={mapRef} />
+          <ShapeCard style={rightBottomStyle} />
+          <DrawHud style={leftBottomStyle} />
           <div
             className="absolute left-3 z-20 flex items-end gap-2 transition-[bottom] duration-150 ease-out"
             style={leftBottomStyle}
@@ -1103,7 +1128,7 @@ export default function MapCanvas() {
             />
           )}
 
-          {measureActive && (
+          {measureActive && !drawTool && (
             <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded border border-border bg-surface px-2.5 py-1.5 text-xs text-text">
               Measure tool armed — click the map to add points.
             </div>

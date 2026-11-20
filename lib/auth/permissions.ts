@@ -72,6 +72,14 @@ export const CAPABILITIES = [
   "inspect.basic",
   /** NDVI spot sample via the Process API (consumes the daily sample quota). */
   "inspect.sample",
+  /** Draw shapes on the map (polygon/rectangle/circle) — client-side only. */
+  "draw.basic",
+  /** NDVI stats for a drawn shape via POST /api/shapes/analyze. */
+  "draw.analyze",
+  /** Keep shapes in the browser-local saved list. */
+  "draw.save",
+  /** Shapefile (.zip) download of a drawn shape. */
+  "draw.export.shapefile",
   /** Read-only system status panel. */
   "system.status",
 ] as const;
@@ -98,6 +106,10 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   "fields.pattern": "Fields / cropping pattern",
   "inspect.basic": "Map inspector",
   "inspect.sample": "NDVI spot sample",
+  "draw.basic": "Draw shapes",
+  "draw.analyze": "Analyze shapes",
+  "draw.save": "Save shapes",
+  "draw.export.shapefile": "Shapefile download",
   "system.status": "System status panel",
 };
 
@@ -161,6 +173,13 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       "fields.pattern": false,
       "inspect.basic": true,
       "inspect.sample": true,
+      // Draw, analyze and browser-local save stay open to guests (no server
+      // cost beyond the PU-capped analyze render); file downloads follow the
+      // "guests don't export" rule and stay SSO-only.
+      "draw.basic": true,
+      "draw.analyze": true,
+      "draw.save": true,
+      "draw.export.shapefile": false,
       "system.status": false,
     },
     limits: {
@@ -196,6 +215,10 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       "fields.pattern": true,
       "inspect.basic": true,
       "inspect.sample": true,
+      "draw.basic": true,
+      "draw.analyze": true,
+      "draw.save": true,
+      "draw.export.shapefile": true,
       "system.status": true,
     },
     limits: {
