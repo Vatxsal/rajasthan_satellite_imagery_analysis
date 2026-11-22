@@ -33,6 +33,7 @@ Next.js 14 · TypeScript · Tailwind · MapLibre GL JS · Zustand · Radix UI ·
 | 🔍 | **Change detection** | Compare two dates: **Swipe**, classified **Changes** map, **Stats** (by class and tehsil), **Events** list with numbered map markers, **Summary**, and exports. Guests run tehsil / ILR at default tuning (3/day); SSO adds district level, adjustable sensitivity / minimum patch, PNG + GeoTIFF / CSV / GeoJSON exports (50/day). |
 | 🧭 | **Map inspector** | Click the map (or focus **Inspect map centre** + Enter) for one Google-Maps-style card: coordinates with copy, *Select this tehsil / district*, field details with an NDVI sparkline, change-event facts, a **Sample NDVI here** spot check, and Copernicus Browser / Google Maps links. Bottom sheet on phones; Esc closes. See [Map inspector](#-map-inspector). |
 | 🌾 | **Fields & crops** | SSO-only: load Fields of the World parcel boundaries for the current view (≤ 25 km²), run a 12-month **cropping pattern** (fallow / kharif / rabi / double-cropped …), paint the map by pattern, curve group or confidence, isolate classes from the legend, and open any parcel in the map inspector. See [Fields & crops on the map](#-fields--crops-on-the-map). |
+| 🛰️ | **High-resolution imagery** | SSO-only NRSC Bhoonidhi LISS-IV scenes (5.8 m, false colour) for the selected area: scene picker, opacity, and a **Swipe vs Sentinel-2** divider. Guests can request an area by email with the AOI attached. See [High-resolution imagery](#-high-resolution-imagery-bhoonidhi). |
 | 🤖 | **AI summary** | SSO-only Gemini briefing of a comparison in English or हिन्दी, built only from the computed statistics (30/day). |
 | 📧 | **Email report** | SSO-only: one click (**Send report to mail**) emails the top events, stats, AI summary, change-map image, `events.csv` and a link that reopens the analysis. Fixed-recipient mode for production. |
 | 🔐 | **Access gate & roles** | `/login` hero page with shared-credential **Sign in**, **Continue as guest** (limited role), and an in-card **Request access** form. Locked features show a padlock popover; the API returns `403 FORBIDDEN_ROLE`. See [Roles & capabilities](#roles--capabilities). |
@@ -248,6 +249,20 @@ The inspector only reads what is already on the map — it never changes a selec
 
 ---
 
+## 🛰️ High-resolution imagery (Bhoonidhi)
+
+**SSO-only** (guests see the lock). The **High-resolution imagery** card in the layers panel shows [NRSC Bhoonidhi](https://bhoonidhi.nrsc.gov.in/) **LISS-IV** scenes (5.8 m, false colour) ingested for the selected area — India's national high-resolution data portal, from ResourceSat-2 / 2A.
+
+**Use it:** select an area → open **Layers** → **High-resolution imagery** → pick a scene (acquisition date · sensor · resolution · covered area) → toggle it on with the eye button and set opacity. **Swipe vs Sentinel-2** splits the map: the nearest Sentinel-2 false-colour scene on the left, the high-resolution scene on the right, with a draggable divider (mouse, touch or arrow keys) and a date picker for the Sentinel-2 side. The card notes the scene's licence and *Source: NRSC / ISRO, via Bhoonidhi* under the map chip.
+
+**How scenes get here:** a separate Python pipeline (`vhr/`, documented in [`vhr/README.md`](`vhr/README.md`), dispatched by `.github/workflows/vhr-ingest.yml`) authenticates against the Bhoonidhi API (20 tokens/hour/IP), clips each scene to the AOI + 200 m, applies a 2–98 percentile stretch and tiles it into a **private** Supabase Storage bucket (`vhr-tiles/<scene-id>/<z>/<x>/<y>.png`). The browser never talks to Bhoonidhi or Storage: `/api/vhr/scenes` lists what overlaps the bbox, and `/api/vhr/tiles/…` proxies one tile server-side after the `vhr.view` capability check — hits cache immutably, gaps answer a transparent pixel, and the service-role key never leaves the server.
+
+**Requesting an area:** **Request high-resolution imagery for this area** emails the administrators the current selection as an `aoi.geojson` attachment (GeoJSON Feature with area name and requested date window) plus an *how to ingest this AOI* hint — use it when no scene exists yet. Availability mirrors the access-request gates (`EMAIL_FIXED_RECIPIENT` + `ACCESS_REQUEST_DAILY_CAP`, else the button reports the service is unavailable); abuse limits are shared with the access request (per IP / per requester / deployment per UTC day, plus 10-minute duplicate suppression). Nothing is stored.
+
+> **Pending decision:** the on-map attribution wording is provisional pending NRSC guidance, and the Bhoonidhi licence terms should be confirmed with NRSC before wider distribution.
+
+---
+
 ## 📧 Email Report
 
 A button in the results panel header (**Send report to mail** in fixed mode, **Email report** in typed mode) sends one auto-generated email containing: the top events, statistics, optional AI summary, an inline change-map image, an `events.csv` attachment, and a **link that reopens the same analysis** (`?a=…&l=…&A=…&B=…&tab=events`). The email states that it is automatically generated by the Rajasthan Imagery Explorer website and must not be replied to.
@@ -313,6 +328,7 @@ Exactly two roles exist — **guest** and **sso**. There is no admin/member tier
 | Save shapes | ✅ | ✅ |
 | Shapefile download | 🔒 | ✅ |
 | System status panel | 🔒 | ✅ |
+| High-resolution imagery | 🔒 | ✅ |
 
 **Guest limits:** 90-day window · tiles z≤12 · 30/day searches · 3/day analyses · 0/day AI · PNG ≤1024 px · 5 saved queries.
 
@@ -401,6 +417,7 @@ Preferences are stored **per account, in this browser only** (`rie:prefs:v1:<sub
 | **Saved queries** | Supabase free projects pause after inactivity — SSO saves answer `503 STORAGE_UNAVAILABLE` until the project resumes; guests keep working in browser storage. |
 | **AI summary** | Can misread images; always check Stats and Changes. |
 | **Fields & crops** | Boundaries come from the Fields of the World archive: Rajasthan publishes 2024–25 and 2025–26 only, so 2026–27 loads 0 parcels (the panel says so) and its classes are provisional (fallow / kharif withheld → *Unclassified*). Pattern classes are NDVI heuristics, not agronomic truth. Selections ≤ 25 km² with parcel-count and PU caps. |
+| **High-resolution imagery** | Scenes exist only where the `vhr/` pipeline has ingested them (AOI ≤ 400 km², Bhoonidhi API quota of 20 tokens/hour); otherwise the card says *No high-resolution scenes for this area yet*. Ingestion runs outside Vercel (dispatch workflow) and needs GDAL, which tests never import. Attribution wording and licence confirmation with NRSC are pending. |
 
 ---
 
@@ -450,14 +467,14 @@ Preferences are stored **per account, in this browser only** (`rie:prefs:v1:<sub
 
 ## 🧪 Testing & CI
 
-Run `npm run verify` before pushing: typecheck → lint → unit tests → production build, **zero errors** (unused variables are lint errors and also fail the Vercel build). CI (`.github/workflows/ci.yml`) runs it on every push and PR to `main` with the mock data source and no secrets, then boots the production server and smoke-tests `/` and `/api/health/cdse`. Work on a feature branch, open a PR, wait for green CI, then merge.
+Run `npm run verify` before pushing: typecheck → lint → unit tests → production build, **zero errors** (unused variables are lint errors and also fail the Vercel build). CI (`.github/workflows/ci.yml`) runs it on every push and PR to `main` with the mock data source and no secrets, then boots the production server and smoke-tests `/` and `/api/health/cdse`. The `vhr` job installs GDAL-free Python deps and runs the Bhoonidhi ingest pipeline's pytest suite (`python -m pytest vhr`) — it needs no credentials and never contacts the network. Work on a feature branch, open a PR, wait for green CI, then merge.
 
 ---
 
 ## 🗂️ Project Layout
 
 ```text
-app/api/            scenes · imagery · tiles/[z]/[x]/[y] · compare (analyze, overlay, summary, email, email/config) · auth (login, guest, logout, session) · access-request · health (cdse, gemini)
+app/api/            scenes · imagery · tiles/[z]/[x]/[y] · compare (analyze, overlay, summary, email, email/config) · auth (login, guest, logout, session) · access-request · vhr (scenes, tiles, request) · health (cdse, gemini)
 app/login/          landing page (hero + auth card, page-level CSS)
 components/         shell · filters · layers · map · scenes · compare (tabs, EmailReport, ShareLinkLoader) · login (LoginHero, AuthCard) · ui
 data/               boundaries/ (OSM districts · Census tehsils) · mock/
@@ -468,10 +485,12 @@ lib/cdse/           OAuth, STAC, Process API, evalscripts, tiling maths
 lib/analysis/       change-detection engine (config, classify, filter, stats, encoders)
 lib/compare/        client helpers: stream, map bridge, share links, exports
 lib/email/          providers (smtp, resend, console), templates, quotas
+lib/vhr/            shared VHR scene types (app side of the Bhoonidhi pipeline)
 lib/server/         API helpers, area resolution, budgets, Gemini client, Turnstile, access-request quotas
 lib/data/           DataAdapter + mock/cdse adapters, boundaries
 store/              Zustand stores (app, compare, session)
 scripts/            mock data, boundary fetchers, email tools, auth CLIs, tests
+vhr/                Bhoonidhi ingest pipeline (Python + GDAL; runs outside Vercel, see vhr/README.md)
 middleware.ts       Edge access gate (public paths, 401s, /login?next=)
 ```
 
@@ -560,6 +579,7 @@ interface DataAdapter {
 - **Sentinel-2:** contains modified Copernicus Sentinel data, © ESA / Copernicus, via the [Copernicus Data Space Ecosystem](https://dataspace.copernicus.eu/) (Copernicus licence terms apply; keep the attribution).
 - **Basemaps:** [OpenFreeMap](https://openfreemap.org/) (OpenMapTiles, © OpenStreetMap contributors, ODbL) and Esri World Imagery (Esri, Maxar, Earthstar Geographics; check Esri's terms for commercial use). **Geocoding:** [Nominatim](https://nominatim.org/), © OpenStreetMap contributors.
 - **Boundaries:** districts © [OpenStreetMap](https://www.openstreetmap.org) contributors (ODbL-1.0, via Overpass); tehsils © [Datameet](https://datameet.org) Census 2011 compilations (Census of India open data, upstream has no explicit licence file). **Field parcels & confidence:** [Fields of the World](https://fieldsoftheworld.org/) (CC BY 4.0 — Robinson et al. 2026, via data.source.coop).
+- **High-resolution imagery:** NRSC Bhoonidhi scenes (ResourceSat-2 / 2A LISS-IV, 5.8 m) — *Source: NRSC / ISRO, via Bhoonidhi*; licence terms pending confirmation with NRSC.
 - **AI:** Google Gemini API (optional). **Libraries:** MapLibre GL JS, Next.js, zod, turf, Radix UI, Nodemailer, lucide; fonts Public Sans and IBM Plex Mono (SIL OFL).
 
 ---

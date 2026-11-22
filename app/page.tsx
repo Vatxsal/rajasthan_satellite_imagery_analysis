@@ -9,6 +9,7 @@ import SceneStrip from "@/components/scenes/SceneStrip";
 import ResultsSurface from "@/components/scenes/ResultsSurface";
 import CompareDrawer from "@/components/compare/CompareDrawer";
 import CompareMapController from "@/components/compare/CompareMapController";
+import VhrSwipeOverlay from "@/components/map/VhrSwipeOverlay";
 import FieldsMapController from "@/components/fields/FieldsMapController";
 import DrawMapController from "@/components/draw/DrawMapController";
 import DownloadDialog from "@/components/scenes/DownloadDialog";
@@ -29,6 +30,7 @@ export default function Page() {
         <main className="relative min-h-0 min-w-0 flex-1">
           <MapCanvas />
           <CompareMapController />
+          <VhrSwipeOverlay />
           <FieldsMapController />
           <DrawMapController />
           {isDesktop && <SceneStrip />}

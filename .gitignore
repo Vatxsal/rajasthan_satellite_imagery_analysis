@@ -29,6 +29,11 @@
 # email-report previews (EMAIL_PROVIDER=console) — never commit generated mail
 /.email-preview/
 
+# python (vhr/ ingest pipeline)
+__pycache__/
+*.pyc
+.pytest_cache/
+
 # misc
 .DS_Store
 *.pem

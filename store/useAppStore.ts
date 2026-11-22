@@ -13,6 +13,7 @@ import { IN_FLIGHT, beginInFlight, abortInFlightAll } from "@/lib/inFlight";
 import type { BasemapId } from "@/lib/map/constants";
 import { rangeToDates } from "@/lib/prefs/range";
 import { runHomeResetHooks } from "@/lib/homeReset";
+import type { VhrScene } from "@/lib/vhr/types";
 import {
   DOWNLOAD_FORMAT_LABELS,
   downloadScene,
@@ -170,6 +171,27 @@ interface AppState {
   imageryError: string | null;
   setImageryLoading: (value: boolean) => void;
   setImageryError: (message: string | null) => void;
+
+  // high-resolution (NRSC Bhoonidhi) imagery -------------------------------
+  /** Scenes overlapping the current bbox, as served by GET /api/vhr/scenes. */
+  vhrScenes: VhrScene[];
+  /** Selected scene id (tile source + attribution follow it). */
+  vhrSceneId: string | null;
+  vhrVisible: boolean;
+  vhrOpacity: number;
+  /** Swipe vs Sentinel-2 overlay active. */
+  vhrSwipe: boolean;
+  /** Sentinel-2 date shown on the left of the VHR swipe divider. */
+  vhrSwipeDate: string | null;
+  /** VHR swipe divider position, 0-100. */
+  vhrDivider: number;
+  setVhrScenes: (scenes: VhrScene[]) => void;
+  setVhrScene: (id: string | null) => void;
+  toggleVhr: () => void;
+  setVhrOpacity: (value: number) => void;
+  setVhrSwipe: (value: boolean) => void;
+  setVhrSwipeDate: (value: string | null) => void;
+  setVhrDivider: (value: number) => void;
 
   // toasts ------------------------------------------------------------------
   toasts: ToastItem[];
@@ -354,6 +376,11 @@ export const useAppStore = create<AppState>((set, get) => {
       toDate: range.to,
       maxCloudCover: prefs.map.maxCloudCover,
       composite: prefs.map.composite,
+      vhrVisible: false,
+      vhrSwipe: false,
+      vhrSceneId: null,
+      vhrSwipeDate: null,
+      vhrDivider: 50,
       sidebarTab: "filters",
       sidebarOpen: true,
       sidebarCollapsed: false,
@@ -416,6 +443,30 @@ export const useAppStore = create<AppState>((set, get) => {
   imageryError: null,
   setImageryLoading: (value) => set({ imageryLoading: value }),
   setImageryError: (message) => set({ imageryError: message }),
+
+  vhrScenes: [],
+  vhrSceneId: null,
+  vhrVisible: false,
+  vhrOpacity: 1,
+  vhrSwipe: false,
+  vhrSwipeDate: null,
+  vhrDivider: 50,
+  setVhrScenes: (scenes) =>
+    set((s) => ({
+      vhrScenes: scenes,
+      // Keep the selection when it still exists; otherwise lead with the
+      // newest scene (the route returns acquired_at.desc order).
+      vhrSceneId:
+        s.vhrSceneId && scenes.some((scene) => scene.id === s.vhrSceneId)
+          ? s.vhrSceneId
+          : scenes[0]?.id ?? null,
+    })),
+  setVhrScene: (id) => set({ vhrSceneId: id }),
+  toggleVhr: () => set((s) => ({ vhrVisible: !s.vhrVisible })),
+  setVhrOpacity: (value) => set({ vhrOpacity: value }),
+  setVhrSwipe: (value) => set({ vhrSwipe: value }),
+  setVhrSwipeDate: (value) => set({ vhrSwipeDate: value }),
+  setVhrDivider: (value) => set({ vhrDivider: value }),
 
   toasts: [],
   pushToast: ({ tone, message, duration = 6000, action }) => {

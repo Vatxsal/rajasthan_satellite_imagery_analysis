@@ -82,6 +82,8 @@ export const CAPABILITIES = [
   "draw.export.shapefile",
   /** Read-only system status panel. */
   "system.status",
+  /** View high-resolution NRSC Bhoonidhi imagery (/api/vhr/*, SSO only). */
+  "vhr.view",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -111,6 +113,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   "draw.save": "Save shapes",
   "draw.export.shapefile": "Shapefile download",
   "system.status": "System status panel",
+  "vhr.view": "High-resolution imagery",
 };
 
 /** Numeric ceilings per role. `null` = unlimited (full archive window). */
@@ -181,6 +184,9 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       "draw.save": true,
       "draw.export.shapefile": false,
       "system.status": false,
+      // Bhoonidhi high-resolution tiles are metered server storage — SSO
+      // only; guests see a locked card with the request button instead.
+      "vhr.view": false,
     },
     limits: {
       searchWindowDays: 90,
@@ -220,6 +226,7 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       "draw.save": true,
       "draw.export.shapefile": true,
       "system.status": true,
+      "vhr.view": true,
     },
     limits: {
       searchWindowDays: null, // full archive

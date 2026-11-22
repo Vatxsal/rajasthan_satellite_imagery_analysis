@@ -48,3 +48,23 @@ jobs:
           curl -fsS -o /dev/null -w "home=%{http_code}\n" http://localhost:3000/
           curl -fsS http://localhost:3000/api/health/cdse
           echo
+
+  # Bhoonidhi ingest pipeline (vhr/): pure-Python unit tests with a fake HTTP
+  # layer — no GDAL, no credentials, no network. GDAL is only needed when the
+  # ingest workflow actually tiles a scene.
+  vhr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: vhr/requirements.txt
+
+      - name: Install
+        run: python -m pip install --quiet pytest -r vhr/requirements.txt
+
+      - name: Ingest pipeline tests
+        run: python -m pytest vhr -q

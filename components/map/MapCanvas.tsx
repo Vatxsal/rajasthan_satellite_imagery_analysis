@@ -34,6 +34,7 @@ import {
 } from "@/lib/map/geojson";
 import { BOUNDARY_LINE_THEMES, MAP_PALETTES, type BoundaryLineStyle } from "@/lib/map/palette";
 import { createPlaceholderImageryUrl } from "@/lib/map/placeholderImagery";
+import type { VhrScene } from "@/lib/vhr/types";
 import { selectActiveSelection, useActiveScene, useActiveSelection, useAppStore } from "@/store/useAppStore";
 import { useDrawStore } from "@/store/useDrawStore";
 import { useInspectorStore } from "@/store/useInspectorStore";
@@ -59,6 +60,7 @@ const SRC = {
   activeScene: "active-scene",
   imagery: "imagery-preview",
   shimmer: "imagery-shimmer",
+  vhr: "vhr-tiles",
 } as const;
 
 const LAYER = {
@@ -78,6 +80,7 @@ const LAYER = {
   sceneLine: "active-scene-line",
   imagery: "imagery-layer",
   shimmer: "imagery-shimmer-fill",
+  vhr: "vhr-tiles-layer",
 } as const;
 
 interface BaseLayerSnapshot {
@@ -390,6 +393,13 @@ function addAppLayers(map: MapLibreMap): void {
     }
   }
 
+  // ------------------------------------------------ high-resolution (vhr) tiles
+  // Restored from the store on every style.load like the other app layers.
+  if (state.vhrVisible && state.vhrSceneId) {
+    const vhrScene = state.vhrScenes.find((scene) => scene.id === state.vhrSceneId);
+    if (vhrScene) setVhrTiles(map, vhrScene);
+  }
+
   // ---------------------------------------------------------- admin boundary data (async, cached)
   const applyAdminData = (data: AdminBoundaryData) => {
     try {
@@ -621,6 +631,60 @@ function removeImagerySource(map: MapLibreMap) {
   if (map.getSource(SRC.imagery)) map.removeSource(SRC.imagery);
 }
 
+/** XYZ template for one high-resolution scene (private bucket proxy). */
+function vhrTileUrl(sceneId: string): string {
+  return `/api/vhr/tiles/${sceneId}/{z}/{x}/{y}.png`;
+}
+
+/** Mandatory source line + the ingest-time licence note, when present. */
+function vhrAttribution(scene: VhrScene): string {
+  const source = "Source: NRSC / ISRO, via Bhoonidhi";
+  return scene.licenseNote ? `${scene.licenseNote} · ${source}` : source;
+}
+
+/**
+ * Adds (or rebuilds) the high-resolution raster source for a scene. The
+ * source is recreated rather than setTiles()'d because attribution and the
+ * zoom band belong to the scene. gdal2tiles ran with --xyz at its default
+ * 256 px tile size, matching this config.
+ */
+function setVhrTiles(
+  map: MapLibreMap,
+  scene: VhrScene,
+): void {
+  removeVhrSource(map);
+  map.addSource(SRC.vhr, {
+    type: "raster",
+    tiles: [vhrTileUrl(scene.id)],
+    tileSize: 256,
+    minzoom: scene.minZoom,
+    maxzoom: scene.maxZoom,
+    attribution: vhrAttribution(scene),
+  });
+  // Directly above the Sentinel imagery overlay, below the boundary lines.
+  addLayerSafe(
+    map,
+    {
+      id: LAYER.vhr,
+      type: "raster",
+      source: SRC.vhr,
+      layout: {
+        visibility: useAppStore.getState().vhrVisible ? "visible" : "none",
+      },
+      paint: {
+        "raster-opacity": useAppStore.getState().vhrOpacity,
+        "raster-fade-duration": 200,
+      },
+    },
+    map.getLayer(LAYER.districts) ? LAYER.districts : undefined,
+  );
+}
+
+function removeVhrSource(map: MapLibreMap) {
+  if (map.getLayer(LAYER.vhr)) map.removeLayer(LAYER.vhr);
+  if (map.getSource(SRC.vhr)) map.removeSource(SRC.vhr);
+}
+
 const SHIMMER_OPACITY = [0.08, 0.18] as const;
 
 function showShimmer(map: MapLibreMap, geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon) {
@@ -659,6 +723,10 @@ export default function MapCanvas() {
   const imageryOpacity = useAppStore((s) => s.imageryOpacity);
   const imageryLoading = useAppStore((s) => s.imageryLoading);
   const imageryError = useAppStore((s) => s.imageryError);
+  const vhrVisible = useAppStore((s) => s.vhrVisible);
+  const vhrOpacity = useAppStore((s) => s.vhrOpacity);
+  const vhrSceneId = useAppStore((s) => s.vhrSceneId);
+  const vhrScenes = useAppStore((s) => s.vhrScenes);
   const sceneFootprintVisible = useAppStore((s) => s.sceneFootprintVisible);
   const hoveredSceneId = useAppStore((s) => s.hoveredSceneId);
   const measureActive = useAppStore((s) => s.measureActive);
@@ -809,6 +877,33 @@ export default function MapCanvas() {
     if (!ready || !map || !map.getLayer(LAYER.imagery)) return;
     map.setPaintProperty(LAYER.imagery, "raster-opacity", imageryOpacity);
   }, [ready, imageryOpacity]);
+
+  // ------------------------------------------------ high-resolution overlay
+  // Rebuilds the source when the scene/selection changes; visibility and
+  // opacity ride along in setVhrTiles (style.load restore lives in
+  // addAppLayers above).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    const scene = vhrSceneId ? vhrScenes.find((candidate) => candidate.id === vhrSceneId) : null;
+    if (!vhrVisible || !scene) {
+      removeVhrSource(map);
+      return;
+    }
+    setVhrTiles(map, scene);
+  }, [ready, vhrVisible, vhrSceneId, vhrScenes]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map || !map.getLayer(LAYER.vhr)) return;
+    map.setLayoutProperty(LAYER.vhr, "visibility", vhrVisible ? "visible" : "none");
+  }, [ready, vhrVisible]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map || !map.getLayer(LAYER.vhr)) return;
+    map.setPaintProperty(LAYER.vhr, "raster-opacity", vhrOpacity);
+  }, [ready, vhrOpacity]);
 
   // ------------------------------------------------ area selection
   useEffect(() => {
