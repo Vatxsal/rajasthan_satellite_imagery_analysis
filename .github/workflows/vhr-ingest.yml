@@ -1,0 +1,148 @@
+# Manual VHR ingest from NRSC Bhoonidhi.
+# Runs only when dispatched by hand (never on push). Secrets stay in GitHub
+# Actions secrets and are passed to the process via the environment only.
+name: VHR ingest (Bhoonidhi)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "search = list candidate scenes; ingest = download, tile and upload"
+        type: choice
+        options:
+          - search
+          - ingest
+        default: search
+        required: true
+      aoi_geojson:
+        description: "AOI as GeoJSON (Polygon / MultiPolygon / Feature / FeatureCollection), max 400 km2"
+        type: string
+        required: true
+      start_date:
+        description: "YYYY-MM-DD (required for search, and for ingest without item_id)"
+        type: string
+        required: false
+        default: ""
+      end_date:
+        description: "YYYY-MM-DD"
+        type: string
+        required: false
+        default: ""
+      collection:
+        description: "STAC collection id (defaults to the ResourceSat LISS-4 pair)"
+        type: string
+        required: false
+        default: ""
+      item_id:
+        description: "Exact item to ingest (skips the search; requires collection)"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# One ingest at a time: Bhoonidhi allows only 20 tokens/hour per IP and
+# 3 concurrent downloads per user+IP.
+concurrency:
+  group: vhr-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        env:
+          MODE: ${{ inputs.mode }}
+          START: ${{ inputs.start_date }}
+          END: ${{ inputs.end_date }}
+          ITEM_ID: ${{ inputs.item_id }}
+          COLLECTION: ${{ inputs.collection }}
+        run: |
+          if [ "$MODE" = "search" ]; then
+            if [ -z "$START" ] || [ -z "$END" ]; then
+              echo "::error::search requires start_date and end_date"
+              exit 1
+            fi
+          else
+            if [ -n "$ITEM_ID" ]; then
+              if [ -z "$COLLECTION" ]; then
+                echo "::error::ingest with item_id requires collection"
+                exit 1
+              fi
+            elif [ -z "$START" ] || [ -z "$END" ]; then
+              echo "::error::ingest without item_id requires start_date and end_date"
+              exit 1
+            fi
+          fi
+
+      - name: Write AOI file
+        env:
+          AOI_GEOJSON: ${{ inputs.aoi_geojson }}
+        run: |
+          AOI_PATH="$RUNNER_TEMP/aoi.geojson"
+          printf '%s\n' "$AOI_GEOJSON" > "$AOI_PATH"
+          # Fail early with a clear message instead of a traceback later.
+          python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$AOI_PATH" \
+            || { echo "::error::aoi_geojson is not valid JSON"; exit 1; }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r vhr/requirements.txt
+
+      - name: Search candidate scenes
+        if: inputs.mode == 'search'
+        working-directory: vhr
+        env:
+          BHOONIDHI_USER: ${{ secrets.BHOONIDHI_USER }}
+          BHOONIDHI_PASSWORD: ${{ secrets.BHOONIDHI_PASSWORD }}
+          START: ${{ inputs.start_date }}
+          END: ${{ inputs.end_date }}
+          COLLECTION: ${{ inputs.collection }}
+        run: |
+          : "${BHOONIDHI_USER:?BHOONIDHI_USER secret is not set}"
+          : "${BHOONIDHI_PASSWORD:?BHOONIDHI_PASSWORD secret is not set}"
+          ARGS=()
+          if [ -n "$COLLECTION" ]; then
+            ARGS+=(--collection "$COLLECTION")
+          fi
+          python ingest.py search --aoi "$RUNNER_TEMP/aoi.geojson" \
+            --start "$START" --end "$END" "${ARGS[@]}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Ingest scene
+        if: inputs.mode == 'ingest'
+        working-directory: vhr
+        env:
+          BHOONIDHI_USER: ${{ secrets.BHOONIDHI_USER }}
+          BHOONIDHI_PASSWORD: ${{ secrets.BHOONIDHI_PASSWORD }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          START: ${{ inputs.start_date }}
+          END: ${{ inputs.end_date }}
+          COLLECTION: ${{ inputs.collection }}
+          ITEM_ID: ${{ inputs.item_id }}
+        run: |
+          : "${BHOONIDHI_USER:?BHOONIDHI_USER secret is not set}"
+          : "${BHOONIDHI_PASSWORD:?BHOONIDHI_PASSWORD secret is not set}"
+          : "${SUPABASE_URL:?SUPABASE_URL secret is not set}"
+          : "${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY secret is not set}"
+          ARGS=(--aoi "$RUNNER_TEMP/aoi.geojson")
+          if [ -n "$ITEM_ID" ]; then
+            ARGS+=(--item-id "$ITEM_ID" --collection "$COLLECTION")
+          else
+            ARGS+=(--start "$START" --end "$END")
+            if [ -n "$COLLECTION" ]; then
+              ARGS+=(--collection "$COLLECTION")
+            fi
+          fi
+          python ingest.py ingest "${ARGS[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

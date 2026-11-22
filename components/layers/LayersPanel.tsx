@@ -6,6 +6,7 @@ import { useActiveScene, useAppStore } from "@/store/useAppStore";
 import Slider from "@/components/ui/Slider";
 import { cn } from "@/components/ui/cn";
 import Legend from "./Legend";
+import VhrLayerCard from "./VhrLayerCard";
 
 interface RowProps {
   label: string;
@@ -148,6 +149,8 @@ export default function LayersPanel() {
             </span>
           </div>
         </LayerRow>
+
+        <VhrLayerCard />
       </section>
 
       <section className="space-y-2.5">

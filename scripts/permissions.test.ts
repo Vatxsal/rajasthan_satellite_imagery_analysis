@@ -84,6 +84,7 @@ test("guest defaults match the brief", () => {
     "fields.pattern",
     "draw.export.shapefile",
     "system.status",
+    "vhr.view",
   ] as Capability[]) {
     assert.equal(can("guest", capability), false, capability);
   }
