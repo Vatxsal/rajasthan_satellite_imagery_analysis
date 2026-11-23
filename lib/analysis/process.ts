@@ -32,6 +32,17 @@ import {
   type Sensitivity,
 } from "./config";
 import { combineValidity, classifyChange, dilateInvalid } from "./classify";
+import {
+  compositeSideFlags,
+  computeCoverage,
+  countClasses,
+  deltaHistogram,
+  edgeProximityMask,
+  histogramThresholds,
+  patchDiagnostics,
+  singleSideFlags,
+  type CompareDiagnostics,
+} from "./diagnostics";
 import { applyShapeEvidence, classifyFused } from "./fused";
 import { classifyModel, loadMlModel } from "./model";
 import { fillSmallHoles, labelPatches, majorityFilter, minPatchPixels } from "./filter";
@@ -147,6 +158,8 @@ export interface CompareArtifact {
 export interface CompareSide {
   indices: IndexRasters;
   valid: Uint8Array;
+  /** dataMask = 0 flag — Phase 0 coverage breakdown ("missing" vs "cloud"). */
+  nodata?: Uint8Array;
   width: number;
   height: number;
 }
@@ -343,6 +356,16 @@ export function processCompare(
     a: { b11: { r2: number; applied: boolean }; b12: { r2: number; applied: boolean } };
     b: { b11: { r2: number; applied: boolean }; b12: { r2: number; applied: boolean } };
   } | null = null;
+  // Phase 0 diagnostics inputs — set by whichever engine branch runs.
+  let idxA: IndexRasters | null = null;
+  let idxB: IndexRasters | null = null;
+  let preCombined: Uint8Array | null = null;
+  let validA: Uint8Array | null = null;
+  let validB: Uint8Array | null = null;
+  let nodataA: Uint8Array | null = null;
+  let nodataB: Uint8Array | null = null;
+  let cloudyA: Uint8Array | null = null;
+  let cloudyB: Uint8Array | null = null;
 
   if (engine === "v2" && parsedA && parsedB) {
     const pa = parsedA;
@@ -383,12 +406,24 @@ export function processCompare(
       mndwi: pb.recentMndwi,
       ndbi: pb.recentNdbi,
     };
-    const validA = pa.valid;
-    const validB = pb.valid;
+    const sideValidA = pa.valid;
+    const sideValidB = pb.valid;
+    // Phase 0 diagnostics: coverage flags, pre-dilation mask + indices.
+    const flagsA = compositeSideFlags(pa);
+    const flagsB = compositeSideFlags(pb);
+    validA = sideValidA;
+    validB = sideValidB;
+    nodataA = flagsA.nodata;
+    nodataB = flagsB.nodata;
+    cloudyA = flagsA.cloudy;
+    cloudyB = flagsB.cloudy;
+    idxA = aIdx;
+    idxB = bIdx;
+    preCombined = combineValidity(sideValidA, sideValidB, inside);
     parsedA = null;
     parsedB = null;
 
-    valid = dilateInvalid(combineValidity(validA, validB, inside), width, height, haloRadius);
+    valid = dilateInvalid(preCombined, width, height, haloRadius);
 
     // 2.4 adaptive thresholds, then 2.5-2.8 classification.
     const adaptive = adaptiveThresholds(aIdx, bIdx, valid, baseThresholds);
@@ -459,12 +494,19 @@ export function processCompare(
       ...(sharpenStats ? { sharpen: sharpenStats } : {}),
     };
   } else if (sideA && sideB) {
-    valid = dilateInvalid(
-      combineValidity(sideA.valid, sideB.valid, inside),
-      width,
-      height,
-      haloRadius,
-    );
+    // Phase 0 diagnostics: coverage flags + pre-dilation mask + indices.
+    const flagsA = singleSideFlags(sideA.valid, sideA.nodata ?? null);
+    const flagsB = singleSideFlags(sideB.valid, sideB.nodata ?? null);
+    validA = sideA.valid;
+    validB = sideB.valid;
+    nodataA = flagsA.nodata;
+    nodataB = flagsB.nodata;
+    cloudyA = flagsA.cloudy;
+    cloudyB = flagsB.cloudy;
+    idxA = sideA.indices;
+    idxB = sideB.indices;
+    preCombined = combineValidity(sideA.valid, sideB.valid, inside);
+    valid = dilateInvalid(preCombined, width, height, haloRadius);
     classGrid = classifyChange(sideA.indices, sideB.indices, valid, inside, baseThresholds);
   } else {
     throw Object.assign(new Error("Missing analysis inputs."), { status: 500 });
@@ -472,10 +514,41 @@ export function processCompare(
 
   // Shared noise control: 2 majority passes, speckle-hole fill, then MMU
   // (confidence-aware for v2 — a high-confidence sub-MMU patch survives).
+  // Phase 0: class counts snapshotted at each stage (raw → majority → min patch).
+  const stageRaw = countClasses(classGrid);
   classGrid = majorityFilter(classGrid, valid, width, height, 2);
+  const stageMajority = countClasses(classGrid);
   const minPixels = minPatchPixels(minPatchHa, grid.metersX, grid.metersY);
-  fillSmallHoles(classGrid, valid, width, height, minPixels);
-  const { labels } = labelPatches(classGrid, width, height, minPixels, tiers);
+  const holesFilled = fillSmallHoles(classGrid, valid, width, height, minPixels);
+  const { labels, removedCount } = labelPatches(classGrid, width, height, minPixels, tiers);
+  const stageMinPatch = countClasses(classGrid);
+
+  // Phase 0 diagnostics: coverage + stage counts + patch sizes/edge + histograms.
+  const tLines = histogramThresholds(effective);
+  const diagnostics: CompareDiagnostics = {
+    grid: { width, height, metersPerPixel: grid.metersPerPixel },
+    coverage: computeCoverage({
+      inside,
+      validA: validA!,
+      validB: validB!,
+      nodataA,
+      nodataB,
+      cloudyA,
+      cloudyB,
+    }),
+    stages: { raw: stageRaw, majority: stageMajority, minPatch: stageMinPatch },
+    holesFilled,
+    patches: patchDiagnostics(
+      labels,
+      edgeProximityMask(inside, width, height, 2),
+      removedCount,
+    ),
+    histograms: {
+      ndvi: deltaHistogram(idxA!.ndvi, idxB!.ndvi, preCombined!, tLines.ndvi),
+      mndwi: deltaHistogram(idxA!.mndwi, idxB!.mndwi, preCombined!, tLines.mndwi),
+      ndbi: deltaHistogram(idxA!.ndbi, idxB!.ndbi, preCombined!, tLines.ndbi),
+    },
+  };
   if ((rules === "fused" || rules === "ml") && conf && tiers) {
     // Shape evidence runs on the KEPT patches (post-denoise, post-MMU).
     applyShapeEvidence({ classGrid, labels, confGrid: conf, tierGrid: tiers, width, height });
@@ -553,6 +626,7 @@ export function processCompare(
         waterLossMndwiMin: effective.waterLossMndwiMin,
       },
       ...(engineStats ? { engineStats } : {}),
+      diagnostics,
       generatedAt: new Date().toISOString(),
     },
     // Full event count for the Events tab header; the client only receives

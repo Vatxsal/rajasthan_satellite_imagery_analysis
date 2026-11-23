@@ -1,4 +1,5 @@
 import type { Sensitivity } from "./config";
+import type { CompareDiagnostics } from "./diagnostics";
 
 /** Analysis grid: linear mapping of the request bbox onto width × height pixels
  *  (the Process API renders the EPSG:4326 bbox linearly, so pixel centres are
@@ -158,6 +159,8 @@ export interface CompareMetadata {
   thresholds: Record<string, number>;
   /** v2 only: engine diagnostics (normalisation, co-reg, adaptive scales, …). */
   engineStats?: EngineStats;
+  /** Phase 0: coverage/stage/patch/histogram diagnostics (Method card + dev log). */
+  diagnostics?: CompareDiagnostics;
   generatedAt: string;
 }
 
