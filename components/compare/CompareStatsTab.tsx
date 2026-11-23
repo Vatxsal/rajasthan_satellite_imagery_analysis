@@ -14,11 +14,13 @@ import { downloadEventsGeoJson, downloadStatsCsv } from "@/lib/compare/export";
 import { analysisParamsQuery } from "@/lib/compare/params";
 import { formatArea, formatDateTime, type AreaUnit } from "@/lib/format";
 import type { CompareStats, ConfidenceTier } from "@/lib/analysis/types";
+import type { CompareDiagnostics, DeltaHistogram } from "@/lib/analysis/diagnostics";
 import type { Sensitivity } from "@/lib/analysis/config";
 import { classColor } from "@/lib/analysis/config";
 import { useCompareStore, type CompareInputMode } from "@/store/useCompareStore";
 import { useAppStore } from "@/store/useAppStore";
 import { usePreferencesStore } from "@/store/usePreferencesStore";
+import { useSession } from "@/store/useSession";
 
 /** "Sentinel-2C" from whatever casing the catalogue reported. */
 function satelliteName(raw: string): string {
@@ -115,6 +117,204 @@ interface CompareStatsTabProps {
   tab: "statistics" | "hotspots";
 }
 
+/** Phase 0 — Δ-index histogram with applied threshold lines (Diagnostics). */
+function HistogramChart({ title, hist }: { title: string; hist: DeltaHistogram }) {
+  const max = Math.max(1, ...hist.bins);
+  const span = hist.max - hist.min;
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <p className="text-[10px] text-muted">{title}</p>
+      <div className="relative flex h-10 items-end gap-px border-b border-border">
+        {hist.bins.map((count, i) => (
+          <div
+            key={i}
+            className={cn("min-w-0 flex-1 rounded-t-[1px]", count > 0 ? "bg-accent/70" : "bg-transparent")}
+            style={{ height: `${count > 0 ? Math.max((count / max) * 100, 3) : 0}%` }}
+            title={`${count.toLocaleString("en")} px`}
+          />
+        ))}
+        {hist.thresholds.map((value, i) => (
+          <span
+            key={i}
+            className="absolute inset-y-0 w-px bg-warning"
+            style={{ left: `${((value - hist.min) / span) * 100}%` }}
+            title={`Threshold ${fmtDelta(value)}`}
+            aria-hidden
+          />
+        ))}
+      </div>
+      <div className="flex justify-between text-[9px] text-muted">
+        <span>{fmtDelta(hist.min)}</span>
+        <span>{fmtDelta(hist.max)}</span>
+      </div>
+      <p className="text-[9px] text-muted">
+        {hist.thresholds.map((v) => fmtDelta(v)).join(" / ")} threshold
+        {hist.thresholds.length > 1 ? "s" : ""} · bars = analysed pixels
+      </p>
+    </div>
+  );
+}
+
+/** Phase 0 — diagnostics content (SSO only, Method & settings card). */
+function DiagnosticsBody({ d }: { d: CompareDiagnostics }) {
+  const cov = d.coverage;
+  const stages: Array<{ label: string; counts: CompareDiagnostics["stages"]["raw"] }> = [
+    { label: "Raw", counts: d.stages.raw },
+    { label: "Majority", counts: d.stages.majority },
+    { label: "Min patch", counts: d.stages.minPatch },
+  ];
+  const stageRows: Array<{ key: keyof CompareDiagnostics["stages"]["raw"]; label: string }> = [
+    { key: "vegLoss", label: "Vegetation loss" },
+    { key: "vegGain", label: "Vegetation gain" },
+    { key: "bareBuilt", label: "Bare / built-up" },
+    { key: "waterGain", label: "Water gain" },
+    { key: "waterLoss", label: "Water loss" },
+    { key: "masked", label: "Masked" },
+  ];
+  const fmtPx = (n: number): string => n.toLocaleString("en");
+  const fmtDeltaPx = (n: number): string =>
+    `${n >= 0 ? "+" : "\u2212"}${Math.abs(n).toLocaleString("en")}`;
+  // Positive = that stage removed change pixels (min-patch figure is net of
+  // the hole fill, which adds change pixels back).
+  const majorityLost = d.stages.raw.change - d.stages.majority.change;
+  const minPatchLost = d.stages.majority.change + d.holesFilled - d.stages.minPatch.change;
+
+  return (
+    <div className="mt-2 flex flex-col gap-3 text-[11px]">
+      <dl className="flex flex-col gap-1">
+        <MethodRow label="Grid">
+          {d.grid.width}×{d.grid.height} · {d.grid.metersPerPixel.toFixed(1)} m/px
+        </MethodRow>
+      </dl>
+
+      {/* Coverage — analysed vs masked, with reasons */}
+      <div className="flex flex-col gap-1">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-muted">
+          Coverage (share of the area)
+        </p>
+        <dl className="flex flex-col gap-1">
+          <MethodRow label="Valid date A">{cov.validAPct.toFixed(1)}%</MethodRow>
+          <MethodRow label="Valid date B">{cov.validBPct.toFixed(1)}%</MethodRow>
+          <MethodRow label="Valid both dates">{cov.validBothPct.toFixed(1)}%</MethodRow>
+          <MethodRow
+            label="A missing"
+            title={`No acquisition on date A — ${fmtPx(cov.aMissingPixels)} px.`}
+          >
+            {cov.aMissingPct.toFixed(1)}%
+          </MethodRow>
+          <MethodRow
+            label="B missing"
+            title={`No acquisition on date B — ${fmtPx(cov.bMissingPixels)} px.`}
+          >
+            {cov.bMissingPct.toFixed(1)}%
+          </MethodRow>
+          <MethodRow
+            label="Cloud / shadow"
+            title={`Acquired but rejected by the cloud/SCL gate — ${fmtPx(cov.cloudShadowPixels)} px.`}
+          >
+            {cov.cloudShadowPct.toFixed(1)}%
+          </MethodRow>
+          {cov.unknownPct > 0 && (
+            <MethodRow
+              label="Unknown"
+              title={`No coverage breakdown available for this input — ${fmtPx(cov.unknownPixels)} px.`}
+            >
+              {cov.unknownPct.toFixed(1)}%
+            </MethodRow>
+          )}
+        </dl>
+      </div>
+
+      {/* Per-stage class pixel counts */}
+      <div className="flex flex-col gap-1">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-muted">
+          Pixels by pipeline stage
+        </p>
+        <div className="overflow-x-auto rounded border border-border">
+          <table className="w-full text-[10px]">
+            <thead>
+              <tr className="border-b border-border bg-surface-2 text-left text-muted">
+                <th className="px-1.5 py-1 font-medium">Class</th>
+                {stages.map((stage) => (
+                  <th key={stage.label} className="px-1.5 py-1 text-right font-medium">
+                    {stage.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {stageRows.map((row) => (
+                <tr key={row.key} className="border-b border-border last:border-0">
+                  <td className="px-1.5 py-1 text-text">{row.label}</td>
+                  {stages.map((stage) => (
+                    <td key={stage.label} className="mono-nums px-1.5 py-1 text-right text-text">
+                      {fmtPx(stage.counts[row.key])}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              <tr className="border-t border-border bg-surface-2 font-medium">
+                <td className="px-1.5 py-1 text-text">Change total</td>
+                {stages.map((stage) => (
+                  <td key={stage.label} className="mono-nums px-1.5 py-1 text-right text-text">
+                    {fmtPx(stage.counts.change)}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="text-[10px] leading-snug text-muted">
+          Change pixels removed — 3×3 majority: {fmtDeltaPx(majorityLost)} px ·
+          min-patch stage (net, incl. hole fill): {fmtDeltaPx(minPatchLost)} px · hole fill added{" "}
+          {fmtPx(d.holesFilled)} px. Positive = removed by that stage.
+        </p>
+      </div>
+
+      {/* Patch sizes + boundary proximity */}
+      <div className="flex flex-col gap-1">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-muted">
+          Change patches
+        </p>
+        <dl className="flex flex-col gap-1">
+          <MethodRow label="Kept">{fmtPx(d.patches.kept)}</MethodRow>
+          <MethodRow label="Removed by size">{fmtPx(d.patches.removed)}</MethodRow>
+          <MethodRow
+            label="Near boundary"
+            title="Kept patches with at least one pixel within 2 px of the polygon boundary — check these before trusting them."
+          >
+            {fmtPx(d.patches.edgeNear)} ({Math.round(d.patches.edgeNearShare * 100)}%)
+          </MethodRow>
+        </dl>
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted">
+          {d.patches.sizeBuckets
+            .filter((bucket) => bucket.count > 0)
+            .map((bucket) => (
+              <span key={bucket.label} className="mono-nums">
+                {bucket.label}: <span className="text-text">{fmtPx(bucket.count)}</span>
+              </span>
+            ))}
+          {d.patches.sizeBuckets.every((bucket) => bucket.count === 0) && (
+            <span>No kept patches.</span>
+          )}
+        </div>
+      </div>
+
+      {/* Δ-index histograms vs thresholds */}
+      <div className="flex flex-col gap-1">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-muted">
+          Δ-index distribution (analysed pixels)
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <HistogramChart title="ΔNDVI" hist={d.histograms.ndvi} />
+          <HistogramChart title="ΔMNDWI" hist={d.histograms.mndwi} />
+          <HistogramChart title="ΔNDBI" hist={d.histograms.ndbi} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Statistics + events tabs (the drawer renders this for both). */
 export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const result = useCompareStore((s) => s.result);
@@ -130,6 +330,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const setMinPatchHa = useCompareStore((s) => s.setMinPatchHa);
   const lockedSensitivity = useLocked("compare.adjust-sensitivity");
   const lockedMinPatch = useLocked("compare.adjust-min-patch");
+  const role = useSession((s) => s.role);
   const running = useCompareStore((s) => s.running);
   const stage = useCompareStore((s) => s.stage);
   const run = useCompareStore((s) => s.run);
@@ -158,6 +359,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   // start collapsed (default = top section only expanded).
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [thresholdsOpen, setThresholdsOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [patchDraft, setPatchDraft] = useState<string | null>(null);
   useEffect(() => {
@@ -898,6 +1100,29 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                 </div>
               )}
             </div>
+
+            {/* Section 4 — Phase 0 diagnostics (SSO only, default closed) */}
+            {role === "sso" && metadata.diagnostics && (
+              <div className="rounded border border-border bg-surface px-2 py-1.5">
+                <button
+                  type="button"
+                  aria-expanded={diagnosticsOpen}
+                  onClick={() => setDiagnosticsOpen((open) => !open)}
+                  className="flex w-full items-center justify-between gap-2 text-[11px] font-medium text-text transition-colors duration-150 hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                >
+                  Diagnostics
+                  <ChevronDown
+                    size={13}
+                    className={cn(
+                      "text-muted transition-transform duration-150",
+                      diagnosticsOpen && "rotate-180",
+                    )}
+                    aria-hidden
+                  />
+                </button>
+                {diagnosticsOpen && <DiagnosticsBody d={metadata.diagnostics} />}
+              </div>
+            )}
           </div>
         )}
       </div>

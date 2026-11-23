@@ -91,6 +91,15 @@ export async function POST(request: Request): Promise<Response> {
             onStage: (stage) => send({ type: "stage", stage }),
             sceneHits,
           });
+          // Phase 0: full diagnostics object in the dev server log (SSO users
+          // see the same numbers in the Method & settings card).
+          if (process.env.NODE_ENV === "development" && entry.stats.metadata.diagnostics) {
+            console.info(
+              `[compare:diagnostics] ${resolved.area.name} (${resolved.area.id}) ` +
+                `${resolved.dateA} → ${resolved.dateB} · ${resolved.sensitivity}`,
+              JSON.stringify(entry.stats.metadata.diagnostics),
+            );
+          }
           if (hit) {
             send({ type: "stage", stage: "fetch-a" });
             send({ type: "stage", stage: "fetch-b" });

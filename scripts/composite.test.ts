@@ -75,12 +75,12 @@ test("deriveIndices: exact v1 evalscript formulas", () => {
   assert.equal(ndbi[2], -1);
 });
 
-test("composite evalscript: ORBIT median, cloud-gated, 12 FLOAT32 bands", () => {
+test("composite evalscript: ORBIT median, cloud-gated, 14 FLOAT32 bands", () => {
   const es = COMPARE_EVALSCRIPT_COMPOSITE;
   assert.ok(es.startsWith("//VERSION=3"));
   assert.ok(es.includes('mosaicking: "ORBIT"'), "must use ORBIT (samples = orbits, not tiles)");
   assert.ok(!es.includes("MULTI_TEMPORAL"), "MULTI_TEMPORAL is not a valid v3 mosaicking mode");
-  assert.ok(es.includes("bands: 12"));
+  assert.ok(es.includes("bands: 14"));
   assert.ok(es.includes('sampleType: "FLOAT32"'));
   assert.ok(es.includes('mosaickingOrder: "mostRecent"'), "recent-orbit bands need newest-first samples");
   assert.ok(es.includes("CLD"), "cloud-probability gate");
@@ -91,6 +91,7 @@ test("composite evalscript: ORBIT median, cloud-gated, 12 FLOAT32 bands", () => 
     es.includes("ndviOf(recent)") && es.includes("mndwiOf(recent)") && es.includes("ndbiOf(recent)"),
     "recent-orbit indices for the persistence check (Phase 2.7)",
   );
+  assert.ok(es.includes("cloudy") && es.includes("nodata"), "Phase 0 coverage-reason bands");
 });
 
 test("v1 evalscript: single-day ORBIT, server-side indices, rounded SCL gate", () => {

@@ -15,6 +15,8 @@ export interface ParsedCompareRaster {
   ndbi: Float32Array;
   /** 1 = both SCL and dataMask passed (before combining across dates). */
   valid: Uint8Array;
+  /** 1 = dataMask 0 (no acquisition) — splits "missing" from "cloud". */
+  nodata: Uint8Array;
 }
 
 /** Parses the 5-band FLOAT32 GeoTIFF into typed arrays. */
@@ -40,11 +42,13 @@ export async function parseCompareRaster(buffer: Buffer): Promise<ParsedCompareR
   const dataMask = bands[4];
 
   const valid = new Uint8Array(width * height);
+  const nodata = new Uint8Array(width * height);
   for (let i = 0; i < valid.length; i++) {
     valid[i] = validBand[i] >= 0.5 && dataMask[i] >= 0.5 ? 1 : 0;
+    nodata[i] = dataMask[i] >= 0.5 ? 0 : 1;
   }
 
-  return { width, height, ndvi, mndwi, ndbi, valid };
+  return { width, height, ndvi, mndwi, ndbi, valid, nodata };
 }
 
 /** Extracts the index triple (shared with tests). */
@@ -107,9 +111,13 @@ export interface ParsedCompositeRaster {
   recentNdvi: Float32Array;
   recentMndwi: Float32Array;
   recentNdbi: Float32Array;
+  /** Samples rejected by the cloud/SCL gate in the window (Phase 0 diagnostics). */
+  cloudyObs?: Float32Array;
+  /** Samples with dataMask = 0 in the window (Phase 0 diagnostics). */
+  nodataObs?: Float32Array;
 }
 
-/** Parses the composite 12-band FLOAT32 GeoTIFF (median reflectances + QC + recent indices). */
+/** Parses the composite 14-band FLOAT32 GeoTIFF (median reflectances + QC + recent indices + coverage reasons). */
 export async function parseCompositeRaster(buffer: Buffer): Promise<ParsedCompositeRaster> {
   const ab = buffer.buffer.slice(
     buffer.byteOffset,
@@ -122,7 +130,7 @@ export async function parseCompositeRaster(buffer: Buffer): Promise<ParsedCompos
   const bands = (await image.readRasters({
     width,
     height,
-    samples: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    samples: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
   })) as Float32Array[];
 
   const valid = new Uint8Array(width * height);
@@ -147,6 +155,8 @@ export async function parseCompositeRaster(buffer: Buffer): Promise<ParsedCompos
     recentNdvi: bands[9],
     recentMndwi: bands[10],
     recentNdbi: bands[11],
+    cloudyObs: bands[12],
+    nodataObs: bands[13],
   };
 }
 

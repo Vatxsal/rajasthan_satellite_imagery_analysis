@@ -151,7 +151,13 @@ export async function runCompare(
     );
     const parsed = await parseCompareRaster(buffer);
     buffer = null;
-    return { indices: toIndexRasters(parsed), valid: parsed.valid, width: parsed.width, height: parsed.height };
+    return {
+      indices: toIndexRasters(parsed),
+      valid: parsed.valid,
+      nodata: parsed.nodata,
+      width: parsed.width,
+      height: parsed.height,
+    };
   }
 
   onStage?.("fetch-a");

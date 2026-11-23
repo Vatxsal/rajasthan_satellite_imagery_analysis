@@ -53,9 +53,10 @@ function evaluatePixel(samples) {
  * neighbouring days instead of voiding the pixel.
  *
  * Valid sample = dataMask ∧ SCL ∉ excluded ∧ CLD ≤ 30 (Sen2Cor cloud %).
- * 12 FLOAT32 bands: B02 B03 B04 B05 B08 B11 B12 · valid_obs_count · recent SCL
+ * 14 FLOAT32 bands: B02 B03 B04 B05 B08 B11 B12 · valid_obs_count · recent SCL
  * · recent-orbit NDVI/MNDWI/NDBI (most-recent valid sample in the window —
- * drives the Phase 2.7 persistence check; outputs are PU-free).
+ * drives the Phase 2.7 persistence check) · cloudy_obs · nodata_obs (Phase 0
+ * coverage diagnostics: why an invalid pixel is invalid; outputs are PU-free).
  * Nodata → all zeros (count 0 = invalid). Indices are derived client-side
  * (lib/analysis/composite.ts) with the exact v1 formulas for A/B parity.
  */
@@ -65,7 +66,7 @@ export const COMPARE_EVALSCRIPT_COMPOSITE = `${HEADER}function setup() {
       { bands: ["B02", "B03", "B04", "B05", "B08", "B11", "B12", "SCL", "CLD", "dataMask"] },
     ],
     mosaicking: "ORBIT",
-    output: { bands: 12, sampleType: "FLOAT32", mosaickingOrder: "mostRecent" },
+    output: { bands: 14, sampleType: "FLOAT32", mosaickingOrder: "mostRecent" },
   };
 }
 var excluded = ${JSON.stringify(EXCLUDED_SCL)};
@@ -90,11 +91,14 @@ function ndbiOf(s) { var d = s.B11 + s.B08; return d === 0 ? 0 : (s.B11 - s.B08)
 function evaluatePixel(samples) {
   var acc = [[], [], [], [], [], [], []];
   var count = 0;
+  var cloudy = 0;
+  var nodata = 0;
   var recentScl = 0;
   var recent = null;
   for (var i = 0; i < samples.length; i++) {
     var s = samples[i];
-    if (!isValidSample(s)) continue;
+    if (s.dataMask !== 1) { nodata++; continue; }
+    if (!isValidSample(s)) { cloudy++; continue; }
     // samples are ordered most-recent first → the first valid = recent orbit
     if (count === 0) { recentScl = Math.round(s.SCL); recent = s; }
     acc[0].push(s.B02);
@@ -106,11 +110,11 @@ function evaluatePixel(samples) {
     acc[6].push(s.B12);
     count++;
   }
-  if (count === 0) return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  if (count === 0) return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, cloudy, nodata];
   return [
     median(acc[0]), median(acc[1]), median(acc[2]), median(acc[3]),
     median(acc[4]), median(acc[5]), median(acc[6]), count, recentScl,
-    ndviOf(recent), mndwiOf(recent), ndbiOf(recent),
+    ndviOf(recent), mndwiOf(recent), ndbiOf(recent), cloudy, nodata,
   ];
 }`;
 
