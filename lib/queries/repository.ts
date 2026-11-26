@@ -117,7 +117,7 @@ export const queryDateRangeSchema = z
 
 export const queryCompareSchema = z
   .object({
-    sensitivity: z.enum(["low", "medium", "high"]),
+    sensitivity: z.enum(["low", "medium", "high", "veryhigh", "auto"]),
     minPatchHa: z.number().min(0.01).max(100),
   })
   .strict();

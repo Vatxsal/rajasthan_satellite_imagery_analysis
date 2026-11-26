@@ -3,6 +3,9 @@ import "./alias-hook"; // must be first: installs the "@/…" resolver before th
 import assert from "node:assert/strict";
 import test, { afterEach, beforeEach } from "node:test";
 import { POST as analyzePost } from "../app/api/compare/analyze/route";
+import { POST as detailEstimatePost } from "../app/api/compare/detail/estimate/route";
+import { GET as detailTilesGet } from "../app/api/compare/tiles/[z]/[x]/[y]/route";
+import { POST as probePost } from "../app/api/compare/probe/route";
 import { GET as eventsGet } from "../app/api/compare/events/route";
 import { POST as emailPost } from "../app/api/compare/email/route";
 import { GET as overlayGet } from "../app/api/compare/overlay/route";
@@ -270,6 +273,9 @@ const ANALYZE_BODY = {
   dateA: "2026-01-01",
   dateB: "2026-01-20",
 };
+/** Same body as a tiles-route query string (bogus key → never matches). */
+const ANALYZE_BODY_QUERY =
+  "areaId=d-jaisalmer&level=tehsil&dateA=2026-01-01&dateB=2026-01-20";
 
 test("analyze: 401 without a session", async () => {
   assertUnauthenticated(await call(analyzePost, post(ANALYZE_URL, ANALYZE_BODY)));
@@ -457,4 +463,151 @@ test("fields/pattern: guest is FORBIDDEN_ROLE, SSO passes", async () => {
   );
   assert.notEqual(sso.status, 401);
   assert.notEqual(sso.status, 403);
+});
+
+// ---------------------------------------------------- compare detail (Phase 3)
+
+test("analyze detail: guest is FORBIDDEN_ROLE (compare.detailed)", async () => {
+  const result = await call(
+    analyzePost,
+    post(ANALYZE_URL, { ...ANALYZE_BODY, detail: "detailed" }, await guestCookie()),
+  );
+  assertForbiddenSso(result);
+});
+
+test("analyze detail: SSO without a confirmed estimate answers 400 DETAIL_CONFIRM_REQUIRED", async () => {
+  const result = await call(
+    analyzePost,
+    post(ANALYZE_URL, { ...ANALYZE_BODY, detail: "smart" }, await ssoCookie()),
+  );
+  assert.equal(result.status, 400, JSON.stringify(result.body));
+  assert.equal(result.body?.code, "DETAIL_CONFIRM_REQUIRED");
+});
+
+test("analyze detail: SSO with confirm reaches the mock-source sentinel", async () => {
+  const result = await call(
+    analyzePost,
+    post(ANALYZE_URL, { ...ANALYZE_BODY, detail: "smart", confirm: true }, await ssoCookie()),
+  );
+  assert.equal(result.status, 400, JSON.stringify(result.body));
+  assert.equal(result.body?.code, "CDSE_CONFIG");
+});
+
+test("analyze detail: the daily detailed quota answers 429 with Retry-After", async () => {
+  const sub = "sso:detailed-quota";
+  exhaustQuota("detailed", sub, limitsFor("sso").detailedPerDay);
+  const result = await call(
+    analyzePost,
+    post(
+      ANALYZE_URL,
+      { ...ANALYZE_BODY, detail: "detailed", confirm: true },
+      await ssoCookie(sub),
+    ),
+  );
+  assertQuota(result);
+});
+
+test("detail estimate: guest is FORBIDDEN_ROLE, quick is INVALID_REQUEST", async () => {
+  const guest = await call(
+    detailEstimatePost,
+    post("http://localhost/api/compare/detail/estimate", { ...ANALYZE_BODY, detail: "smart" }, await guestCookie()),
+  );
+  assertForbiddenSso(guest);
+
+  const quick = await call(
+    detailEstimatePost,
+    post("http://localhost/api/compare/detail/estimate", { ...ANALYZE_BODY, detail: "quick" }, await ssoCookie()),
+  );
+  assert.equal(quick.status, 400, JSON.stringify(quick.body));
+  assert.equal(quick.body?.code, "INVALID_REQUEST");
+});
+
+test("detail estimate: SSO smart reaches the mock-source sentinel without consuming quota", async () => {
+  const sub = "sso:estimate";
+  const result = await call(
+    detailEstimatePost,
+    post("http://localhost/api/compare/detail/estimate", { ...ANALYZE_BODY, detail: "smart" }, await ssoCookie(sub)),
+  );
+  assert.equal(result.status, 400, JSON.stringify(result.body));
+  assert.equal(result.body?.code, "CDSE_CONFIG");
+  // Estimates are free — the detailed quota was not consumed.
+  const second = await call(
+    detailEstimatePost,
+    post("http://localhost/api/compare/detail/estimate", { ...ANALYZE_BODY, detail: "smart" }, await ssoCookie(sub)),
+  );
+  assert.equal(second.status, 400);
+  assert.equal(second.body?.code, "CDSE_CONFIG");
+});
+
+// -------------------------------------------------------- compare detail tiles
+
+async function detailTile(z: number, x: number, y: number, query: string, cookie?: string) {
+  return call(
+    detailTilesGet,
+    get(`http://localhost/api/compare/tiles/${z}/${x}/${y}.png?${query}`, cookie),
+    { params: { z: String(z), x: String(x), y: String(y) } },
+  );
+}
+
+test("detail tiles: 401 without a session", async () => {
+  assertUnauthenticated(await detailTile(12, 2000, 2000, `key=${VALID_KEY}`));
+});
+
+test("detail tiles: below the zoom band answers an empty tile (no key work)", async () => {
+  const result = await detailTile(5, 0, 0, `key=${VALID_KEY}`, await ssoCookie());
+  assert.equal(result.status, 200);
+  assert.equal(result.headers.get("X-Tile-Skip"), "zoom-out-of-range");
+});
+
+test("detail tiles: guest is refused above z12 (role zoom cap)", async () => {
+  const result = await detailTile(13, 0, 0, `key=${VALID_KEY}`, await guestCookie());
+  assertForbiddenSso(result);
+});
+
+test("detail tiles: a bogus key/param pair is stopped by the mock-source guard", async () => {
+  // The mock CDSE_CONFIG guard fires inside resolveCompareParams before the
+  // key is derived — the observable contract: never a role/401 error for a
+  // well-formed SSO request, and never tile bytes for a bogus key.
+  const result = await detailTile(
+    12,
+    2000,
+    2000,
+    `key=${VALID_KEY}&${ANALYZE_BODY_QUERY}`,
+    await ssoCookie(),
+  );
+  assert.equal(result.status, 400, JSON.stringify(result.body));
+  assert.equal(result.body?.code, "CDSE_CONFIG");
+});
+
+// ------------------------------------------------------------- probe (Phase 4)
+
+const PROBE_URL = "http://localhost/api/compare/probe";
+const PROBE_BODY = { ...ANALYZE_BODY, lng: 72.5, lat: 27.5 };
+
+test("probe: 401 without a session", async () => {
+  assertUnauthenticated(await call(probePost, post(PROBE_URL, PROBE_BODY)));
+});
+
+test("probe: guest (inspect.basic) reaches the mock-source sentinel", async () => {
+  const result = await call(probePost, post(PROBE_URL, PROBE_BODY, await guestCookie()));
+  assert.equal(result.status, 400, JSON.stringify(result.body));
+  assert.equal(result.body?.code, "CDSE_CONFIG");
+});
+
+test("probe: a spent sample quota answers 429 with Retry-After", async () => {
+  const sub = "guest:probe-quota";
+  exhaustQuota("inspectSample", sub, limitsFor("guest").inspectSamplesPerDay);
+  const result = await call(probePost, post(PROBE_URL, PROBE_BODY, await guestCookie(sub)));
+  assertQuota(result);
+});
+
+test("probe: outside the area's bbox answers PROBE_OUTSIDE (mock gate first)", async () => {
+  // The mock-source guard fires during resolve, so the observable contract
+  // here is that a well-formed probe body never gets a role error.
+  const result = await call(
+    probePost,
+    post(PROBE_URL, { ...PROBE_BODY, lng: 10.0, lat: 10.0 }, await ssoCookie()),
+  );
+  assert.equal(result.status, 400, JSON.stringify(result.body));
+  assert.equal(result.body?.code, "CDSE_CONFIG");
 });

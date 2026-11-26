@@ -9,16 +9,22 @@
  * normalised inputs the key was built from.
  */
 import type { CompareMetadata } from "@/lib/analysis/types";
+import type { CompareSpeckle, Sensitivity } from "@/lib/analysis/config";
 
 export interface AnalysisParams {
   areaId: string;
   level: "district" | "tehsil" | "ilr";
   dateA: string;
   dateB: string;
-  sensitivity: "low" | "medium" | "high";
+  sensitivity: Sensitivity;
   minPatchHa: number;
   inputMode: "single" | "composite";
   compositeWindowDays: number;
+  /** Phase 2 despeckle mode (omitted by pre-Phase-2 callers → server default). */
+  speckle?: CompareSpeckle;
+  /** Phase 3 detail mode (omitted for quick runs — keeps quick keys/query
+   *  byte-identical to pre-Phase-3 callers). */
+  detail?: "quick" | "detailed" | "smart";
 }
 
 export function analysisParamsFromMetadata(metadata: CompareMetadata): AnalysisParams {
@@ -31,6 +37,8 @@ export function analysisParamsFromMetadata(metadata: CompareMetadata): AnalysisP
     minPatchHa: metadata.minPatchHa,
     inputMode: metadata.inputMode,
     compositeWindowDays: metadata.compositeWindowDays,
+    ...(metadata.speckle ? { speckle: metadata.speckle } : {}),
+    ...(metadata.detail ? { detail: metadata.detail } : {}),
   };
 }
 
@@ -49,6 +57,8 @@ export function paramsToQuery(params: AnalysisParams): URLSearchParams {
   query.set("minPatchHa", String(params.minPatchHa));
   query.set("inputMode", params.inputMode);
   query.set("compositeWindowDays", String(params.compositeWindowDays));
+  if (params.speckle) query.set("speckle", params.speckle);
+  if (params.detail && params.detail !== "quick") query.set("detail", params.detail);
   return query;
 }
 

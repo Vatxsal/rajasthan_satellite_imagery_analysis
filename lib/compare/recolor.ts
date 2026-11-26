@@ -58,14 +58,18 @@ export interface OverlayDisplayOptions {
   boost: boolean;
   /** Map theme — picks the outline colour (light outline on dark maps). */
   theme: "light" | "dark";
+  /** Re-encode even with no display changes — the caller fetched an
+   *  alternate base image (showUnchanged=1) that must become the blob URL. */
+  force?: boolean;
 }
 
-/** A recolour pass is needed for hidden classes and/or the boost filter. */
+/** A recolour pass is needed for hidden classes, the boost filter and/or an
+ *  alternate base image (Phase 1 show-unchanged tint). */
 export function needsRecolor(
   classVisible: Record<number, boolean>,
-  options: Pick<OverlayDisplayOptions, "boost">,
+  options: Pick<OverlayDisplayOptions, "boost" | "force">,
 ): boolean {
-  return options.boost || !allClassesVisible(classVisible);
+  return options.boost || Boolean(options.force) || !allClassesVisible(classVisible);
 }
 
 /** Dilation radius in image pixels: 1-3 px, scaled to the analysis grid size. */
@@ -133,7 +137,7 @@ export async function buildOverlayBlobUrl(
     (code) => classVisible[code] === false && code !== CLASS.masked,
   ).map((code) => classColor(code));
   const hideMasked = classVisible[CLASS.masked] === false;
-  if (hiddenColors.length === 0 && !hideMasked && !options.boost) return null;
+  if (hiddenColors.length === 0 && !hideMasked && !options.boost && !options.force) return null;
 
   const width = base.width;
   const height = base.height;

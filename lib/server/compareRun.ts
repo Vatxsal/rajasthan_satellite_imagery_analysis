@@ -16,6 +16,7 @@ import { runCompare, type CompareStage } from "@/lib/analysis/analyze";
 import {
   COMPOSITE_WINDOW_DAYS_DEFAULT,
   COMPOSITE_WINDOW_DAYS_MAX,
+  type CompareSpeckle,
   type Sensitivity,
 } from "@/lib/analysis/config";
 import type {
@@ -52,8 +53,12 @@ export const compareParamsSchema = z
     level: z.enum(["district", "tehsil", "ilr"]),
     dateA: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateA must be YYYY-MM-DD"),
     dateB: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateB must be YYYY-MM-DD"),
-    sensitivity: z.enum(["low", "medium", "high"]).default("medium"),
-    minPatchHa: z.coerce.number().min(0.01).max(100).default(0.2),
+    sensitivity: z
+      .enum(["low", "medium", "high", "veryhigh", "auto"])
+      .default("medium"),
+    minPatchHa: z.coerce.number().min(0.01).max(100).default(0.05),
+    /** Phase 2 despeckle mode (gentle = magnitude-aware, legacy = 3×3 majority). */
+    speckle: z.enum(["gentle", "legacy"]).default("gentle"),
     /** Engine-v2 input mode (ignored while CHANGE_ENGINE=v1). */
     inputMode: z.enum(["single", "composite"]).default("composite"),
     /** ±days around each date for composite inputs (0-15; 0 = the single day). */
@@ -63,6 +68,11 @@ export const compareParamsSchema = z
       .min(0)
       .max(COMPOSITE_WINDOW_DAYS_MAX)
       .default(COMPOSITE_WINDOW_DAYS_DEFAULT),
+    /** Phase 3: quick (default) = one whole-AOI grid; detailed = native 1024²
+     *  blocks + XYZ tiles; smart = screening pass then hot blocks only. */
+    detail: z.enum(["quick", "detailed", "smart"]).default("quick"),
+    /** Phase 3: client-side PU estimate acknowledgement (detail runs only). */
+    confirm: z.boolean().optional(),
   })
   .refine((value) => value.dateA !== value.dateB, {
     message: "Pick two different dates to compare.",
@@ -86,6 +96,8 @@ export interface ResolvedCompareParams {
   dateB: string;
   sensitivity: Sensitivity;
   minPatchHa: number;
+  /** Phase 2 despeckle mode. */
+  speckle: CompareSpeckle;
   engine: CompareEngine;
   /** CHANGE_RULES (fused/ml force the v2 engine — resolveChangeRules). */
   rules: "legacy" | "fused" | "ml";
@@ -94,6 +106,10 @@ export interface ResolvedCompareParams {
   /** SHARPEN_SWIR — regression SWIR sharpening on the v2 composite. */
   sharpen: boolean;
   maxPx: number;
+  /** Phase 3 detail mode (quick = default, no block work). */
+  detail: "quick" | "detailed" | "smart";
+  /** Phase 3: client acknowledged the PU estimate (required for detail). */
+  confirm: boolean;
 }
 
 export function sceneMeta(hits: CatalogHit[]): DateSceneMeta {
@@ -184,6 +200,7 @@ export function resolveCompareParams(
     dateB,
     sensitivity: body.sensitivity,
     minPatchHa: body.minPatchHa,
+    speckle: body.speckle,
     engine,
     inputMode,
     compositeWindowDays,
@@ -191,6 +208,7 @@ export function resolveCompareParams(
     s1WindowDays: evidencePlan?.s1WindowDays ?? 0,
     worldCover: rules !== "legacy" && env.WORLDCOVER_ENABLED ? 1 : 0,
     sharpen: env.SHARPEN_SWIR ? 1 : 0,
+    detail: body.detail,
   });
 
   return {
@@ -201,12 +219,15 @@ export function resolveCompareParams(
     dateB,
     sensitivity: body.sensitivity,
     minPatchHa: body.minPatchHa,
+    speckle: body.speckle,
     engine,
     rules,
     inputMode,
     compositeWindowDays,
     sharpen: env.SHARPEN_SWIR,
     maxPx: env.COMPARE_MAX_PX,
+    detail: body.detail,
+    confirm: body.confirm === true,
   };
 }
 
@@ -224,6 +245,8 @@ export function compareParamsQueryString(resolved: ResolvedCompareParams): strin
     minPatchHa: resolved.minPatchHa,
     inputMode: resolved.inputMode,
     compositeWindowDays: resolved.compositeWindowDays,
+    speckle: resolved.speckle,
+    detail: resolved.detail,
   }).toString();
 }
 
@@ -315,6 +338,7 @@ export async function ensureCompare(
           areaId: resolved.area.id,
           sensitivity: resolved.sensitivity,
           minPatchHa: resolved.minPatchHa,
+          speckle: resolved.speckle,
           maxPx: resolved.maxPx,
           sceneA: sceneMeta(hits.hitsA),
           sceneB: sceneMeta(hits.hitsB),
@@ -338,6 +362,9 @@ export async function ensureCompare(
         stats: artifact.result,
         overlayPng: artifact.overlayPng,
         classGz: artifact.classGz,
+        coverageGz: artifact.coverageGz,
+        sourceGz: artifact.sourceGz,
+        magnitudeGz: artifact.magnitudeGz,
         width: artifact.width,
         height: artifact.height,
         bbox: artifact.bbox,
@@ -369,6 +396,13 @@ export async function entryForKey(
   if (hasParams) {
     const resolved = resolveCompareParams(rawParams, options);
     assertKeyMatches(requestedKey, resolved.key);
+    // Phase 3: detailed/smart keys resolve through the block orchestrator —
+    // lazy import keeps the module graph acyclic (detailRun imports this file).
+    if (resolved.detail !== "quick") {
+      const { ensureDetail } = await import("./detailRun");
+      const { entry } = await ensureDetail(resolved);
+      return entry;
+    }
     const { entry } = await ensureCompare(resolved);
     return entry;
   }

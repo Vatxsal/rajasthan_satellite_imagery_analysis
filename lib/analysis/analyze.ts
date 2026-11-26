@@ -19,6 +19,18 @@ import { getServerEnv } from "@/lib/env";
 import type { BBox } from "@/lib/data";
 import { fetchCompareCompositeRaster, fetchCompareRaster } from "./fetch";
 import { parseCompareRaster, parseCompositeRaster, parseElevationRaster, toIndexRasters, type ParsedCompositeRaster } from "./parse";
+import { deriveIndices } from "./composite";
+import {
+  insidePixelCount,
+  insideValidPct,
+  mergeCompareSide,
+  mergeCompositeSide,
+  needsGapFill,
+  rescueNodataFlags,
+  rescueWindowDays,
+  type GapFillInfo,
+} from "./gapfill";
+import { rasterizeAreaMask } from "./mask";
 import {
   prepareCompare,
   processCompare,
@@ -115,7 +127,11 @@ export async function runCompare(
   input: RunCompareInput,
   onStage?: (stage: CompareStage) => void,
 ): Promise<CompareArtifact> {
-  const prep = prepareCompare(input, { puLimit: getServerEnv().PER_ANALYSIS_PU_LIMIT });
+  // Phase 3: the smart screening pass runs above the single-analysis cap —
+  // its cost is governed by the estimate/confirm card (puLimit: 0).
+  const prep = prepareCompare(input, {
+    puLimit: input.puLimit ?? getServerEnv().PER_ANALYSIS_PU_LIMIT,
+  });
   const { bbox, width, height, windowDays, engine } = prep;
   // Fused and ML rules both consume the Phase 3 evidence streams.
   const evidenceOn = (input.rules === "fused" || input.rules === "ml") && engine === "v2";
@@ -176,6 +192,87 @@ export async function runCompare(
     inputs.sideA = await sa;
     onStage?.("fetch-b");
     inputs.sideB = await sb;
+  }
+
+  // Phase 1 coverage rescue: a side with <95% usable coverage over the
+  // polygon is re-fetched with a wider ±window composite (median of more
+  // overpasses) and merged only where the primary could not analyse. Both
+  // sides are rescued in parallel; failures degrade to "no rescue".
+  const rescueDays = rescueWindowDays(windowDays);
+  if (rescueDays !== null) {
+    const inside = rasterizeAreaMask(input.geometry, prep.grid);
+    const insideCount = insidePixelCount(inside);
+    const validOf = (side: { valid: Uint8Array } | null | undefined): Uint8Array | null =>
+      side?.valid ?? null;
+    const validA = validOf(engine === "v2" ? inputs.parsedA : inputs.sideA);
+    const validB = validOf(engine === "v2" ? inputs.parsedB : inputs.sideB);
+    const sides: Array<{ label: "A" | "B"; date: string; otherDate: string }> = [];
+    if (validA && needsGapFill(insideValidPct(inside, validA))) {
+      sides.push({ label: "A", date: input.dateA, otherDate: input.dateB });
+    }
+    if (validB && needsGapFill(insideValidPct(inside, validB))) {
+      sides.push({ label: "B", date: input.dateB, otherDate: input.dateA });
+    }
+    if (sides.length > 0) {
+      onStage?.("rescue");
+      const source = new Uint8Array(width * height);
+      const rescued: string[] = [];
+      await Promise.all(
+        sides.map(async ({ label, date, otherDate }) => {
+          let rescue: ParsedCompositeRaster;
+          try {
+            let buffer: Buffer | null = await fetchCompareCompositeRaster(
+              input.geometry,
+              date,
+              bbox,
+              { width, height },
+              rescueDays,
+              otherDate,
+            );
+            rescue = await parseCompositeRaster(buffer);
+            buffer = null;
+          } catch {
+            return; // rescue is best-effort — the primary result stands
+          }
+          if (engine === "v1") {
+            const primary = label === "A" ? inputs.sideA : inputs.sideB;
+            if (!primary) return;
+            mergeCompareSide(
+              primary,
+              {
+                indices: deriveIndices(rescue),
+                valid: rescue.valid,
+                nodata: rescueNodataFlags(rescue),
+                width: rescue.width,
+                height: rescue.height,
+              },
+              source,
+            );
+          } else {
+            const primary = label === "A" ? inputs.parsedA : inputs.parsedB;
+            if (!primary) return;
+            mergeCompositeSide(primary, rescue, source);
+          }
+          rescued.push(label);
+        }),
+      );
+      // Scope marks + counts to the polygon (the grids extend past it).
+      let filledInside = 0;
+      for (let i = 0; i < source.length; i++) {
+        if (source[i] !== 1) continue;
+        if (inside[i] === 1) filledInside += 1;
+        else source[i] = 0;
+      }
+      if (filledInside > 0 && rescued.length > 0 && insideCount > 0) {
+        const gapFill: GapFillInfo = {
+          source,
+          windowDays: rescueDays,
+          sides: rescued.sort(),
+          filledPct: Math.round((filledInside / insideCount) * 1000) / 10,
+        };
+        inputs.gapFill = gapFill;
+      }
+    }
   }
 
   onStage?.("analyze");

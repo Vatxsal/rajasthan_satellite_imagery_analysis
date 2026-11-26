@@ -40,6 +40,7 @@ function envFixture(overrides: Partial<ServerEnv> = {}): ServerEnv {
     TILE_CACHE_DIR: undefined,
     DAILY_RENDER_BUDGET: 3000,
     COMPARE_MAX_PX: 1500,
+    COMPARE_MAX_BLOCKS: 500,
     PER_ANALYSIS_PU_LIMIT: 700,
     CHANGE_ENGINE: "v1",
     CHANGE_RULES: "fused",

@@ -45,6 +45,9 @@ import { useTheme } from "@/store/useTheme";
 const SRC = {
   overlay: "compare-overlay",
   hotspotPolys: "compare-hotspot-polygons",
+  coverage: "compare-coverage",
+  gap: "compare-gapfill",
+  magnitude: "compare-magnitude",
 } as const;
 
 const LAYER = {
@@ -54,7 +57,18 @@ const LAYER = {
   hotspotFill: EVENT_LAYERS.fill,
   hotspotLine: EVENT_LAYERS.line,
   hotspotHover: EVENT_LAYERS.hover,
+  coverage: "compare-coverage-layer",
+  gap: "compare-gapfill-layer",
+  magnitude: "compare-magnitude-layer",
 } as const;
+
+/** Phase 1 diagnostic layers — every one is an overlay-route PNG image source. */
+type AuxKey = "coverage" | "gap" | "magnitude";
+
+/** URL + bbox last applied per aux layer (avoids refetch churn). */
+const appliedAux: Record<AuxKey, string | null> = { coverage: null, gap: null, magnitude: null };
+
+const AUX_OPACITY: Record<AuxKey, number> = { coverage: 0.85, gap: 0.85, magnitude: 0.8 };
 
 /** Legacy canvas-circle/symbol marker artifacts — stripped if a stale map has them. */
 const LEGACY_MARKER_LAYERS = ["compare-hotspot-circle", "compare-hotspot-rank"];
@@ -110,6 +124,36 @@ function imageCoords(bbox: [number, number, number, number]): CompareCoords {
   ];
 }
 
+/** Phase 3: {z}/{x}/{y} tile template + display-layer query params. The tiles
+ *  route colours server-side (showUnchanged + legend hides ride the class
+ *  layer URL). */
+function detailTileUrl(
+  tiles: string,
+  layer: "class" | "coverage" | "gapfill" | "magnitude",
+  options: { index?: string; showUnchanged?: boolean; hide?: number[] } = {},
+): string {
+  const sep = tiles.includes("?") ? "&" : "?";
+  const parts: string[] = [];
+  if (layer === "coverage") parts.push("layer=coverage");
+  else if (layer === "gapfill") parts.push("layer=gapfill");
+  else if (layer === "magnitude") {
+    parts.push("layer=magnitude");
+    parts.push(`index=${encodeURIComponent(options.index ?? "combined")}`);
+  }
+  if (layer === "class") {
+    if (options.showUnchanged) parts.push("showUnchanged=1");
+    if (options.hide && options.hide.length > 0) {
+      parts.push(`hide=${options.hide.join(",")}`);
+    }
+  }
+  return parts.length > 0 ? `${tiles}${sep}${parts.join("&")}` : tiles;
+}
+
+/** Tile-source zoom band (the route serves the imagery band; MapLibre
+ *  overzooms beyond maxzoom instead of requesting empties). */
+const DETAIL_SOURCE_MINZOOM = 7;
+const DETAIL_SOURCE_MAXZOOM = 14;
+
 function firstLabelId(map: MapLibreMap): string | undefined {
   return (map.getStyle().layers ?? []).find((layer) => layer.type === "symbol")?.id;
 }
@@ -159,7 +203,9 @@ function removeSourceLayer(map: MapLibreMap, sourceId: string, layerIds: string[
   if (map.getSource(sourceId)) map.removeSource(sourceId);
 }
 
-/** Classified overlay image source — visibility follows the active tab. */
+/** Classified overlay source — visibility follows the active tab. Phase 3
+ *  detailed/smart results use the native-resolution XYZ tile source instead
+ *  of the whole-AOI image (server-coloured; recolour blob is bypassed). */
 function syncOverlay(map: MapLibreMap): void {
   const state = useCompareStore.getState();
   const result = state.result;
@@ -170,9 +216,57 @@ function syncOverlay(map: MapLibreMap): void {
     return;
   }
 
+  const visible = state.tab !== "swipe" ? "visible" : "none";
+
+  if (result.detail) {
+    // Legend toggles: hidden class codes ride the tile URL (server-side).
+    const hidden: number[] = [];
+    for (const code of Object.keys(state.classVisible)) {
+      if (!state.classVisible[Number(code)]) hidden.push(Number(code));
+    }
+    const wantedUrl = detailTileUrl(result.detail.tiles, "class", {
+      showUnchanged: state.showUnchanged,
+      hide: hidden.sort((a, b) => a - b),
+    });
+    const existing = map.getSource(SRC.overlay);
+    const urlChanged = appliedOverlayUrl !== wantedUrl;
+    if (!existing || existing.type !== "raster" || urlChanged) {
+      removeSourceLayer(map, SRC.overlay, [LAYER.overlay]);
+      map.addSource(SRC.overlay, {
+        type: "raster",
+        tiles: [wantedUrl],
+        tileSize: 512,
+        minzoom: DETAIL_SOURCE_MINZOOM,
+        maxzoom: DETAIL_SOURCE_MAXZOOM,
+      });
+      appliedOverlayUrl = wantedUrl;
+      appliedOverlayBbox = null;
+      addThematicLayer(
+        map,
+        {
+          id: LAYER.overlay,
+          type: "raster",
+          source: SRC.overlay,
+          layout: { visibility: visible },
+          paint: { "raster-opacity": state.overlayOpacity, "raster-fade-duration": 0 },
+        },
+        layerAnchor(map),
+      );
+    }
+    if (map.getLayer(LAYER.overlay)) {
+      map.setLayoutProperty(LAYER.overlay, "visibility", visible);
+      map.setPaintProperty(LAYER.overlay, "raster-opacity", state.overlayOpacity);
+    }
+    return;
+  }
+
   const wantedUrl = displayOverlayUrl ?? result.overlayUrl;
   const bboxKey = result.bbox.join(",");
-  const visible = state.tab !== "swipe" ? "visible" : "none";
+  const existingSource = map.getSource(SRC.overlay);
+  if (existingSource && existingSource.type !== "image") {
+    // Coming back from a detailed result — the raster source must go.
+    removeSourceLayer(map, SRC.overlay, [LAYER.overlay]);
+  }
   const existing = map.getSource(SRC.overlay) as ImageSource | undefined;
 
   if (!existing) {
@@ -202,6 +296,166 @@ function syncOverlay(map: MapLibreMap): void {
     map.setLayoutProperty(LAYER.overlay, "visibility", visible);
     map.setPaintProperty(LAYER.overlay, "raster-opacity", state.overlayOpacity);
   }
+}
+
+/** Overlay-route URL for one Phase 1 diagnostic layer (params already in the
+ *  base URL — append with the right separator). */
+function auxLayerUrl(overlayUrl: string, key: AuxKey, magnitudeIndex: string): string {
+  const sep = overlayUrl.includes("?") ? "&" : "?";
+  if (key === "coverage") return `${overlayUrl}${sep}layer=coverage`;
+  if (key === "gap") return `${overlayUrl}${sep}layer=gapfill`;
+  return `${overlayUrl}${sep}layer=magnitude&index=${encodeURIComponent(magnitudeIndex)}`;
+}
+
+/**
+ * One diagnostic layer: added below the classified overlay (or the boundary
+ * lines when no overlay exists) so change classes always paint on top;
+ * removed when toggled off; visibility restored after tab switches. Quick
+ * results use whole-AOI image sources; detailed/smart results use the same
+ * XYZ tile source with a layer query param (raster=true).
+ */
+function syncAuxLayer(
+  map: MapLibreMap,
+  key: AuxKey,
+  sourceId: string,
+  layerId: string,
+  enabled: boolean,
+  url: string | null,
+  visible: boolean,
+  bbox: [number, number, number, number],
+  raster: boolean,
+): void {
+  if (!enabled || !url) {
+    removeSourceLayer(map, sourceId, [layerId]);
+    appliedAux[key] = null;
+    return;
+  }
+  if (raster) {
+    const existing = map.getSource(sourceId);
+    if (!existing || existing.type !== "raster" || appliedAux[key] !== url) {
+      removeSourceLayer(map, sourceId, [layerId]);
+      map.addSource(sourceId, {
+        type: "raster",
+        tiles: [url],
+        tileSize: 512,
+        minzoom: DETAIL_SOURCE_MINZOOM,
+        maxzoom: DETAIL_SOURCE_MAXZOOM,
+      });
+      appliedAux[key] = url;
+      addThematicLayer(
+        map,
+        {
+          id: layerId,
+          type: "raster",
+          source: sourceId,
+          layout: { visibility: visible ? "visible" : "none" },
+          paint: { "raster-opacity": AUX_OPACITY[key], "raster-fade-duration": 0 },
+        },
+        map.getLayer(LAYER.overlay) ? LAYER.overlay : undefined,
+      );
+    }
+    if (map.getLayer(layerId)) {
+      map.setLayoutProperty(layerId, "visibility", visible ? "visible" : "none");
+      map.setPaintProperty(layerId, "raster-opacity", AUX_OPACITY[key]);
+    }
+    return;
+  }
+  const existingSource = map.getSource(sourceId);
+  if (existingSource && existingSource.type !== "image") {
+    removeSourceLayer(map, sourceId, [layerId]);
+  }
+  const existing = map.getSource(sourceId) as ImageSource | undefined;
+  if (!existing) {
+    map.addSource(sourceId, { type: "image", url, coordinates: imageCoords(bbox) });
+    appliedAux[key] = url;
+    addThematicLayer(
+      map,
+      {
+        id: layerId,
+        type: "raster",
+        source: sourceId,
+        layout: { visibility: visible ? "visible" : "none" },
+        paint: { "raster-opacity": AUX_OPACITY[key], "raster-fade-duration": 0 },
+      },
+      map.getLayer(LAYER.overlay) ? LAYER.overlay : undefined,
+    );
+    return;
+  }
+  if (appliedAux[key] !== url) {
+    existing.updateImage({ url, coordinates: imageCoords(bbox) });
+    appliedAux[key] = url;
+  }
+  if (map.getLayer(layerId)) {
+    map.setLayoutProperty(layerId, "visibility", visible ? "visible" : "none");
+    map.setPaintProperty(layerId, "raster-opacity", AUX_OPACITY[key]);
+  }
+}
+
+/** Phase 1 diagnostic layers (coverage / gap-fill / magnitude) from the store.
+ *  Runs BEFORE syncOverlay so every aux layer lands under the classified map. */
+function syncAuxLayers(map: MapLibreMap): void {
+  const state = useCompareStore.getState();
+  const result = state.result;
+  if (!result) {
+    for (const [key, sourceId, layerId] of [
+      ["coverage", SRC.coverage, LAYER.coverage],
+      ["gap", SRC.gap, LAYER.gap],
+      ["magnitude", SRC.magnitude, LAYER.magnitude],
+    ] as const) {
+      removeSourceLayer(map, sourceId, [layerId]);
+      appliedAux[key] = null;
+    }
+    return;
+  }
+  const bbox = result.bbox;
+  const visible = state.tab !== "swipe";
+  // Detailed/smart results serve every diagnostic layer from the same tile
+  // route (layer= param); quick results keep the whole-AOI image sources.
+  const raster = Boolean(result.detail);
+  const magnitudeUrl = raster
+    ? detailTileUrl(result.detail!.tiles, "magnitude", { index: state.magnitudeIndex })
+    : auxLayerUrl(result.overlayUrl, "magnitude", state.magnitudeIndex);
+  const coverageUrl = raster
+    ? detailTileUrl(result.detail!.tiles, "coverage")
+    : auxLayerUrl(result.overlayUrl, "coverage", state.magnitudeIndex);
+  const gapUrl = raster
+    ? detailTileUrl(result.detail!.tiles, "gapfill")
+    : auxLayerUrl(result.overlayUrl, "gap", state.magnitudeIndex);
+  // Add order magnitude → coverage → gap keeps the newest addition directly
+  // under the overlay, so all three stack below the classified map.
+  syncAuxLayer(
+    map,
+    "magnitude",
+    SRC.magnitude,
+    LAYER.magnitude,
+    state.magnitudeLayer,
+    magnitudeUrl,
+    visible,
+    bbox,
+    raster,
+  );
+  syncAuxLayer(
+    map,
+    "coverage",
+    SRC.coverage,
+    LAYER.coverage,
+    state.coverageLayer,
+    coverageUrl,
+    visible,
+    bbox,
+    raster,
+  );
+  syncAuxLayer(
+    map,
+    "gap",
+    SRC.gap,
+    LAYER.gap,
+    state.gapLayer,
+    gapUrl,
+    visible,
+    bbox,
+    raster,
+  );
 }
 
 /** Per-tehsil alpha shading from the zonal stats (district-level results). */
@@ -297,6 +551,7 @@ function visibleEvents(): GeoJSON.Feature[] {
   return selectVisibleEvents(state.eventsItems, {
     confidenceFilter: state.confidenceFilter,
     limit: state.eventsLimit,
+    includeEdge: state.showEdgeEvents,
   });
 }
 
@@ -637,6 +892,7 @@ function bindHotspotEvents(map: MapLibreMap): void {
 function syncCompareMap(map: MapLibreMap): void {
   try {
     if (!map.isStyleLoaded()) return; // style.load → addAppLayers → addCompareLayers
+    syncAuxLayers(map);
     syncOverlay(map);
     ensureChoroplethLayer(map);
     syncChoropleth(map);
@@ -728,6 +984,9 @@ export function syncTabVisibility(): void {
     hide(LAYER.hotspotFill);
     hide(LAYER.hotspotLine);
     hide(LAYER.hotspotHover);
+    hide(LAYER.coverage);
+    hide(LAYER.gap);
+    hide(LAYER.magnitude);
   } catch {
     // Map disposed mid-sync.
   }

@@ -30,8 +30,8 @@ Next.js 14 · TypeScript · Tailwind · MapLibre GL JS · Zustand · Radix UI ·
 | 🔎 | **Filters & scenes** | District → Tehsil → ILR cascade, date presets and a calendar that highlights dates with scenes, cloud slider, true / false colour / NDVI. One card per acquisition day with cloud %, **coverage % of the area**, UTC time and scene id. |
 | 🗺️ | **Map & imagery** | OpenFreeMap basemap (English labels) with an Esri satellite switcher, **native-resolution 512 px tiles** (bicubic upscaling, zoom band up to z15) clipped to the selected area, opacity slider, legends, address search, boundary layers, light / dark themes. |
 | ⬇️ | **Downloads** | PNG preview for every role; **GeoTIFF (visual, 8-bit)** and **GeoTIFF (analysis, FLOAT32 bands)** for SSO; Copernicus Browser deep links. Clipped to the selection, up to 2500 px per side (guest PNG capped at 1024 px). |
-| 🔍 | **Change detection** | Compare two dates: **Swipe**, classified **Changes** map, **Stats** (by class and tehsil), **Events** list with numbered map markers, **Summary**, and exports. Guests run tehsil / ILR at default tuning (3/day); SSO adds district level, adjustable sensitivity / minimum patch, PNG + GeoTIFF / CSV / GeoJSON exports (50/day). |
-| 🧭 | **Map inspector** | Click the map (or focus **Inspect map centre** + Enter) for one Google-Maps-style card: coordinates with copy, *Select this tehsil / district*, field details with an NDVI sparkline, change-event facts, a **Sample NDVI here** spot check, and Copernicus Browser / Google Maps links. Bottom sheet on phones; Esc closes. See [Map inspector](#-map-inspector). |
+| 🔍 | **Change detection** | Compare two dates: **Swipe**, classified **Changes** map, **Stats** (by class and tehsil), **Events** list with numbered map markers, **Summary**, and exports. Guests run tehsil / ILR at default tuning (3/day); SSO adds district level, adjustable sensitivity / minimum patch, PNG + GeoTIFF / CSV / GeoJSON exports (50/day). SSO can also run **Detailed / Smart** native-10 m block analyses with an estimate-and-confirm card (3/day) and **probe** any point to learn *why* it did (or didn't) change. |
+| 🧭 | **Map inspector** | Click the map (or focus **Inspect map centre** + Enter) for one Google-Maps-style card: coordinates with copy, *Select this tehsil / district*, field details with an NDVI sparkline, change-event facts, a **Probe at native 10 m** verdict for change misses, a **Sample NDVI here** spot check, and Copernicus Browser / Google Maps links. Bottom sheet on phones; Esc closes. See [Map inspector](#-map-inspector). |
 | 🌾 | **Fields & crops** | SSO-only: load Fields of the World parcel boundaries for the current view (≤ 25 km²), run a 12-month **cropping pattern** (fallow / kharif / rabi / double-cropped …), paint the map by pattern, curve group or confidence, isolate classes from the legend, and open any parcel in the map inspector. See [Fields & crops on the map](#-fields--crops-on-the-map). |
 | 🛰️ | **High-resolution imagery** | SSO-only NRSC Bhoonidhi LISS-IV scenes (5.8 m, false colour) for the selected area: scene picker, opacity, and a **Swipe vs Sentinel-2** divider. Guests can request an area by email with the AOI attached. See [High-resolution imagery](#-high-resolution-imagery-bhoonidhi). |
 | 🤖 | **AI summary** | SSO-only Gemini briefing of a comparison in English or हिन्दी, built only from the computed statistics (30/day). |
@@ -123,6 +123,7 @@ All Copernicus, Gemini and email calls are **server-side**; the browser never se
 | `DAILY_RENDER_BUDGET` | server | `3000` | Daily render cap per instance (`0` = off) |
 | `TILE_CACHE_DIR` | server | unset | Disk tile cache (auto-off on Vercel) |
 | `COMPARE_MAX_PX` / `COMPARE_RATE_LIMIT_PER_MIN` | server | `1500` / `6` | Analysis grid cap and analyze limit |
+| `COMPARE_MAX_BLOCKS` | server | `500` | Phase 3: max native 1024² blocks in one detailed run |
 | `PER_ANALYSIS_PU_LIMIT` | server | `700` | PU cap per analysis, estimated before fetching (`0` = off) |
 | `CHANGE_RULES` / `CHANGE_ENGINE` | server | `fused` / `v1` | Change-rule mode: `legacy`, `fused` or `ml`; `CHANGE_ENGINE` picks v1/v2 for `legacy` only |
 | `S1_ENABLED` / `S1_WINDOW_DAYS` | server | `true` / `6` | Sentinel-1 GRD evidence for fused/ml rules and its ±day temporal median |
@@ -180,7 +181,9 @@ Compare two Sentinel-2 dates over the selected district / tehsil / ILR. Every nu
 
 Results are cached; if the cache has expired the server **recomputes from the analysis parameters**, so the tabs and exports keep working.
 
-**Pipeline:** fetch NDVI / MNDWI / NDBI for each date (clouds, shadows and no-data masked) → classify with fixed precedence → 3×3 majority filter and a minimum mapping unit (0.2 ha) → statistics, per-tehsil zonal stats and events.
+**Pipeline:** fetch NDVI / MNDWI / NDBI for each date (clouds, shadows and no-data masked) → classify with fixed precedence → **gentle despeckle** (magnitude-aware; the pre-Phase-2 3×3 majority is available as `legacy` in the Method & settings card) → minimum mapping unit (**0.05 ha** — small-but-real plots survive) → statistics, per-tehsil zonal stats and events. When a date renders with < 95 % usable coverage the server automatically re-fetches a wider ±window composite and marks the rescued pixels (*gap-fill layer* shows where).
+
+A side of the analysis with < 95 % usable coverage triggers a **coverage rescue**: the server re-fetches a wider ±window composite and merges it only where the primary render had no data. The **Coverage** diagnostic layer (analysed / A missing / B missing / cloud / unknown) shows every pixel's story, the **Magnitude** layer shows the raw Δ-index values, and boundary-hugging patches are flagged **edge** so they stay out of the headline area until you include them.
 
 | Rule | Class |
 | --- | --- |
@@ -190,7 +193,28 @@ Results are cached; if the cache has expired the server **recomputes from the an
 | ΔNDVI ≥ +0.15 | Vegetation gain |
 | ΔNDBI ≥ +0.10 and ΔNDVI ≤ −0.05 | Bare / built-up increase |
 
-Thresholds live in `lib/analysis/config.ts`; **sensitivity** scales them (low ×1.5, medium ×1, high ×0.7). They are heuristics: treat events as places to check, not confirmed changes. Valid data below 70% triggers a warning.
+Thresholds live in `lib/analysis/config.ts`; **sensitivity** scales them — low ×1.5, medium ×1, high ×0.7, **very high** ×0.5, and **Auto** derives them from the scene's own noise (3× the robust σ per index, with floors). They are heuristics: treat events as places to check, not confirmed changes. Valid data below 70% triggers a warning.
+
+### 🧱 Detailed & smart runs (Phase 3)
+
+SSO users can pick the analysis **detail level** in the compare bar: **Quick** (the standard ≤1500 px whole-AOI grid), **Smart** (default for districts) or **Detailed**.
+
+- **Detailed** splits the area into native **1024 px (≈10.2 km) blocks** with a 32 px context margin, classifies each at full 10 m resolution, and stitches them: patches that cross a block seam are united (union-find over the overlap strips) so events, stats and the map read as one analysis. Progress streams block by block (`Block 12/57`) and closing the panel cancels the run between blocks.
+- **Smart** first runs a coarse ~40 m **screening pass** over the whole area, then refines only the **hot blocks** (Δ above 0.6× a threshold, or the top 5 % of magnitude) plus a one-block buffer — district-sized runs stay affordable. Skipped blocks simply read as analysed-unchanged.
+- Before any detail run the server answers an **estimate card** — blocks, screening cost, total PU — and the run only starts after you confirm. Detailed runs need the SSO `compare.detailed` capability (3/day) and are capped by `COMPARE_MAX_BLOCKS`.
+- On the map, detailed results render from a native-resolution **XYZ tile route** (`/api/compare/tiles/…`) instead of the single overlay image — zoom in to see field-level change boundaries. All the diagnostic layers (coverage, gap-fill, magnitude) tile natively too; class toggles and *show unchanged* ride the tile URL.
+
+### 📍 Probe: why did (or didn't) this point change? (Phase 4)
+
+The inspector's **Probe at native 10 m** button classifies a ~480 m window around the clicked point and answers one of:
+
+- **kept** — confirmed change: class, patch size in the window, confidence tier;
+- **below the minimum patch** — the classifiers did see a change here, but the patch is smaller than the minimum patch size, so it was cut. One button re-runs the analysis with 0.01 ha patches;
+- **below thresholds** — the deltas with the applied thresholds side by side. One button re-runs with higher sensitivity;
+- **cloud / missing data** — which date is unusable;
+- **no change** — the deltas are ≈ 0.
+
+Probes are metered like NDVI samples (`inspectSample` quota) and cached per point (~100 m), so re-opening the same pin is free.
 
 ### 🧪 Evidence, rules & confidence
 
@@ -221,7 +245,7 @@ Sections appear only when they have something to say:
 
 - **Location** — coordinates with **Copy coordinates**, reverse-geocoded place, district / tehsil / irrigation block, and **Select this tehsil** / **Select this district** buttons that arm the area filter.
 - **Field** — when *Fields & crops* is loaded and a parcel is hit: area, confidence, cropping class and its 12-month NDVI sparkline, with a jump to the list row.
-- **Change** — the analysis facts for the event under the pointer (or its loading / error state).
+- **Change** — the analysis facts for the event under the pointer (or its loading / error state), plus the **Probe at native 10 m** verdict that explains a miss and offers the matching re-run (higher sensitivity / smaller patches).
 - **Imagery** — **Sample NDVI here**: one spot value with clear / cloudy conditions, against a daily quota.
 - **Open elsewhere** — deep links to Copernicus Browser and Google Maps for the same location.
 
@@ -311,6 +335,7 @@ Exactly two roles exist — **guest** and **sso**. There is no admin/member tier
 | District-level compare | 🔒 | ✅ |
 | Adjust sensitivity | 🔒 | ✅ |
 | Adjust minimum patch | 🔒 | ✅ |
+| Detailed comparison | 🔒 | ✅ |
 | PNG preview download | ✅ | ✅ |
 | GeoTIFF download | 🔒 | ✅ |
 | Copernicus Browser links | ✅ | ✅ |
@@ -330,9 +355,9 @@ Exactly two roles exist — **guest** and **sso**. There is no admin/member tier
 | System status panel | 🔒 | ✅ |
 | High-resolution imagery | 🔒 | ✅ |
 
-**Guest limits:** 90-day window · tiles z≤12 · 30/day searches · 3/day analyses · 0/day AI · PNG ≤1024 px · 5 saved queries.
+**Guest limits:** 90-day window · tiles z≤12 · 30/day searches · 3/day analyses · 0/day detailed · 0/day AI · PNG ≤1024 px · 5 saved queries.
 
-**SSO limits:** full archive · tiles z≤14 · 300/day searches · 50/day analyses · 30/day AI · PNG ≤2500 px · 50 saved queries.
+**SSO limits:** full archive · tiles z≤14 · 300/day searches · 50/day analyses · 3/day detailed · 30/day AI · PNG ≤2500 px · 50 saved queries.
 
 🔒 = not available for that role (the API answers `403 FORBIDDEN_ROLE`; the UI shows a lock popover).
 Daily quotas are counted per session **and** per client IP for each UTC day.
@@ -408,7 +433,7 @@ Preferences are stored **per account, in this browser only** (`rie:prefs:v1:<sub
 
 | Area | Limitation |
 | --- | --- |
-| **Resolution / plots** | 10 m pixels: plots well under ~0.1 ha are not resolved, and outlines follow pixels, not legal plot boundaries. District-level runs use a capped grid (`COMPARE_MAX_PX`); choose a tehsil for full detail. |
+| **Resolution / plots** | 10 m pixels: plots well under ~0.1 ha are not resolved, and outlines follow pixels, not legal plot boundaries. Quick district runs use a capped grid (`COMPARE_MAX_PX`); SSO **Detailed / Smart** runs (Phase 3) classify at native 10 m in blocks instead. |
 | **Built-up vs bare soil** | Spectrally similar in semi-arid terrain; the "bare / built-up" class can contain both. |
 | **Crop cycles** | Harvest, tillage and irrigation look like change. Gaps under ~30 days show little; compare the same season across years. |
 | **Single-date images** | Residual haze or shadow can create false change; composites are planned. |

@@ -19,14 +19,26 @@ const CONFIDENCE_RANK: Record<ConfidenceTier, number> = { low: 1, medium: 2, hig
  * MINIMUM semantics — "medium" keeps medium + high — matching the server's
  * `confidence` query param (pageEvents) and the probe totals, so the visible
  * rows always agree with the header count.
+ *
+ * Phase 2: `includeEdge: false` additionally drops boundary/masked-seam
+ * patches client-side (the list and the markers can flip without refetching;
+ * the header total comes from stats.eventsEdgeTotal / the edge probe param).
  */
 export function filterEvents(
   features: GeoJSON.Feature[],
   confidenceFilter: ConfidenceTier | null,
+  includeEdge = true,
 ): GeoJSON.Feature[] {
-  if (!confidenceFilter) return features;
+  let out = features;
+  if (!includeEdge) {
+    out = out.filter((feature) => {
+      const props = feature.properties as Record<string, unknown> | undefined;
+      return props?.edge !== true;
+    });
+  }
+  if (!confidenceFilter) return out;
   const min = CONFIDENCE_RANK[confidenceFilter];
-  return features.filter((feature) => {
+  return out.filter((feature) => {
     const props = feature.properties as Record<string, unknown> | undefined;
     const tier = props?.confidence as ConfidenceTier | undefined;
     const rank = tier ? CONFIDENCE_RANK[tier] : undefined;
@@ -38,6 +50,8 @@ export interface SelectVisibleOptions {
   confidenceFilter: ConfidenceTier | null;
   /** Client page cursor — how many rows the list shows (and how many markers exist). */
   limit: number;
+  /** Phase 2: false = hide boundary/masked-seam patches (default: show). */
+  includeEdge?: boolean;
 }
 
 /**
@@ -49,7 +63,10 @@ export function selectVisibleEvents(
   features: GeoJSON.Feature[],
   options: SelectVisibleOptions,
 ): GeoJSON.Feature[] {
-  return filterEvents(features, options.confidenceFilter).slice(0, Math.max(0, options.limit));
+  return filterEvents(features, options.confidenceFilter, options.includeEdge ?? true).slice(
+    0,
+    Math.max(0, options.limit),
+  );
 }
 
 /** Marker rows are the visible list rows — kept as a named step for clarity. */

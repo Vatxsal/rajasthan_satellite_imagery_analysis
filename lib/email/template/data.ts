@@ -65,7 +65,7 @@ export interface ReportEmailData {
   dateA: string;
   dateB: string;
   gapDays: number;
-  sensitivity: "low" | "medium" | "high";
+  sensitivity: "low" | "medium" | "high" | "veryhigh" | "auto";
   minPatchHa: number;
   inputMode: "single" | "composite";
   changedHa: number;
@@ -285,7 +285,7 @@ export interface ReportSourceInput {
   dateA: string;
   dateB: string;
   gapDays: number;
-  sensitivity: "low" | "medium" | "high";
+  sensitivity: "low" | "medium" | "high" | "veryhigh" | "auto";
   minPatchHa: number;
   inputMode: "single" | "composite";
   stats: ReportStatsSource;

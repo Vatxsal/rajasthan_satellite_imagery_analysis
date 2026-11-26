@@ -13,7 +13,7 @@
  * path and the node test build. Areas/statistics never use these vertices:
  * they stay pixel-derived in stats.ts.
  */
-import { POLYGON_SIMPLIFY_PX, POLYGON_SMOOTH_PASSES } from "./config";
+import { POLYGON_SIMPLIFY_PX, POLYGON_SMOOTH_MAX_CUT_PX, POLYGON_SMOOTH_PASSES } from "./config";
 import type { AnalysisGrid } from "./types";
 
 type Vertex = [number, number];
@@ -170,16 +170,23 @@ function simplifyRing(ring: Ring, tol: number): Ring {
   return out.length >= 3 ? out : ring;
 }
 
-/** One Chaikin corner-cutting pass over a closed ring (rounds stair corners). */
-function chaikin(ring: Ring): Ring {
+/**
+ * One Chaikin corner-cutting pass over a closed ring (rounds stair corners).
+ * The per-edge cut fraction is capped so a corner loses at most `maxCutPx`
+ * per pass — the classic quarter-edge cut would otherwise swallow long chords
+ * (see POLYGON_SMOOTH_MAX_CUT_PX).
+ */
+function chaikin(ring: Ring, maxCutPx: number): Ring {
   const n = ring.length;
   if (n < 3) return ring;
   const out: Ring = [];
   for (let i = 0; i < n; i++) {
     const p = ring[i];
     const q = ring[(i + 1) % n];
-    out.push([0.75 * p[0] + 0.25 * q[0], 0.75 * p[1] + 0.25 * q[1]]);
-    out.push([0.25 * p[0] + 0.75 * q[0], 0.25 * p[1] + 0.75 * q[1]]);
+    const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    const t = len > 0 ? Math.min(0.25, maxCutPx / len) : 0;
+    out.push([(1 - t) * p[0] + t * q[0], (1 - t) * p[1] + t * q[1]]);
+    out.push([t * p[0] + (1 - t) * q[0], t * p[1] + (1 - t) * q[1]]);
   }
   return out;
 }
@@ -187,7 +194,9 @@ function chaikin(ring: Ring): Ring {
 /** Simplify stair-steps away, then round corners (Phase 3 smoothing). */
 function smoothRing(ring: Ring): Ring {
   let out = simplifyRing(ring, POLYGON_SIMPLIFY_PX);
-  for (let pass = 0; pass < POLYGON_SMOOTH_PASSES; pass++) out = chaikin(out);
+  for (let pass = 0; pass < POLYGON_SMOOTH_PASSES; pass++) {
+    out = chaikin(out, POLYGON_SMOOTH_MAX_CUT_PX);
+  }
   return out;
 }
 

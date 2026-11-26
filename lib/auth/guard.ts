@@ -98,6 +98,7 @@ export function forbiddenZoomResponse(zoom: number): NextResponse {
 const QUOTA_LABELS: Record<QuotaKind, string> = {
   search: "search",
   compare: "analysis",
+  detailed: "detailed analysis",
   aiSummary: "AI summary",
   inspectSample: "NDVI sample",
 };

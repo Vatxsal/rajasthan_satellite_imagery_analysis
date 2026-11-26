@@ -189,7 +189,7 @@ test("compare store: sensitivity, summary and overlay seed from preferences", ()
   // Live state still matches the schema defaults on a fresh profile.
   const state = useCompareStore.getState();
   assert.equal(state.sensitivity, "medium");
-  assert.equal(state.minPatchHa, 0.2);
+  assert.equal(state.minPatchHa, 0.05);
   assert.equal(state.summaryLanguage, "en");
   assert.equal(state.summaryIncludeImages, true);
 });
@@ -199,7 +199,7 @@ test("compare store: sensitivity, summary and overlay seed from preferences", ()
 test("format call sites: every surveyed surface uses the shared formatters", () => {
   const stats = read("components", "compare", "CompareStatsTab.tsx");
   assert.match(stats, /haRound\(stats\.areaHa, areaUnit\)/);
-  assert.match(stats, /ha\(stats\.changedHa, areaUnit\)/);
+  assert.match(stats, /ha\(headlineHa, areaUnit\)/);
   assert.match(stats, /formatArea\(areaHa, areaUnit\)/);
   assert.match(stats, /formatDateTime\(Math\.floor\(Date\.parse\(metadata\.generatedAt\)/);
   assert.doesNotMatch(stats, /toLocaleString\("en", \{ maximumFractionDigits: 1 \}\) ha/);

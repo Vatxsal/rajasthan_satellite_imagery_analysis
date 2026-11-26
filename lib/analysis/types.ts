@@ -1,4 +1,4 @@
-import type { Sensitivity } from "./config";
+import type { CompareSpeckle, Sensitivity } from "./config";
 import type { CompareDiagnostics } from "./diagnostics";
 
 /** Analysis grid: linear mapping of the request bbox onto width × height pixels
@@ -56,7 +56,7 @@ export interface TehsilZonalStat {
   insidePixels: number;
 }
 
-/** v2 confidence tier of a change patch (v1 results carry no tier). */
+/** Confidence tier of a change patch (v1 derives it from magnitude since Phase 2). */
 export type ConfidenceTier = "high" | "medium" | "low";
 
 export interface Hotspot {
@@ -70,7 +70,7 @@ export interface Hotspot {
   tehsilName: string | null;
   /** Patch outline in EPSG:4326 (map layer + GeoJSON export); null if untraceable. */
   polygon: GeoJSON.MultiPolygon | null;
-  /** v2 only: majority confidence tier of the patch pixels. */
+  /** Majority confidence tier of the patch pixels. */
   confidence?: ConfidenceTier;
   /** Phase 3 fused only: patch-mean confidence 0-100 (tier is derived from it). */
   confidencePct?: number;
@@ -78,6 +78,8 @@ export interface Hotspot {
   subLabel?: string | null;
   /** v2 only: patch tags — "transient" | "crop-cycle" | "short-gap". */
   tags?: string[];
+  /** Phase 2: patch touches the boundary / masked / gap-fill seam ("edge, check"). */
+  edge?: boolean;
 }
 
 /** v2 engine diagnostics echoed into the result metadata. */
@@ -141,6 +143,10 @@ export interface CompareMetadata {
   coarse: boolean;
   sensitivity: Sensitivity;
   minPatchHa: number;
+  /** Phase 2 despeckle mode that produced this result (default gentle). */
+  speckle?: CompareSpeckle;
+  /** Phase 3: present on detailed/smart runs (absent = quick). */
+  detail?: "detailed" | "smart";
   /** Engine that produced this result (CHANGE_ENGINE). */
   engine: CompareEngine;
   /** Rule mode that produced this result (CHANGE_RULES; omitted pre-Phase 3). */
@@ -161,6 +167,9 @@ export interface CompareMetadata {
   engineStats?: EngineStats;
   /** Phase 0: coverage/stage/patch/histogram diagnostics (Method card + dev log). */
   diagnostics?: CompareDiagnostics;
+  /** Phase 1: coverage-rescue statement — a wider ±window render recovered
+   *  this share of the polygon for the listed sides (absent when no rescue). */
+  gapFill?: { windowDays: number; sides: string[]; filledPct: number };
   generatedAt: string;
 }
 
@@ -180,11 +189,19 @@ export interface CompareStats {
   changeBbox: [number, number, number, number] | null;
   /** True when no change survived the thresholds + minimum mapping unit. */
   negligible: boolean;
-  /** v2 only: change pixels per confidence tier (UI filter counts). */
+  /** Change pixels per confidence tier (UI filter counts; v1 tiers derive from magnitude). */
   confidence?: { high: number; medium: number; low: number };
   /** Total patch-vector events stored with this analysis (the client ships the
    *  first ANALYZE_EVENTS_CAP of them; more pages come from /api/compare/events). */
   eventsTotal?: number;
+  /** Phase 2: change area (ha) on edge-flagged patches — excluded from the
+   *  headline "Changed area" unless the user includes edge events. */
+  edgeHa?: number;
+  /** Phase 2: patches flagged edge (excluded from the headline count). */
+  eventsEdgeTotal?: number;
+  /** Phase 2: patch counts per change class for the Events header
+   *  (count = all patches, edgeCount = the edge-flagged subset). */
+  eventsByClass?: Array<{ classCode: number; count: number; edgeCount: number }>;
 }
 
 /** Result of an /api/compare/analyze call (final NDJSON frame). */
@@ -199,6 +216,18 @@ export interface AnalyzeResponse {
    * uncapped count — further pages come from GET /api/compare/events.
    */
   events: GeoJSON.Feature[];
+  /** Phase 3: present on detailed/smart results — the map switches from the
+   *  image overlay to the native-resolution XYZ tile source. */
+  detail?: AnalyzeDetail;
+}
+
+/** Phase 3 detail summary on the analyze result frame. */
+export interface AnalyzeDetail {
+  mode: "detailed" | "smart";
+  blocks: number;
+  blocksTotal: number;
+  /** `/api/compare/tiles/{z}/{x}/{y}?…` — {z}/{x}/{y} are placeholders. */
+  tiles: string;
 }
 
 /** Structured AI summary the /api/compare/summary route returns. */

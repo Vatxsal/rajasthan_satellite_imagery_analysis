@@ -28,16 +28,24 @@
  */
 
 /** Ordered classification classes. Precedence = the order in CLASS_ORDER. */
-export type Sensitivity = "low" | "medium" | "high";
+export type Sensitivity = "low" | "medium" | "high" | "veryhigh" | "auto";
+
+/** Phase 2 despeckle mode: gentle = magnitude-aware component removal,
+ *  legacy = the pre-Phase-2 3×3 majority passes. */
+export type CompareSpeckle = "gentle" | "legacy";
 
 /**
  * Low = conservative (fewer, stronger changes) → thresholds × 1.5.
- * Medium = × 1. High = sensitive (more changes) → × 0.7.
+ * Medium = × 1. High = × 0.7. Very high = × 0.5. Auto thresholds are
+ * derived per-pair from the Δ-index noise (autoThresholds) — the ×1 here
+ * is only the placeholder until the rasters exist.
  */
 export const SENSITIVITY_MULTIPLIER: Record<Sensitivity, number> = {
   low: 1.5,
   medium: 1,
   high: 0.7,
+  veryhigh: 0.5,
+  auto: 1,
 };
 
 export const DEFAULT_SENSITIVITY: Sensitivity = "medium";
@@ -49,9 +57,17 @@ export const GRID_NATIVE_RES_M = 10;
 /** Absolute floor of the analysis grid long side (px) — guards degenerate bboxes. */
 export const GRID_MIN_PX = 32;
 /** Minimum mapping unit in hectares — patches smaller than this become "no change". */
-export const DEFAULT_MIN_PATCH_HA = 0.2;
-/** 3×3 majority (mode) filter kernel size. */
+export const DEFAULT_MIN_PATCH_HA = 0.05;
+/** 3×3 majority (mode) filter kernel size (legacy despeckle). */
 export const MAJORITY_WINDOW = 3;
+/** Phase 1 magnitude layers: Δ-index → int8 quantisation (value × 64, ±1.98 range). */
+export const MAGNITUDE_SCALE = 64;
+/** Phase 2 auto-sensitivity floors per Δ-index — never adapt below these. */
+export const AUTO_THRESHOLD_FLOOR = { ndvi: 0.05, mndwi: 0.1, ndbi: 0.05 } as const;
+/** Phase 2 gentle despeckle: a sub-MMU component whose mean magnitude (max
+ *  |Δ_i| / threshold_i) reaches this multiple of the applied thresholds is a
+ *  "strong small change" and survives the MMU cut. */
+export const STRONG_SMALL_MAGNITUDE = 1.5;
 
 export const THRESHOLDS = {
   /** ΔMNDWI ≥ +0.20 and MNDWI(B) > 0 → open water appeared. */
@@ -318,6 +334,11 @@ export const POLYGON_SIMPLIFY_PX = 0.5;
 /** Chaikin corner-cutting passes after simplification (visual smoothing only —
  *  stats/areas always come from the raster, never from these vertices). */
 export const POLYGON_SMOOTH_PASSES = 2;
+/** Cap on how deep one corner-cutting pass may bite into a corner (edge/pixel
+ *  units). Chaikin's default quarter-edge cut is unbounded in absolute terms:
+ *  a Douglas-Peucker-collapsed ring (clean staircase → a few long chords, as
+ *  gentle mode produces) would lose tens of pixels to rounding. */
+export const POLYGON_SMOOTH_MAX_CUT_PX = 0.5;
 
 // ── Phase 5 — cost model & full-coverage vectors ───────────────────────────
 

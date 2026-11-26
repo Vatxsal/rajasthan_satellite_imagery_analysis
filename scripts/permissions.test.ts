@@ -132,14 +132,18 @@ test("quota mapping: metered capabilities and their limit keys", () => {
   assert.deepEqual(QUOTA_BY_CAPABILITY, {
     "scenes.search": "search",
     "compare.analyses": "compare",
+    "compare.detailed": "detailed",
     "ai.summary": "aiSummary",
     "inspect.sample": "inspectSample",
   });
   assert.equal(QUOTA_LIMIT_KEY.search, "searchesPerDay");
   assert.equal(QUOTA_LIMIT_KEY.compare, "comparePerDay");
+  assert.equal(QUOTA_LIMIT_KEY.detailed, "detailedPerDay");
   assert.equal(QUOTA_LIMIT_KEY.aiSummary, "aiSummariesPerDay");
   assert.equal(QUOTA_LIMIT_KEY.inspectSample, "inspectSamplesPerDay");
   assert.equal(limitForKind(limitsFor("guest"), "compare"), 3);
+  assert.equal(limitForKind(limitsFor("guest"), "detailed"), 0);
+  assert.equal(limitForKind(limitsFor("sso"), "detailed"), 3);
   assert.equal(limitForKind(limitsFor("sso"), "aiSummary"), 30);
   assert.equal(limitForKind(limitsFor("guest"), "search"), 30);
   // Map inspector: guests sample NDVI 10×/day, SSO 100×/day; basic

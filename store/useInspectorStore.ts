@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { bboxFromGeometry } from "@/lib/cdse/geometry";
+import type { ProbeResult } from "@/lib/analysis/probe";
 import { analysisParamsFromMetadata } from "@/lib/compare/params";
 import type { District, Tehsil } from "@/lib/data/types";
 import type { InspectorHit } from "@/lib/inspect/hits";
@@ -64,6 +65,8 @@ export interface InspectorState {
   location: InspectorLocation | null;
   lookup: { status: SectionStatus; name: string | null; error: string | null };
   change: { status: SectionStatus; info: ChangeInfo | null; error: string | null };
+  /** Phase 4 native-resolution probe (metered, per-point cached). */
+  probe: { status: SectionStatus; info: ProbeResult | null; error: string | null };
   sample: { status: SectionStatus; info: SampleInfo | null; error: string | null };
 
   openAt: (input: {
@@ -76,25 +79,32 @@ export interface InspectorState {
   close: () => void;
   setBasemapWords: (words: string[]) => void;
   lookupPlace: () => void;
+  /** Phase 4: classifies a ~480 m native window around the pin and explains
+   *  the verdict (kept / below-mmu / sub-threshold / masked / no-change). */
+  probeChange: () => void;
   sampleNdvi: (scene: { date: string; composite: string }) => void;
   selectAdminArea: (level: "tehsil" | "district") => boolean;
 }
 
 const IDLE = { status: "idle" as SectionStatus, name: null, error: null };
 const IDLE_CHANGE = { status: "idle" as SectionStatus, info: null, error: null };
+const IDLE_PROBE = { status: "idle" as SectionStatus, info: null, error: null };
 const IDLE_SAMPLE = { status: "idle" as SectionStatus, info: null, error: null };
 
 /** Bumped by every open/close so late responses are discarded. */
 let seq = 0;
 let changeController: AbortController | null = null;
+let probeController: AbortController | null = null;
 let lookupController: AbortController | null = null;
 let sampleController: AbortController | null = null;
 
 function abortAll(): void {
   changeController?.abort();
+  probeController?.abort();
   lookupController?.abort();
   sampleController?.abort();
   changeController = null;
+  probeController = null;
   lookupController = null;
   sampleController = null;
 }
@@ -127,6 +137,7 @@ function openCommon(
     location,
     lookup: { ...IDLE },
     change: { ...IDLE_CHANGE },
+    probe: { ...IDLE_PROBE },
     sample: { ...IDLE_SAMPLE },
   });
 
@@ -175,6 +186,7 @@ export const useInspectorStore = create<InspectorState>((set, get) => ({
   location: null,
   lookup: { ...IDLE },
   change: { ...IDLE_CHANGE },
+  probe: { ...IDLE_PROBE },
   sample: { ...IDLE_SAMPLE },
 
   openAt: (input) => openCommon(set, input),
@@ -192,6 +204,7 @@ export const useInspectorStore = create<InspectorState>((set, get) => ({
       location: null,
       lookup: { ...IDLE },
       change: { ...IDLE_CHANGE },
+      probe: { ...IDLE_PROBE },
       sample: { ...IDLE_SAMPLE },
     });
   },
@@ -218,6 +231,42 @@ export const useInspectorStore = create<InspectorState>((set, get) => ({
         set({ lookup: { status: "error", name: null, error: message } });
       } finally {
         if (lookupController === controller) lookupController = null;
+      }
+    })();
+  },
+
+  probeChange: () => {
+    const { pin, probe } = get();
+    const result = useCompareStore.getState().result;
+    if (!pin || !result || probe.status === "loading") return;
+    seq += 1;
+    const mySeq = seq;
+    probeController?.abort();
+    const controller = new AbortController();
+    probeController = controller;
+    set({ probe: { status: "loading", info: null, error: null } });
+    void (async () => {
+      try {
+        const response = await fetch("/api/compare/probe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            lng: pin[0],
+            lat: pin[1],
+            ...analysisParamsFromMetadata(result.stats.metadata),
+          }),
+        });
+        if (!response.ok) throw new Error(await readError(response, "Probe failed"));
+        const info = (await response.json()) as ProbeResult;
+        if (seq !== mySeq) return;
+        set({ probe: { status: "done", info, error: null } });
+      } catch (error) {
+        if (seq !== mySeq || controller.signal.aborted) return;
+        const message = error instanceof Error ? error.message : "Probe failed.";
+        set({ probe: { status: "error", info: null, error: message } });
+      } finally {
+        if (probeController === controller) probeController = null;
       }
     })();
   },

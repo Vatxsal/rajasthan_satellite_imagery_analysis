@@ -16,7 +16,7 @@ export interface ReportCopy {
   datesLabel: string;
   gapLabel: (days: number) => string;
   sensitivityLabel: string;
-  sensitivity: Record<"low" | "medium" | "high", string>;
+  sensitivity: Record<"low" | "medium" | "high" | "veryhigh" | "auto", string>;
   minPatchLabel: string;
   inputModeLabel: string;
   inputMode: Record<"single" | "composite", string>;
@@ -99,7 +99,7 @@ const EN: ReportCopy = {
   datesLabel: "Dates",
   gapLabel: (days) => `${days} day gap`,
   sensitivityLabel: "Sensitivity",
-  sensitivity: { low: "Low", medium: "Medium", high: "High" },
+  sensitivity: { low: "Low", medium: "Medium", high: "High", veryhigh: "Very high", auto: "Auto" },
   minPatchLabel: "Minimum patch",
   inputModeLabel: "Input mode",
   inputMode: { single: "Single date", composite: "Composite window" },
@@ -191,7 +191,7 @@ const HI: ReportCopy = {
   datesLabel: "तिथियाँ",
   gapLabel: (days) => `${days} दिन का अंतर`,
   sensitivityLabel: "संवेदनशीलता",
-  sensitivity: { low: "कम", medium: "मध्यम", high: "उच्च" },
+  sensitivity: { low: "कम", medium: "मध्यम", high: "उच्च", veryhigh: "अति उच्च", auto: "स्वतः" },
   minPatchLabel: "न्यूनतम पैच",
   inputModeLabel: "इनपुट मोड",
   inputMode: { single: "एकल तिथि", composite: "कंपोज़िट विंडो" },

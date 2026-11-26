@@ -1,11 +1,17 @@
 import { create } from "zustand";
-import type { Sensitivity } from "@/lib/analysis/config";
-import type { CompareStats, ConfidenceTier, SummaryData, SummaryLanguage } from "@/lib/analysis/types";
+import type { CompareSpeckle, Sensitivity } from "@/lib/analysis/config";
+import type {
+  AnalyzeDetail,
+  CompareStats,
+  ConfidenceTier,
+  SummaryData,
+  SummaryLanguage,
+} from "@/lib/analysis/types";
 import { bboxFromGeometry } from "@/lib/cdse/geometry";
 import { filterEvents } from "@/lib/compare/eventList";
 import { analysisParamsFromMetadata, analysisParamsQuery } from "@/lib/compare/params";
 import { normalizeComparePair } from "@/lib/compare/swipe";
-import { streamAnalyze } from "@/lib/compare/run";
+import { fetchDetailEstimate, streamAnalyze, type DetailEstimateResponse } from "@/lib/compare/run";
 import type { CompositeId } from "@/lib/data";
 import { IN_FLIGHT, beginInFlight } from "@/lib/inFlight";
 import { registerHomeResetHook } from "@/lib/homeReset";
@@ -14,7 +20,13 @@ import { usePreferencesStore } from "@/store/usePreferencesStore";
 import { selectCan, useSession } from "@/store/useSession";
 
 export type CompareTab = "swipe" | "change-map" | "statistics" | "hotspots" | "summary";
-export type CompareStage = "fetch-a" | "fetch-b" | "analyze";
+export type CompareStage =
+  | "fetch-a"
+  | "fetch-b"
+  | "rescue"
+  | "analyze"
+  | "screen"
+  | "block";
 export type CompareSlot = "dateA" | "dateB";
 export type CompareSummaryStatus = "idle" | "loading" | "done" | "error";
 /** Which server step a loading summary is in (artifact recompute vs Gemini). */
@@ -25,6 +37,11 @@ export type CompareEventsStatus = "idle" | "loading" | "ready" | "error";
 export type CompareInputMode = "single" | "composite";
 /** Swipe-tab right-hand side: the second date or the Esri satellite basemap. */
 export type CompareSwipeMode = "dates" | "basemap";
+/** Phase 1 magnitude layer plane (overlay route `index=`). */
+export type CompareMagnitudeIndex = "ndvi" | "mndwi" | "ndbi" | "combined";
+/** Phase 3 detail mode: quick (default) | detailed (all native blocks) | smart
+ *  (screening pass, then only the hot blocks). */
+export type CompareDetail = "quick" | "detailed" | "smart";
 
 /** One page of change events — client cursor growth step AND server page size. */
 const EVENTS_PAGE_SIZE = 100;
@@ -33,7 +50,10 @@ const EVENTS_PAGE_SIZE = 100;
 export const COMPARE_STAGE_LABELS: Record<CompareStage, string> = {
   "fetch-a": "Fetching date A",
   "fetch-b": "Fetching date B",
+  rescue: "Checking coverage",
   analyze: "Analyzing",
+  screen: "Screening for hot blocks",
+  block: "Classifying blocks",
 };
 
 /** Result of a completed analysis plus the grid bbox it was rendered for. */
@@ -50,6 +70,8 @@ export interface CompareResult {
   events: GeoJSON.Feature[];
   /** Analysis-grid bbox (geometry bbox, same as the server) for the image source. */
   bbox: [number, number, number, number];
+  /** Phase 3: present on detailed/smart runs — the map uses the tile source. */
+  detail?: AnalyzeDetail;
 }
 
 /** Side panel width bounds (desktop compare results panel). */
@@ -63,6 +85,8 @@ interface CompareState {
   dateB: string | null;
   running: boolean;
   stage: CompareStage | null;
+  /** Phase 3: block-loop position while stage === "block". */
+  blockProgress: { index: number; total: number } | null;
   error: { code: string; message: string } | null;
   result: CompareResult | null;
   tab: CompareTab;
@@ -99,6 +123,26 @@ interface CompareState {
   swipeOutline: boolean;
   /** Display-only dilation + outline so small changes stay visible (default on). */
   boostVisibility: boolean;
+  /** Phase 1: tint "no change" pixels on the overlay (analysed vs masked vs outside). */
+  showUnchanged: boolean;
+  /** Phase 2: show boundary / masked-seam patches in the Events list. */
+  showEdgeEvents: boolean;
+  /** Phase 2 despeckle mode for the next run (gentle = magnitude-aware). */
+  speckle: CompareSpeckle;
+  /** Phase 3 detail mode for the next run. */
+  detail: CompareDetail;
+  /** Phase 3: user explicitly picked a detail mode (auto-defaults stop). */
+  detailTouched: boolean;
+  /** Phase 3 estimate card: loading / data / dialog visibility. */
+  detailEstimating: boolean;
+  detailEstimate: DetailEstimateResponse | null;
+  detailConfirmOpen: boolean;
+  /** Phase 1 diagnostic map layers (each served by /api/compare/overlay). */
+  coverageLayer: boolean;
+  gapLayer: boolean;
+  magnitudeLayer: boolean;
+  /** Which Δ plane the magnitude layer shows. */
+  magnitudeIndex: CompareMagnitudeIndex;
   /** Slim compare strip: scene cards hidden until expanded. */
   stripExpanded: boolean;
   /** Desktop results panel width in px. */
@@ -130,6 +174,17 @@ interface CompareState {
   toggleSlot: (date: string, slot: CompareSlot) => void;
   clearPair: () => void;
   run: () => Promise<void>;
+  /** Streaming path shared by quick runs and confirmed detail runs. */
+  startRun: (confirm: boolean) => Promise<void>;
+  /** Phase 3: (re)fetches the estimate card for the pending detail run. */
+  refreshDetailEstimate: () => Promise<void>;
+  /** Phase 3: user accepted the estimate — starts the confirmed run. */
+  confirmDetailRun: () => void;
+  /** Phase 3: dialog dismissed — no run starts. */
+  cancelDetailRun: () => void;
+  setDetail: (value: CompareDetail) => void;
+  /** Phase 3 auto-default (district → smart) — does not mark the picker touched. */
+  applyDetailDefault: (value: CompareDetail) => void;
   setTab: (tab: CompareTab) => void;
   setDrawerOpen: (value: boolean) => void;
   setOverlayOpacity: (value: number) => void;
@@ -149,6 +204,13 @@ interface CompareState {
   setSwipeMode: (value: CompareSwipeMode) => void;
   setSwipeOutline: (value: boolean) => void;
   setBoostVisibility: (value: boolean) => void;
+  setShowUnchanged: (value: boolean) => void;
+  setShowEdgeEvents: (value: boolean) => void;
+  setSpeckle: (value: CompareSpeckle) => void;
+  toggleCoverageLayer: () => void;
+  toggleGapLayer: () => void;
+  toggleMagnitudeLayer: () => void;
+  setMagnitudeIndex: (value: CompareMagnitudeIndex) => void;
   setStripExpanded: (value: boolean) => void;
   setPanelWidth: (value: number) => void;
   toggleChoropleth: () => void;
@@ -164,6 +226,8 @@ interface CompareState {
 
 /** Active run — kept out of the store state (AbortController is not reactive). */
 let activeController: AbortController | null = null;
+/** In-flight detail estimate (the smart screening render) — cancelled with the card. */
+let estimateController: AbortController | null = null;
 /** Monotonic run id: results from an aborted/superseded run are discarded. */
 let runSeq = 0;
 /** Monotonic events id: pages superseded by a filter change are discarded. */
@@ -177,6 +241,8 @@ function resetRunState() {
   runSeq += 1;
   activeController?.abort();
   activeController = null;
+  estimateController?.abort();
+  estimateController = null;
   return runSeq;
 }
 
@@ -224,6 +290,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   dateB: null,
   running: false,
   stage: null,
+  blockProgress: null,
   error: null,
   result: null,
   tab: "change-map",
@@ -245,6 +312,18 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   swipeMode: "dates",
   swipeOutline: true,
   boostVisibility: initialPrefs.map.boostVisibility,
+  showUnchanged: false,
+  showEdgeEvents: false,
+  speckle: "gentle" as CompareSpeckle,
+  detail: "quick" as CompareDetail,
+  detailTouched: false,
+  detailEstimating: false,
+  detailEstimate: null,
+  detailConfirmOpen: false,
+  coverageLayer: false,
+  gapLayer: false,
+  magnitudeLayer: false,
+  magnitudeIndex: "combined" as CompareMagnitudeIndex,
   stripExpanded: false,
   panelWidth: 420,
   choropleth: false,
@@ -272,6 +351,10 @@ export const useCompareStore = create<CompareState>((set, get) => ({
         dateB: null,
         running: false,
         stage: null,
+        blockProgress: null,
+        detailConfirmOpen: false,
+        detailEstimating: false,
+        detailEstimate: null,
         error: null,
         ...RESULT_BOUND_RESET,
         stripExpanded: false,
@@ -307,7 +390,17 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   clearPair: () => {
     if (get().running) return;
     resetRunState();
-    set({ dateA: null, dateB: null, error: null, ...RESULT_BOUND_RESET, ...summaryIdle() });
+    set({
+      dateA: null,
+      dateB: null,
+      error: null,
+      blockProgress: null,
+      detailConfirmOpen: false,
+      detailEstimating: false,
+      detailEstimate: null,
+      ...RESULT_BOUND_RESET,
+      ...summaryIdle(),
+    });
   },
 
   run: async () => {
@@ -323,10 +416,38 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       toast("error", "Pick a tehsil or ILR — district-level compare needs an SSO ID.");
       return;
     }
+    // Phase 3: detail runs open the cost card first (the smart screening
+    // estimate loads in the background); Confirm re-enters via confirmDetailRun.
+    if (state.detail !== "quick") {
+      if (!selectCan(useSession.getState(), "compare.detailed")) {
+        toast("error", "Detailed comparisons need an SSO ID.");
+        return;
+      }
+      set({ detailConfirmOpen: true, detailEstimate: null, detailEstimating: true });
+      void get().refreshDetailEstimate();
+      return;
+    }
+    await get().startRun(false);
+  },
 
+  startRun: async (confirm) => {
+    const state = get();
+    const selection = selectActiveSelection(useAppStore.getState());
+    if (!selection) {
+      toast("error", "Select a district, tehsil or ILR first.");
+      return;
+    }
     // Analyse in chronological order: A = earlier, B = later.
+    if (!state.dateA || !state.dateB) return;
     const pair = normalizeComparePair(state.dateA, state.dateB);
-    if (!pair.dateA || !pair.dateB) return; // unreachable — guarded above
+    if (!pair.dateA || !pair.dateB) return;
+
+    const detail = state.detail;
+    const isDetail = detail !== "quick";
+    if (isDetail && !selectCan(useSession.getState(), "compare.detailed")) {
+      toast("error", "Detailed comparisons need an SSO ID.");
+      return;
+    }
 
     activeController?.abort();
     const controller = new AbortController();
@@ -343,7 +464,10 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       dateA: pair.dateA,
       dateB: pair.dateB,
       running: true,
-      stage: "fetch-a",
+      // Detailed starts at the first screening/block frame; block without
+      // progress numbers reads as the generic "Classifying blocks" label.
+      stage: isDetail ? (detail === "smart" ? "screen" : "block") : "fetch-a",
+      blockProgress: null,
       error: null,
       ...summaryIdle(),
     });
@@ -357,12 +481,16 @@ export const useCompareStore = create<CompareState>((set, get) => ({
           dateB: pair.dateB,
           sensitivity: state.sensitivity,
           minPatchHa: state.minPatchHa,
+          speckle: state.speckle,
           inputMode: state.inputMode,
+          ...(isDetail ? { detail, confirm } : {}),
         },
         {
           signal: controller.signal,
-          onStage: (stage) => {
-            if (seq === runSeq) set({ stage });
+          onStage: (stage, block) => {
+            if (seq !== runSeq) return;
+            if (stage === "block") set({ stage, blockProgress: block ?? null });
+            else set({ stage, blockProgress: null });
           },
         },
       );
@@ -372,6 +500,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       set({
         running: false,
         stage: null,
+        blockProgress: null,
         error: null,
         result: { ...result, bbox },
         drawerOpen: true,
@@ -401,7 +530,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
     } catch (error) {
       if (controller.signal.aborted || seq !== runSeq) {
         // Cancelled (area/scenes changed or mode toggled) — stay quiet.
-        if (seq === runSeq) set({ running: false, stage: null });
+        if (seq === runSeq) set({ running: false, stage: null, blockProgress: null });
         return;
       }
       activeController = null;
@@ -411,10 +540,71 @@ export const useCompareStore = create<CompareState>((set, get) => ({
         typeof err.message === "string" && err.message
           ? err.message
           : "Change detection failed. Try again shortly.";
-      set({ running: false, stage: null, error: { code, message } });
+      set({ running: false, stage: null, blockProgress: null, error: { code, message } });
       toast("error", message);
     }
   },
+
+  refreshDetailEstimate: async () => {
+    const state = get();
+    const selection = selectActiveSelection(useAppStore.getState());
+    if (!selection || !state.dateA || !state.dateB || state.detail === "quick") return;
+    const detail = state.detail;
+    const pair = normalizeComparePair(state.dateA, state.dateB);
+    if (!pair.dateA || !pair.dateB) return;
+    // Cancelling the card aborts the screening fetch (it is a real render).
+    estimateController?.abort();
+    const controller = new AbortController();
+    estimateController = controller;
+    try {
+      const estimate = await fetchDetailEstimate(
+        {
+          areaId: selection.id,
+          level: selection.level,
+          dateA: pair.dateA,
+          dateB: pair.dateB,
+          sensitivity: state.sensitivity,
+          minPatchHa: state.minPatchHa,
+          speckle: state.speckle,
+          inputMode: state.inputMode,
+          detail,
+        },
+        { signal: controller.signal },
+      );
+      // Ignore stale cards (the picker changed while the screening ran).
+      if (get().detail !== detail) return;
+      set({ detailEstimate: estimate, detailEstimating: false });
+    } catch (error) {
+      if (controller.signal.aborted) return; // the card was cancelled — quiet
+      if (get().detail !== detail) return;
+      const err = error as { code?: string; message?: string };
+      set({ detailEstimating: false, detailConfirmOpen: false, detailEstimate: null });
+      toast(
+        "error",
+        typeof err.message === "string" && err.message
+          ? err.message
+          : "Could not estimate this detailed comparison.",
+      );
+    } finally {
+      if (estimateController === controller) estimateController = null;
+    }
+  },
+
+  confirmDetailRun: () => {
+    estimateController?.abort();
+    estimateController = null;
+    set({ detailConfirmOpen: false, detailEstimating: false, detailEstimate: null });
+    void get().startRun(true);
+  },
+
+  cancelDetailRun: () => {
+    estimateController?.abort();
+    estimateController = null;
+    set({ detailConfirmOpen: false, detailEstimating: false, detailEstimate: null });
+  },
+
+  setDetail: (value) => set({ detail: value, detailTouched: true }),
+  applyDetailDefault: (value) => set({ detail: value }),
 
   setTab: (tab) => set({ tab }),
   setDrawerOpen: (value) => set({ drawerOpen: value }),
@@ -445,18 +635,25 @@ export const useCompareStore = create<CompareState>((set, get) => ({
     const result = state.result;
     const filter = state.confidenceFilter;
     if (!result || !filter) return;
+    const includeEdge = state.showEdgeEvents;
     try {
       const query = analysisParamsQuery(result.stats.metadata);
       query.set("key", result.key);
       query.set("limit", "1");
       query.set("offset", "0");
       query.set("confidence", filter);
+      query.set("edge", includeEdge ? "include" : "exclude");
       const response = await fetch(`/api/compare/events?${query}`);
       const body = (await response.json().catch(() => null)) as { total?: number } | null;
       if (!response.ok || typeof body?.total !== "number") return;
       const current = get();
-      // Discard stale probes (filter or result changed while it was in flight).
-      if (current.result?.key !== result.key || current.confidenceFilter !== filter) return;
+      // Discard stale probes (filter/edge/result changed while it was in flight).
+      if (
+        current.result?.key !== result.key ||
+        current.confidenceFilter !== filter ||
+        current.showEdgeEvents !== includeEdge
+      )
+        return;
       set({ eventsFilteredTotal: body.total });
     } catch {
       // Best-effort: the header falls back to the loaded count.
@@ -470,7 +667,7 @@ export const useCompareStore = create<CompareState>((set, get) => ({
     const filter = state.confidenceFilter;
 
     // Rows already loaded but past the cursor → just advance it (no network).
-    const loadedMatches = filterEvents(state.eventsItems, filter);
+    const loadedMatches = filterEvents(state.eventsItems, filter, state.showEdgeEvents);
     if (state.eventsLimit < loadedMatches.length) {
       set({ eventsLimit: state.eventsLimit + EVENTS_PAGE_SIZE });
       return;
@@ -523,7 +720,19 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   setSwipeComposite: (value) => set({ swipeComposite: value }),
   setSwipeMode: (value) => set({ swipeMode: value }),
   setSwipeOutline: (value) => set({ swipeOutline: value }),
-  setBoostVisibility: (value) => set({ boostVisibility: value }),
+    setBoostVisibility: (value) => set({ boostVisibility: value }),
+    setShowUnchanged: (value) => set({ showUnchanged: value }),
+    setShowEdgeEvents: (value) => {
+      set({ showEdgeEvents: value });
+      // The probe total depends on the edge set — refresh it while a
+      // confidence filter is active (no filter → header is derived locally).
+      if (get().confidenceFilter && get().result) void get().probeEventsTotal();
+    },
+    setSpeckle: (value) => set({ speckle: value }),
+    toggleCoverageLayer: () => set((s) => ({ coverageLayer: !s.coverageLayer })),
+    toggleGapLayer: () => set((s) => ({ gapLayer: !s.gapLayer })),
+    toggleMagnitudeLayer: () => set((s) => ({ magnitudeLayer: !s.magnitudeLayer })),
+    setMagnitudeIndex: (value) => set({ magnitudeIndex: value }),
   setStripExpanded: (value) => set({ stripExpanded: value }),
   setPanelWidth: (value) =>
     set({ panelWidth: Math.max(PANEL_WIDTH_MIN, Math.min(PANEL_WIDTH_MAX, Math.round(value))) }),

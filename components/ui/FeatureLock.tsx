@@ -101,6 +101,7 @@ export default function FeatureLock({ capability, label, className, size = "icon
 const QUOTA_LABELS: Record<QuotaKind, string> = {
   search: "searches",
   compare: "analyses",
+  detailed: "detailed analyses",
   aiSummary: "AI summaries",
   inspectSample: "NDVI samples",
 };

@@ -23,7 +23,7 @@
  * ./guard.ts — the policy itself never changes at runtime.
  */
 import type { AreaLevel } from "../data/types";
-import type { Sensitivity } from "../analysis/config";
+import type { CompareSpeckle, Sensitivity } from "../analysis/config";
 
 export type { AreaLevel, Sensitivity };
 
@@ -48,6 +48,8 @@ export const CAPABILITIES = [
   "compare.adjust-sensitivity",
   /** Minimum patch size away from the default. */
   "compare.adjust-min-patch",
+  /** Phase 3: detailed (tiled, native-resolution) comparison runs + tiles. */
+  "compare.detailed",
   /** PNG imagery renders, up to the role's pixel cap. */
   "downloads.png",
   /** GeoTIFF renders (visual + analysis). */
@@ -96,6 +98,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   "compare.district": "District-level compare",
   "compare.adjust-sensitivity": "Adjust sensitivity",
   "compare.adjust-min-patch": "Adjust minimum patch",
+  "compare.detailed": "Detailed comparison",
   "downloads.png": "PNG preview download",
   "downloads.geotiff": "GeoTIFF download",
   "downloads.copernicus": "Copernicus Browser links",
@@ -126,6 +129,8 @@ export interface RoleLimits {
   searchesPerDay: number;
   /** Compare analyses per UTC day (per session AND per IP). */
   comparePerDay: number;
+  /** Phase 3: detailed comparison runs per UTC day (per session AND per IP). */
+  detailedPerDay: number;
   /** AI summaries per UTC day (per session AND per IP). */
   aiSummariesPerDay: number;
   /** Max edge length in px for /api/imagery renders. */
@@ -162,6 +167,7 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       "compare.district": false,
       "compare.adjust-sensitivity": false,
       "compare.adjust-min-patch": false,
+      "compare.detailed": false,
       "downloads.png": true,
       "downloads.geotiff": false,
       "downloads.copernicus": true,
@@ -193,6 +199,7 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       tileZoomMax: 12,
       searchesPerDay: 30,
       comparePerDay: 3,
+      detailedPerDay: 0,
       aiSummariesPerDay: 0,
       downloadMaxPx: 1024,
       savedQueriesMax: 5,
@@ -209,6 +216,7 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       "compare.district": true,
       "compare.adjust-sensitivity": true,
       "compare.adjust-min-patch": true,
+      "compare.detailed": true,
       "downloads.png": true,
       "downloads.geotiff": true,
       "downloads.copernicus": true,
@@ -234,6 +242,8 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       // Not in the brief for SSO — generous placeholder, adjust freely.
       searchesPerDay: 300,
       comparePerDay: 50,
+      /** Phase 3: detailed runs are long multi-block analyses — 3/day. */
+      detailedPerDay: 3,
       aiSummariesPerDay: 30,
       downloadMaxPx: 2500,
       savedQueriesMax: 50,
@@ -243,7 +253,7 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
 };
 
 /** Daily quota buckets. Which capability consumes which bucket: */
-export type QuotaKind = "search" | "compare" | "aiSummary" | "inspectSample";
+export type QuotaKind = "search" | "compare" | "detailed" | "aiSummary" | "inspectSample";
 
 /**
  * Capability → daily quota. Only these capabilities are metered; calling
@@ -253,6 +263,7 @@ export type QuotaKind = "search" | "compare" | "aiSummary" | "inspectSample";
 export const QUOTA_BY_CAPABILITY: Readonly<Partial<Record<Capability, QuotaKind>>> = {
   "scenes.search": "search",
   "compare.analyses": "compare",
+  "compare.detailed": "detailed",
   "ai.summary": "aiSummary",
   "inspect.sample": "inspectSample",
 };
@@ -266,6 +277,7 @@ export type CounterLimitKey = {
 export const QUOTA_LIMIT_KEY: Readonly<Record<QuotaKind, CounterLimitKey>> = {
   search: "searchesPerDay",
   compare: "comparePerDay",
+  detailed: "detailedPerDay",
   aiSummary: "aiSummariesPerDay",
   inspectSample: "inspectSamplesPerDay",
 };
@@ -319,16 +331,18 @@ export function exceedsSearchWindow(role: Role, fromDate: string, toDate: string
 
 /** The default tuning values — guests (and the schema defaults) sit here. */
 export const DEFAULT_SENSITIVITY: Sensitivity = "medium";
-export const DEFAULT_MIN_PATCH_HA = 0.2;
+/** Phase 2: 0.05 ha (500 m²) — small-but-real patches survive the MMU cut. */
+export const DEFAULT_MIN_PATCH_HA = 0.05;
 
 /**
  * Forces sensitivity/minPatchHa back to the defaults for roles that may not
  * adjust them (clamping, not rejecting: tuning is a convenience, not a lock).
+ * Phase 2: the despeckle mode rides the same capability — guests always run
+ * the default gentle despeckle.
  */
-export function clampCompareTuning<T extends { sensitivity: Sensitivity; minPatchHa: number }>(
-  role: Role,
-  params: T,
-): T {
+export function clampCompareTuning<
+  T extends { sensitivity: Sensitivity; minPatchHa: number; speckle?: CompareSpeckle },
+>(role: Role, params: T): T {
   const policy = policyFor(role);
   return {
     ...params,
@@ -338,5 +352,12 @@ export function clampCompareTuning<T extends { sensitivity: Sensitivity; minPatc
     minPatchHa: policy.capabilities["compare.adjust-min-patch"]
       ? params.minPatchHa
       : DEFAULT_MIN_PATCH_HA,
+    ...(params.speckle !== undefined
+      ? {
+          speckle: policy.capabilities["compare.adjust-sensitivity"]
+            ? params.speckle
+            : ("gentle" as CompareSpeckle),
+        }
+      : {}),
   };
 }

@@ -1,10 +1,15 @@
 "use client";
 
+import { useEffect } from "react";
 import { ChevronDown, ChevronUp, GitCompare, Loader2, X } from "lucide-react";
 import { cn } from "@/components/ui/cn";
 import Button from "@/components/ui/Button";
+import Segmented from "@/components/ui/Segmented";
 import { QuotaReadout } from "@/components/ui/FeatureLock";
-import { COMPARE_STAGE_LABELS, useCompareStore } from "@/store/useCompareStore";
+import DetailConfirmDialog from "./DetailConfirmDialog";
+import { COMPARE_STAGE_LABELS, useCompareStore, type CompareDetail } from "@/store/useCompareStore";
+import { selectActiveSelection, useAppStore } from "@/store/useAppStore";
+import { selectCan, useSession } from "@/store/useSession";
 
 export function formatShortDate(iso: string): string {
   const [y, m, d] = iso.split("-");
@@ -70,6 +75,7 @@ export default function CompareBar() {
   const dateB = useCompareStore((s) => s.dateB);
   const running = useCompareStore((s) => s.running);
   const stage = useCompareStore((s) => s.stage);
+  const blockProgress = useCompareStore((s) => s.blockProgress);
   const error = useCompareStore((s) => s.error);
   const result = useCompareStore((s) => s.result);
   const drawerOpen = useCompareStore((s) => s.drawerOpen);
@@ -77,6 +83,21 @@ export default function CompareBar() {
   const setStripExpanded = useCompareStore((s) => s.setStripExpanded);
   const run = useCompareStore((s) => s.run);
   const setDrawerOpen = useCompareStore((s) => s.setDrawerOpen);
+  const detail = useCompareStore((s) => s.detail);
+  const detailTouched = useCompareStore((s) => s.detailTouched);
+  const setDetail = useCompareStore((s) => s.setDetail);
+  const applyDetailDefault = useCompareStore((s) => s.applyDetailDefault);
+
+  const selectionLevel = useAppStore((s) => selectActiveSelection(s)?.level ?? null);
+  const canDetailed = selectCan(useSession.getState(), "compare.detailed");
+
+  // District detail defaults to Smart (screening keeps the block count sane);
+  // tehsil/ILR default to Quick. Stops once the user picks a mode themselves.
+  useEffect(() => {
+    if (detailTouched) return;
+    if (selectionLevel === "district" && detail === "quick") applyDetailDefault("smart");
+    else if (selectionLevel !== "district" && detail === "smart") applyDetailDefault("quick");
+  }, [selectionLevel, detail, detailTouched, applyDetailDefault]);
 
   if (!compareMode) return null;
 
@@ -115,7 +136,11 @@ export default function CompareBar() {
         {running && (
           <span className="flex items-center gap-1.5 text-[11px] text-muted">
             <Loader2 size={13} className="animate-spin" aria-hidden />
-            {stage ? COMPARE_STAGE_LABELS[stage] : "Working…"}
+            {stage === "block" && blockProgress
+              ? `Block ${blockProgress.index}/${blockProgress.total}`
+              : stage
+                ? COMPARE_STAGE_LABELS[stage]
+                : "Working…"}
           </span>
         )}
         {!running && error && (
@@ -127,6 +152,19 @@ export default function CompareBar() {
           <Button size="sm" className="h-6 px-2 text-[11px]" onClick={() => setDrawerOpen(true)}>
             Show results
           </Button>
+        )}
+        {canDetailed && (
+          <Segmented<CompareDetail>
+            options={[
+              { value: "quick", label: "Quick" },
+              { value: "smart", label: "Smart" },
+              { value: "detailed", label: "Detailed" },
+            ]}
+            value={detail}
+            onChange={setDetail}
+            ariaLabel="Detail level"
+            className="h-6 shrink-0"
+          />
         )}
         <button
           type="button"
@@ -153,8 +191,9 @@ export default function CompareBar() {
         >
           {running ? "Analyzing…" : "Analyze"}
         </Button>
-        <QuotaReadout kind="compare" className="max-w-[12rem]" />
+        <QuotaReadout kind={detail === "quick" ? "compare" : "detailed"} className="max-w-[12rem]" />
       </div>
+      <DetailConfirmDialog />
     </div>
   );
 }

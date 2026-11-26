@@ -47,7 +47,7 @@ test("round trip: tab variants and a trailing-slash origin", () => {
   assert.equal(parseUrl(url)?.tab, "summary");
 });
 
-test("defaults: minimal a/l/A/B link fills medium, 0.2 ha, composite, Events tab", () => {
+test("defaults: minimal a/l/A/B link fills medium, 0.05 ha, composite, Events tab", () => {
   const link = parseShareLink("?a=t-jaipur-amber&l=tehsil&A=2026-03-01&B=2026-04-01");
   assert.deepEqual(link, {
     areaId: "t-jaipur-amber",
@@ -55,7 +55,7 @@ test("defaults: minimal a/l/A/B link fills medium, 0.2 ha, composite, Events tab
     dateA: "2026-03-01",
     dateB: "2026-04-01",
     sensitivity: "medium",
-    minPatchHa: 0.2,
+    minPatchHa: 0.05,
     inputMode: "composite",
     tab: "hotspots",
     eventId: null,

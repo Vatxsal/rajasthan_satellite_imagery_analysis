@@ -48,8 +48,10 @@ const summaryBodySchema = z.object({
   level: z.enum(["district", "tehsil", "ilr"]).optional(),
   dateA: z.string().optional(),
   dateB: z.string().optional(),
-  sensitivity: z.enum(["low", "medium", "high"]).optional(),
+  sensitivity: z.enum(["low", "medium", "high", "veryhigh", "auto"]).optional(),
   minPatchHa: z.coerce.number().optional(),
+  speckle: z.enum(["gentle", "legacy"]).optional(),
+  detail: z.enum(["quick", "detailed", "smart"]).optional(),
   inputMode: z.enum(["single", "composite"]).optional(),
   compositeWindowDays: z.coerce.number().int().optional(),
 });

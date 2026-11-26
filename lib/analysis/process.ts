@@ -17,6 +17,7 @@ import { deflateSync } from "node:zlib";
 import { bboxFromGeometry, computeOutputSize, type ClipGeometry } from "../cdse/geometry";
 import type { BBox } from "@/lib/data";
 import {
+  CLASS,
   COMPOSITE_ERODE_RADIUS,
   COMPOSITE_WINDOW_DAYS_DEFAULT,
   COMPOSITE_WINDOW_DAYS_MAX,
@@ -28,6 +29,7 @@ import {
   scaledThresholds,
   seasonalTag,
   type CompareRules,
+  type CompareSpeckle,
   type ScaledThresholds,
   type Sensitivity,
 } from "./config";
@@ -36,18 +38,30 @@ import {
   compositeSideFlags,
   computeCoverage,
   countClasses,
+  coverageReasonRaster,
   deltaHistogram,
+  edgeEventMask,
   edgeProximityMask,
   histogramThresholds,
+  magnitudePlanes,
   patchDiagnostics,
   singleSideFlags,
   type CompareDiagnostics,
+  type MagnitudePlanes,
 } from "./diagnostics";
+import type { GapFillInfo } from "./gapfill";
 import { applyShapeEvidence, classifyFused } from "./fused";
 import { classifyModel, loadMlModel } from "./model";
-import { fillSmallHoles, labelPatches, majorityFilter, minPatchPixels } from "./filter";
+import {
+  fillSmallHoles,
+  gentleDespeckle,
+  labelPatches,
+  majorityFilter,
+  magnitudeGrid,
+  minPatchPixels,
+} from "./filter";
 import { makeAnalysisGrid, nativeLongSidePx } from "./grid";
-import { rasterizeAreaMask, rasterizeZones } from "./mask";
+import { erodeMask, rasterizeAreaMask, rasterizeZones } from "./mask";
 import { classToRgba, encodePng } from "./png";
 import type { ParsedCompositeRaster } from "./parse";
 import {
@@ -68,6 +82,7 @@ import { buildPatchVectors, computeStats, type ZoneMeta } from "./stats";
 import {
   adaptiveThresholds,
   applyShift,
+  autoThresholds,
   classifyV2,
   deriveV2Indices,
   estimateShift,
@@ -84,7 +99,7 @@ import type {
 } from "./types";
 import type { ClassifyV2Output, RecentIndices, V2Indices } from "./v2";
 
-export type CompareStage = "fetch-a" | "fetch-b" | "analyze";
+export type CompareStage = "fetch-a" | "fetch-b" | "rescue" | "analyze";
 
 export interface CompareZone {
   id: string;
@@ -103,8 +118,19 @@ export interface RunCompareInput {
   areaId: string;
   sensitivity: Sensitivity;
   minPatchHa?: number;
+  /** Phase 2 despeckle: gentle (default) = magnitude-aware component removal,
+   *  legacy = the pre-Phase-2 3×3 majority passes. */
+  speckle?: CompareSpeckle;
   /** Long-side cap of the analysis grid (COMPARE_MAX_PX). */
   maxPx?: number;
+  /** Phase 3: exact output raster size — blocks (and smart screening) derive
+   *  their grid from grid-aligned bboxes, so aspect rounding must not shift
+   *  pixels off the AOI lattice. Overrides the maxPx/native computation. */
+  outputSize?: { width: number; height: number };
+  /** Phase 3: per-run PU budget override (0 disables the guard) — the smart
+   *  screening pass is governed by the estimate/confirm card instead of the
+   *  single-analysis cap. */
+  puLimit?: number;
   sceneA?: DateSceneMeta | null;
   sceneB?: DateSceneMeta | null;
   /** Tehsil polygons for the zonal breakdown (district level only). */
@@ -143,6 +169,12 @@ export interface CompareArtifact {
   overlayPng: Buffer;
   /** Deflated raw class raster — stored for GeoTIFF export. */
   classGz: Buffer;
+  /** Phase 1: deflated per-pixel coverage-reason raster (COVERAGE_REASON codes). */
+  coverageGz: Buffer;
+  /** Phase 1: deflated gap-fill source flags (1 = rescued from ±window). */
+  sourceGz: Buffer;
+  /** Phase 1: deflated int8 Δ-index magnitude planes (MAGNITUDE_SCALE). */
+  magnitudeGz: { ndvi: Buffer; mndwi: Buffer; ndbi: Buffer; combined: Buffer };
   /** Classified raster (CLASS codes) — validation/events vectorize from this. */
   classGrid: Uint8Array;
   /** Kept-patch labels from labelPatches (0 = no kept patch). */
@@ -152,6 +184,13 @@ export interface CompareArtifact {
   width: number;
   height: number;
   bbox: [number, number, number, number];
+  /** Phase 3: raw arrays behind the deflated planes + patch aux — the detail
+   *  orchestrator computes core-scoped counts before these are dropped. */
+  coverage: Uint8Array;
+  source: Uint8Array;
+  magnitude: MagnitudePlanes;
+  edgeMask: Uint8Array | null;
+  tiers: Uint8Array | null;
 }
 
 /** One v1 side: parsed index rasters for a single UTC day. */
@@ -172,6 +211,8 @@ export interface RasterInputs {
   /** v1 sides (single-date mode). */
   sideA?: CompareSide | null;
   sideB?: CompareSide | null;
+  /** Phase 1 coverage rescue: merge marks + method-card statement (analyze.ts). */
+  gapFill?: GapFillInfo | null;
 }
 
 export interface PreparedCompare {
@@ -227,7 +268,7 @@ export function prepareCompare(input: RunCompareInput, options: PrepareOptions =
   // AOI past its native 10 m pixel grid (faster, cheaper, honest resolution).
   const maxPx = input.maxPx ?? DEFAULT_MAX_PX;
   const nativeCap = Math.max(GRID_MIN_PX, Math.min(maxPx, Math.floor(nativeLongSidePx(bbox))));
-  const { width, height } = computeOutputSize(bbox, nativeCap);
+  const { width, height } = input.outputSize ?? computeOutputSize(bbox, nativeCap);
   const grid = makeAnalysisGrid(bbox, width, height);
   const minPatchHa = input.minPatchHa ?? DEFAULT_MIN_PATCH_HA;
   const baseThresholds = scaledThresholds(input.sensitivity);
@@ -312,6 +353,7 @@ export function processCompare(
   // against v1 inputs degrades to legacy (recorded honestly in metadata).
   const rules: CompareRules =
     input.rules && input.rules !== "legacy" && engine === "v2" ? input.rules : "legacy";
+  const speckle: CompareSpeckle = input.speckle ?? "gentle";
   // Consume the inputs object up front (it is a throwaway for every caller):
   // raw bands are released as soon as their index stacks are derived, exactly
   // like the original fetch path, so peak memory stays one side at a time.
@@ -323,6 +365,8 @@ export function processCompare(
   inputs.parsedB = null;
   inputs.sideA = null;
   inputs.sideB = null;
+  const gapFill = inputs.gapFill ?? null;
+  inputs.gapFill = null;
 
   const checkSize = (w: number, h: number) => {
     if (w !== width || h !== height) {
@@ -341,6 +385,10 @@ export function processCompare(
   }
 
   const inside = rasterizeAreaMask(input.geometry, grid);
+  // Phase 2: classification, stats and events run 1 px inside the polygon —
+  // boundary slivers never become phantom patches. Coverage/gap-fill
+  // diagnostics keep the full mask.
+  const insideClass = erodeMask(inside, width, height, 1);
   const haloRadius = engine === "v2" ? COMPOSITE_ERODE_RADIUS : 1;
 
   let classGrid: Uint8Array;
@@ -425,9 +473,13 @@ export function processCompare(
 
     valid = dilateInvalid(preCombined, width, height, haloRadius);
 
-    // 2.4 adaptive thresholds, then 2.5-2.8 classification.
+    // 2.4 adaptive thresholds, then 2.5-2.8 classification. Phase 2 "auto"
+    // sensitivity derives thresholds from this pair's noise instead and
+    // bypasses the adaptive scale (all scales report as 1).
     const adaptive = adaptiveThresholds(aIdx, bIdx, valid, baseThresholds);
-    effective = adaptive.t;
+    const autoT = input.sensitivity === "auto" ? autoThresholds(aIdx, bIdx, valid) : null;
+    effective = autoT ?? adaptive.t;
+    const appliedScales = autoT ? { ndvi: 1, mndwi: 1, ndbi: 1, bsi: 1 } : adaptive.scales;
     const seasonalLossTag = seasonalTag(input.dateB, "loss");
     const seasonalGainTag = seasonalTag(input.dateB, "gain");
     shortGap = gapDays >= 0 && gapDays < V2_SHORT_GAP_DAYS;
@@ -438,9 +490,9 @@ export function processCompare(
       aRecent,
       bRecent,
       valid,
-      inside,
-      t: adaptive.t,
-      scales: adaptive.scales,
+      inside: insideClass,
+      t: effective,
+      scales: appliedScales,
       seasonalLossTag,
       seasonalGainTag,
       shortGap,
@@ -483,7 +535,7 @@ export function processCompare(
     engineStats = {
       normalization,
       coReg: co,
-      adaptive: { scales: adaptive.scales, sigma: adaptive.sigma },
+      adaptive: { scales: appliedScales, sigma: adaptive.sigma },
       persistence: {
         checked: decided > 0,
         persistentPct:
@@ -507,20 +559,52 @@ export function processCompare(
     idxB = sideB.indices;
     preCombined = combineValidity(sideA.valid, sideB.valid, inside);
     valid = dilateInvalid(preCombined, width, height, haloRadius);
-    classGrid = classifyChange(sideA.indices, sideB.indices, valid, inside, baseThresholds);
+    if (input.sensitivity === "auto") effective = autoThresholds(sideA.indices, sideB.indices, valid);
+    classGrid = classifyChange(sideA.indices, sideB.indices, valid, insideClass, effective);
   } else {
     throw Object.assign(new Error("Missing analysis inputs."), { status: 500 });
   }
 
-  // Shared noise control: 2 majority passes, speckle-hole fill, then MMU
-  // (confidence-aware for v2 — a high-confidence sub-MMU patch survives).
-  // Phase 0: class counts snapshotted at each stage (raw → majority → min patch).
+  // Phase 2: per-pixel magnitude (max |Δ_i| / applied threshold) drives the
+  // gentle despeckle, the strong-small MMU escape and the v1 confidence tiers.
+  const changeMagnitude = idxA && idxB ? magnitudeGrid(idxA, idxB, effective, valid) : null;
+  if (engine === "v1" && changeMagnitude && !tiers) {
+    tiers = new Uint8Array(classGrid.length);
+    for (let i = 0; i < classGrid.length; i++) {
+      const code = classGrid[i];
+      if (code < CLASS.vegGain || code > CLASS.waterLoss) continue;
+      const m = changeMagnitude[i];
+      tiers[i] = m >= 2 ? 3 : m >= 1.25 ? 2 : 1;
+    }
+  }
+
+  // Noise control: legacy = 2 majority passes; gentle (default) = magnitude-
+  // aware component removal that keeps strong small changes. Then speckle-
+  // hole fill and the MMU cut (confidence- and magnitude-aware escapes).
+  // Phase 0: class counts snapshotted at each stage (raw → despeckle → min patch).
   const stageRaw = countClasses(classGrid);
-  classGrid = majorityFilter(classGrid, valid, width, height, 2);
-  const stageMajority = countClasses(classGrid);
   const minPixels = minPatchPixels(minPatchHa, grid.metersX, grid.metersY);
-  const holesFilled = fillSmallHoles(classGrid, valid, width, height, minPixels);
-  const { labels, removedCount } = labelPatches(classGrid, width, height, minPixels, tiers);
+  // Denoise must never resurrect the 1-px eroded boundary ring: skip masked
+  // AND non-eroded-inside pixels (ring pixels keep their outside class).
+  const denoiseValid = new Uint8Array(valid.length);
+  for (let i = 0; i < valid.length; i++) {
+    denoiseValid[i] = valid[i] === 1 && insideClass[i] === 1 ? 1 : 0;
+  }
+  if (speckle === "legacy") {
+    classGrid = majorityFilter(classGrid, denoiseValid, width, height, 2);
+  } else {
+    gentleDespeckle(classGrid, width, height, minPixels, changeMagnitude);
+  }
+  const stageMajority = countClasses(classGrid);
+  const holesFilled = fillSmallHoles(classGrid, denoiseValid, width, height, minPixels);
+  const { labels, removedCount } = labelPatches(
+    classGrid,
+    width,
+    height,
+    minPixels,
+    tiers,
+    speckle === "gentle" ? changeMagnitude : null,
+  );
   const stageMinPatch = countClasses(classGrid);
 
   // Phase 0 diagnostics: coverage + stage counts + patch sizes/edge + histograms.
@@ -554,6 +638,22 @@ export function processCompare(
     applyShapeEvidence({ classGrid, labels, confGrid: conf, tierGrid: tiers, width, height });
   }
 
+  // Phase 1 map layers: coverage reasons (same precedence as diagnostics),
+  // gap-fill source marks, and int8 Δ-index magnitude planes.
+  const coverageRaster = coverageReasonRaster({
+    inside,
+    validA: validA!,
+    validB: validB!,
+    nodataA,
+    nodataB,
+    cloudyA,
+    cloudyB,
+  });
+  const gapSource = gapFill?.source ?? new Uint8Array(width * height);
+  const magnitude = magnitudePlanes(idxA!, idxB!, effective);
+  // Phase 2: per-pixel edge flag — boundary / masked / gap-fill seam.
+  const edgeMask = edgeEventMask(insideClass, valid, gapSource, width, height);
+
   let zones: Int16Array | null = null;
   let zoneMeta: ZoneMeta[] | null = null;
   if (input.areaLevel === "district" && input.zones && input.zones.length > 0) {
@@ -575,6 +675,7 @@ export function processCompare(
     persist,
     conf,
     shortGap,
+    edgeMask,
   });
   // Phase 5 (#13): full-coverage vector layer for events/exports — kept off
   // the client-facing result (except the count), so response size stays small.
@@ -583,11 +684,26 @@ export function processCompare(
     labels,
     grid,
     (grid.metersX * grid.metersY) / M2_PER_HA,
-    { tiers, subs, persist, conf, shortGap },
+    { tiers, subs, persist, conf, shortGap, edgeMask },
     undefined,
     zones,
     zoneMeta,
   );
+  // Phase 2: per-class patch counts + edge totals for the Events header.
+  let eventsEdgeTotal = 0;
+  const eventsByClassMap = new Map<number, { count: number; edgeCount: number }>();
+  for (const feature of patchVectors.features) {
+    const props = (feature.properties ?? {}) as Record<string, unknown>;
+    const code = Number(props.classCode ?? -1);
+    const slot = eventsByClassMap.get(code) ?? { count: 0, edgeCount: 0 };
+    slot.count += 1;
+    if (props.edge === true) {
+      slot.edgeCount += 1;
+      eventsEdgeTotal += 1;
+    }
+    eventsByClassMap.set(code, slot);
+  }
+  const eventsByClass = Array.from(eventsByClassMap, ([classCode, v]) => ({ classCode, ...v }));
   const result: CompareStats = {
     ...core,
     metadata: {
@@ -605,6 +721,7 @@ export function processCompare(
       coarse: grid.metersPerPixel > 10,
       sensitivity: input.sensitivity,
       minPatchHa,
+      speckle,
       engine,
       rules,
       ...(rules === "fused" || rules === "ml" ? { evidence: evidenceMeta(evidence) } : {}),
@@ -627,15 +744,54 @@ export function processCompare(
       },
       ...(engineStats ? { engineStats } : {}),
       diagnostics,
+      // Phase 1: coverage-rescue statement for the method card (absent when
+      // no rescue ran or it recovered nothing).
+      ...(gapFill && gapFill.filledPct > 0
+        ? {
+            gapFill: {
+              windowDays: gapFill.windowDays,
+              sides: gapFill.sides,
+              filledPct: gapFill.filledPct,
+            },
+          }
+        : {}),
       generatedAt: new Date().toISOString(),
     },
     // Full event count for the Events tab header; the client only receives
     // the first ANALYZE_EVENTS_CAP features inline (fetched in analyze.ts).
     eventsTotal: patchVectors.features.length,
+    eventsEdgeTotal,
+    eventsByClass,
   };
 
   const overlayPng = encodePng(classToRgba(classGrid, width), width, height);
   const classGz = deflateSync(classGrid);
+  const coverageGz = deflateSync(coverageRaster);
+  const sourceGz = deflateSync(gapSource);
+  const magnitudeGz = {
+    ndvi: deflateSync(magnitude.ndvi),
+    mndwi: deflateSync(magnitude.mndwi),
+    ndbi: deflateSync(magnitude.ndbi),
+    combined: deflateSync(magnitude.combined),
+  };
 
-  return { result, overlayPng, classGz, classGrid, labels, patchVectors, width, height, bbox };
+  return {
+    result,
+    overlayPng,
+    classGz,
+    coverageGz,
+    sourceGz,
+    magnitudeGz,
+    classGrid,
+    labels,
+    patchVectors,
+    coverage: coverageRaster,
+    source: gapSource,
+    magnitude,
+    edgeMask,
+    tiers,
+    width,
+    height,
+    bbox,
+  };
 }
