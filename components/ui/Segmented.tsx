@@ -15,6 +15,10 @@ export interface SegmentedProps<T extends string> {
   /** Optional id for the group wrapper (label htmlFor target). */
   id?: string;
   className?: string;
+  /** Fill the parent's width (default, panel/dialog rows). false → shrink to
+   *  content for inline rows (the compare bar's detail picker) — without this
+   *  an inline row overflows instead of wrapping. */
+  fill?: boolean;
 }
 
 export default function Segmented<T extends string>({
@@ -24,6 +28,7 @@ export default function Segmented<T extends string>({
   ariaLabel,
   id,
   className,
+  fill = true,
 }: SegmentedProps<T>) {
   return (
     <div
@@ -31,7 +36,8 @@ export default function Segmented<T extends string>({
       id={id}
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex w-full rounded border border-border bg-surface-2 p-0.5",
+        "inline-flex rounded border border-border bg-surface-2 p-0.5",
+        fill ? "w-full" : "w-auto shrink",
         className,
       )}
     >

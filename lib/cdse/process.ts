@@ -10,7 +10,7 @@ import {
   evalscriptForDownload,
 } from "./evalscripts";
 import { withGeoTiffMetadata } from "./geotiff";
-import { bboxFromGeometry, computeOutputSize, type ClipGeometry } from "./geometry";
+import { assertProcessOutputSize, bboxFromGeometry, computeOutputSize, type ClipGeometry } from "./geometry";
 
 export interface ProcessQuery {
   geometry: ClipGeometry;
@@ -48,6 +48,8 @@ export async function renderSceneImage(query: ProcessQuery): Promise<Buffer> {
   const format = query.format ?? "png";
   const isTiff = format !== "png";
   const { width, height } = computeOutputSize(bbox, query.maxSize ?? 1024);
+  // Never send what the Process API must refuse (2500² limit).
+  assertProcessOutputSize(width, height);
   consumeRenderBudget();
 
   const response = await fetch(`${env.CDSE_SH_BASE_URL}/api/v1/process`, {
@@ -139,6 +141,8 @@ export async function renderTileImage(query: TileRenderQuery): Promise<Buffer> {
   const env = getServerEnv();
   const token = await getAccessToken();
   consumeRenderBudget();
+  // 512² is far under the Process API limit — assert keeps it that way.
+  assertProcessOutputSize(query.size, query.size);
 
   const response = await fetch(`${env.CDSE_SH_BASE_URL}/api/v1/process`, {
     method: "POST",

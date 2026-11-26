@@ -107,7 +107,7 @@ export default function CompareBar() {
   const canRun = Boolean(dateA && dateB) && !running;
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-surface-2 px-3 py-1.5">
+    <div className="flex w-full min-w-0 flex-wrap items-center gap-2 border-b border-border bg-surface-2 px-3 py-1.5">
       <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted" title="Pick one scene as A and another as B">
         <GitCompare size={13} />
         Dates
@@ -132,7 +132,7 @@ export default function CompareBar() {
         </span>
       )}
 
-      <div className="ml-auto flex min-w-0 items-center gap-2">
+      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
         {running && (
           <span className="flex items-center gap-1.5 text-[11px] text-muted">
             <Loader2 size={13} className="animate-spin" aria-hidden />
@@ -163,7 +163,8 @@ export default function CompareBar() {
             value={detail}
             onChange={setDetail}
             ariaLabel="Detail level"
-            className="h-6 shrink-0"
+            fill={false}
+            className="h-6 shrink-0 rounded-sm [&>button]:h-5 [&>button]:rounded-sm [&>button]:px-1.5 [&>button]:py-0.5 [&>button]:text-[11px]"
           />
         )}
         <button

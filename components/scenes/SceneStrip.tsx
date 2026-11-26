@@ -86,11 +86,11 @@ export default function SceneStrip({ variant = "docked" }: SceneStripProps) {
   const header = (
     <div
       className={cn(
-        "flex shrink-0 items-center justify-between gap-2 border-border px-3",
+        "flex w-full min-w-0 shrink-0 items-center justify-between gap-2 border-border px-3",
         variant === "docked" ? "h-9 border-b" : "pt-2",
       )}
     >
-      <p className="truncate text-xs text-muted">
+      <p className="min-w-0 truncate text-xs text-muted">
         <span className="mono-nums text-text">{searching ? "…" : scenes.length}</span>
         {" scenes · "}
         {SORT_LABELS[sort]}

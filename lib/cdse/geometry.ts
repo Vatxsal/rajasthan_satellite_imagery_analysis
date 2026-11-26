@@ -39,6 +39,11 @@ export function bboxAreaKm2(bbox: BBox): number {
 /**
  * Output pixel size for a clipped render: aspect-corrected (cos-lat) with the
  * long side capped at maxSize (1024 by default).
+ *
+ * NOTE: callers feeding a Sentinel Hub Process API request must cap maxSize
+ * at PROCESS_MAX_OUTPUT_PX (see assertProcessOutputSize) — but NOT every
+ * caller is a Process request (the detail-block lattice grid legitimately
+ * runs to tens of thousands of pixels, rendered per-block).
  */
 export function computeOutputSize(bbox: BBox, maxSize = 1024): { width: number; height: number } {
   const [west, south, east, north] = bbox;
@@ -56,4 +61,43 @@ export function computeOutputSize(bbox: BBox, maxSize = 1024): { width: number; 
     width = Math.max(1, Math.round((maxSize * widthDeg) / heightDeg));
   }
   return { width, height };
+}
+
+/**
+ * Sentinel Hub Process API hard output limit, per request:
+ * "For a Process API request, the limit is 2500*2500 pixels, if the output
+ * below has larger values, you have to limit the bounding box or reduce the
+ * resolution."
+ * (CDSE documentation, notebook-samples/sentinelhub —
+ *  documentation.dataspace.copernicus.eu; confirmed by the Process API
+ *  error "output->width must be less than or equal to 2500".)
+ */
+export const PROCESS_MAX_OUTPUT_PX = 2500;
+
+/**
+ * Last-line validation before any Process API POST: refuses outputs wider or
+ * taller than PROCESS_MAX_OUTPUT_PX so the request is never sent (no
+ * processing units burned, no raw upstream JSON in the UI). Sizes fed from
+ * computeOutputSize(maxSize ≤ PROCESS_MAX_OUTPUT_PX) always pass; explicit
+ * grids (detail blocks, probe windows) are cheap to check.
+ */
+export function assertProcessOutputSize(width: number, height: number): void {
+  if (
+    Number.isFinite(width) &&
+    Number.isFinite(height) &&
+    width >= 1 &&
+    height >= 1 &&
+    width <= PROCESS_MAX_OUTPUT_PX &&
+    height <= PROCESS_MAX_OUTPUT_PX
+  ) {
+    return;
+  }
+  throw Object.assign(
+    new Error(
+      `This render would be ${width}×${height} px — Copernicus allows at most ` +
+        `${PROCESS_MAX_OUTPUT_PX}×${PROCESS_MAX_OUTPUT_PX} px per request, so it was not sent. ` +
+        `Pick a smaller area or a coarser resolution.`,
+    ),
+    { status: 400, code: "PROCESS_OUTPUT_TOO_LARGE" },
+  );
 }

@@ -58,6 +58,9 @@ export interface DetailEstimateResponse {
   estimatedPu: number;
   cap: number;
   overQuickLimit: boolean;
+  /** Smart: effective screening resolution in m (coarsened to fit the
+   *  Process API 2500-px limit on large AOIs) — null for detailed mode. */
+  screeningMeters: number | null;
 }
 
 interface StreamOptions {

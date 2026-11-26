@@ -250,14 +250,24 @@ test("imagery: guest PNG is capped at 1024 px", async () => {
   assert.match(String(result.body?.message), /1024×1024/);
 });
 
-test("imagery: SSO PNG renders up to 1024 too, GeoTIFF up to 2500", async () => {
+test("imagery: the Process API limit (2500 px) is the schema ceiling", async () => {
+  // The Copernicus Process API refuses any output above 2500 px per side —
+  // the schema now rejects such requests before a render is even attempted.
   const over = await call(
     imageryGet,
     get(`${IMAGERY_URL}&size=3000&format=tiff`, await ssoCookie()),
   );
   assert.equal(over.status, 400);
-  assert.equal(over.body?.code, "DOWNLOAD_TOO_LARGE");
-  assert.match(String(over.body?.message), /2500×2500/);
+  assert.equal(over.body?.code, "INVALID_REQUEST");
+
+  // SSO's download cap (2500) equals the Process limit; guests (1024) still
+  // get the role-level DOWNLOAD_TOO_LARGE answer between their cap and 2500.
+  const guestOver = await call(
+    imageryGet,
+    get(`${IMAGERY_URL}&size=2000&format=png`, await guestCookie()),
+  );
+  assert.equal(guestOver.status, 400);
+  assert.equal(guestOver.body?.code, "DOWNLOAD_TOO_LARGE");
 
   // Within both caps: format + size accepted (render fails offline → ≥500).
   const ok = await call(imageryGet, get(`${IMAGERY_URL}&size=512&format=tiff`, await ssoCookie()));

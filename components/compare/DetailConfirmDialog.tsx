@@ -49,6 +49,12 @@ export default function DetailConfirmDialog() {
               </dd>
               {smart && (
                 <>
+                  <dt className="text-muted">Screening pass</dt>
+                  <dd className="mono-nums">
+                    {estimate.screeningMeters
+                      ? `~${estimate.screeningMeters} m resolution`
+                      : "coarse overview"}
+                  </dd>
                   <dt className="text-muted">Screening cost</dt>
                   <dd className="mono-nums">{estimate.screeningPu} PU</dd>
                 </>
