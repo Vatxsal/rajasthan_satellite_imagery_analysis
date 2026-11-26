@@ -15,7 +15,7 @@
  * so the node test harness exercises exactly what the detail run executes.
  */
 import type { BBox } from "@/lib/data";
-import { computeOutputSize } from "../cdse/geometry";
+import { computeOutputSize, PROCESS_MAX_OUTPUT_PX } from "../cdse/geometry";
 import { CLASS, GRID_MIN_PX, MAGNITUDE_SCALE } from "./config";
 import { makeAnalysisGrid, nativeLongSidePx } from "./grid";
 import type { AnalysisGrid } from "./types";
@@ -27,12 +27,26 @@ export const DETAIL_BLOCK_PX = 1024;
 export const DETAIL_OVERLAP_PX = 32;
 /** gid = blockIndex·STRIDE + localLabel — local labels stay well below this. */
 export const DETAIL_LABEL_STRIDE = 1 << 24;
-/** Screening runs at ~1/4 native (≈40 m at 10 m native), capped for cost. */
-export const DETAIL_SCREENING_MAX_PX = 4096;
 /** Fraction of the strongest screening pixels always refined (top 5%). */
 export const DETAIL_SCREEN_TOP_PCT = 0.05;
 /** A screening pixel is hot above this share of its applied threshold. */
 export const DETAIL_SCREEN_THRESHOLD_SHARE = 0.6;
+
+/**
+ * Screening raster size for smart mode: ~1/4 native (≈40 m at 10 m native),
+ * capped at the Sentinel Hub Process API output limit (2500 px per side —
+ * a district at native ÷ 4 easily asks for 6000+ px, which the API refuses
+ * with COMMON_BAD_PAYLOAD). Large AOIs therefore screen coarser than 40 m
+ * and the effective resolution rides the estimate card + metadata.
+ */
+export function screeningSize(bbox: BBox): {
+  width: number;
+  height: number;
+} {
+  const native = Math.max(GRID_MIN_PX, Math.floor(nativeLongSidePx(bbox)));
+  const cap = Math.min(PROCESS_MAX_OUTPUT_PX, native);
+  return computeOutputSize(bbox, cap);
+}
 
 export interface DetailBlock {
   index: number;

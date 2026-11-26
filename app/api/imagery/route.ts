@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { renderSceneImage } from "@/lib/cdse/process";
-import { bboxFromGeometry, bboxAreaKm2, type ClipGeometry } from "@/lib/cdse/geometry";
+import {
+  bboxAreaKm2,
+  bboxFromGeometry,
+  PROCESS_MAX_OUTPUT_PX,
+  type ClipGeometry,
+} from "@/lib/cdse/geometry";
 import { districtsFc, ilrsFc, resolveDistrictId, tehsilsFc } from "@/lib/data/boundaries";
 import { imageryCache, imageryCacheKey } from "@/lib/cache";
 import { getServerEnv } from "@/lib/env";
@@ -35,7 +40,8 @@ const querySchema = z.object({
   geometry: z.string().max(200_000).nullish(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
   composite: z.enum(["true-color", "false-color", "ndvi"]).default("true-color"),
-  size: z.coerce.number().int().min(64).max(4096).default(DEFAULT_SIZE),
+  // Copernicus refuses any render above 2500 px per side (Process API limit).
+  size: z.coerce.number().int().min(64).max(PROCESS_MAX_OUTPUT_PX).default(DEFAULT_SIZE),
   format: z.enum(["png", "tiff", "analysis"]).default("png"),
 });
 
@@ -45,7 +51,7 @@ const postSchema = z.object({
   geometry: geometrySchema.nullish(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
   composite: z.enum(["true-color", "false-color", "ndvi"]).default("true-color"),
-  size: z.coerce.number().int().min(64).max(4096).default(DEFAULT_SIZE),
+  size: z.coerce.number().int().min(64).max(PROCESS_MAX_OUTPUT_PX).default(DEFAULT_SIZE),
   format: z.enum(["png", "tiff", "analysis"]).default("png"),
 });
 

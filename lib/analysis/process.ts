@@ -14,7 +14,13 @@
  * filter onwards is shared.
  */
 import { deflateSync } from "node:zlib";
-import { bboxFromGeometry, computeOutputSize, type ClipGeometry } from "../cdse/geometry";
+import {
+  assertProcessOutputSize,
+  bboxFromGeometry,
+  computeOutputSize,
+  PROCESS_MAX_OUTPUT_PX,
+  type ClipGeometry,
+} from "../cdse/geometry";
 import type { BBox } from "@/lib/data";
 import {
   CLASS,
@@ -266,9 +272,17 @@ export function prepareCompare(input: RunCompareInput, options: PrepareOptions =
   }
   // #14: COMPARE_MAX_PX is a ceiling, not a target — never upscale a small
   // AOI past its native 10 m pixel grid (faster, cheaper, honest resolution).
+  // The Process API refuses outputs above PROCESS_MAX_OUTPUT_PX per side, so
+  // every analysis grid is clamped there regardless of the env setting.
   const maxPx = input.maxPx ?? DEFAULT_MAX_PX;
-  const nativeCap = Math.max(GRID_MIN_PX, Math.min(maxPx, Math.floor(nativeLongSidePx(bbox))));
+  const nativeCap = Math.max(
+    GRID_MIN_PX,
+    Math.min(maxPx, Math.floor(nativeLongSidePx(bbox)), PROCESS_MAX_OUTPUT_PX),
+  );
   const { width, height } = input.outputSize ?? computeOutputSize(bbox, nativeCap);
+  // Explicit grids (detail blocks / screening / probe windows) bypass the
+  // cap above — validate them at the same last line as the fetch itself.
+  assertProcessOutputSize(width, height);
   const grid = makeAnalysisGrid(bbox, width, height);
   const minPatchHa = input.minPatchHa ?? DEFAULT_MIN_PATCH_HA;
   const baseThresholds = scaledThresholds(input.sensitivity);

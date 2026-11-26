@@ -11,8 +11,8 @@ import { getServerEnv } from "@/lib/env";
 import { consumeRenderBudget } from "@/lib/server/budget";
 import { getAccessToken } from "@/lib/cdse/auth";
 import { mapCdseStatus } from "@/lib/cdse/errors";
+import { assertProcessOutputSize, type ClipGeometry } from "@/lib/cdse/geometry";
 import type { BBox } from "@/lib/data";
-import type { ClipGeometry } from "@/lib/cdse/geometry";
 import { COMPARE_EVALSCRIPT, COMPARE_EVALSCRIPT_COMPOSITE } from "./evalscript";
 import { compositeTimeRange } from "./composite";
 
@@ -40,12 +40,30 @@ interface ProcessOptions {
 
 export async function fetchAnalysisRaster(options: ProcessOptions): Promise<Buffer> {
   const { geometry, evalscript, size, data } = options;
+  // Last-line guard: never POST an output the Process API must refuse —
+  // the caller gets a clear message and no processing units are spent.
+  assertProcessOutputSize(size.width, size.height);
   const env = getServerEnv();
   const token = await getAccessToken();
   consumeRenderBudget(); // once per user-facing fetch, retries don't bill twice
 
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  // Transient failures (timeout / 5xx / empty): one retry, as before.
+  const MAX_ATTEMPTS = 2;
+  // HTTP 429 per-minute rate limit: up to two retries honoring Retry-After.
+  // Quota exhaustion (CDSE_QUOTA) and payload rejections (CDSE_BAD_REQUEST)
+  // are deterministic — they surface immediately, never retried.
+  const MAX_RATE_RETRIES = 2;
+  let attempt = 0;
+  let rateRetries = 0;
+  // Render time grows with the raster area: a 1500 px composite measured
+  // ~65-135 s, and a clamped-to-2500 px screening pass is ~2.8× that. Scale
+  // the deadline from the output size so a legitimate big render is not
+  // timed out locally (capped at 5 minutes, the route's own budget).
+  const areaFactor = Math.max(1, (size.width * size.height) / (1500 * 1500));
+  const baseTimeoutMs = Math.min(300_000, Math.round(90_000 * areaFactor));
+
+  for (;;) {
+    attempt += 1;
     try {
       const response = await fetch(`${env.CDSE_SH_BASE_URL}/api/v1/process`, {
         method: "POST",
@@ -70,13 +88,28 @@ export async function fetchAnalysisRaster(options: ProcessOptions): Promise<Buff
           evalscript,
         }),
         cache: "no-store",
-        // District-scale 12-band composites measured ~65 s end-to-end — the
-        // old 60 s budget timed out on every heavy AOI; one generous retry
-        // covers queue spikes without letting a dead render hang forever.
-        signal: AbortSignal.timeout(attempt === 1 ? 120_000 : 150_000),
+        // One generous retry covers queue spikes without letting a dead
+        // render hang forever; the second attempt gets a quarter more.
+        signal: AbortSignal.timeout(
+          attempt === 1 ? baseTimeoutMs : Math.round(baseTimeoutMs * 1.25),
+        ),
       });
 
       if (!response.ok) {
+        // Rate limit: back off by Retry-After (clamped 1-30 s) and retry —
+        // but only while it is the per-minute limit, not exhausted quota.
+        if (response.status === 429) {
+          const body = await response.text().catch(() => "");
+          const mapped = mapCdseStatus(429, body);
+          if (mapped.code === "CDSE_RATE_LIMIT" && rateRetries < MAX_RATE_RETRIES) {
+            rateRetries += 1;
+            const retryAfterSeconds = Number(response.headers.get("Retry-After"));
+            const delay = Math.max(1, Math.min(Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 5, 30)) * 1000;
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
+          throw mapped;
+        }
         throw mapCdseStatus(response.status, await response.text().catch(() => ""));
       }
 
@@ -86,16 +119,20 @@ export async function fetchAnalysisRaster(options: ProcessOptions): Promise<Buff
       }
       return buffer;
     } catch (error) {
-      lastError = error;
-      // Retry transient failures once (timeouts, resets, upstream 5xx/empty) —
-      // auth/quota errors are deterministic and surface immediately.
       const code = (error as { code?: unknown } | null)?.code;
-      const retryable = typeof code !== "string" || code === "CDSE_UPSTREAM";
-      if (!retryable || attempt === 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      const codeText = typeof code === "string" ? code : "";
+      // Retried here: timeouts/resets (no code) and upstream 5xx/empty.
+      // Never retried: CDSE_AUTH, CDSE_QUOTA, CDSE_BAD_REQUEST,
+      // CDSE_RATE_LIMIT (already past its retry budget) and the local
+      // PROCESS_OUTPUT_TOO_LARGE guard.
+      const retryable = codeText === "" || codeText === "CDSE_UPSTREAM";
+      if (retryable && attempt < MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+        continue;
+      }
+      throw error;
     }
   }
-  throw lastError;
 }
 
 /** v1 input: one UTC day (mosaic of that day's scenes). */

@@ -49,6 +49,53 @@ function readAuthDetail(bodyText?: string): UpstreamAuthDetail {
   };
 }
 
+/** Sentinel Hub 400 payload: { error: { status, reason, message, code, errors: [...] } }. */
+interface ShBadRequestError {
+  status?: number;
+  reason?: string;
+  message?: string;
+  code?: string;
+  errors?: Array<{
+    parameter?: string;
+    invalidValue?: unknown;
+    violation?: string;
+  }>;
+}
+
+/** Reads the Sentinel Hub 400 violation list into a human-readable line. */
+function readBadRequestDetail(bodyText?: string): string | null {
+  if (!bodyText) return null;
+  let parsed: { error?: unknown };
+  try {
+    parsed = JSON.parse(bodyText) as { error?: unknown };
+  } catch {
+    return null;
+  }
+  const error = parsed.error;
+  if (!error || typeof error !== "object") return null;
+  const bad = error as ShBadRequestError;
+  const violations = (bad.errors ?? [])
+    .map((item) => {
+      const parameter = item.parameter ? String(item.parameter) : "";
+      const value = item.invalidValue !== undefined ? ` ${String(item.invalidValue)}` : "";
+      const violation = item.violation ? String(item.violation).replace(/[.\s]+$/, "") : "";
+      if (!parameter && !violation) return null;
+      return `${parameter || "a field"}${value}${violation ? ` — ${violation}` : ""}`;
+    })
+    .filter((line): line is string => line !== null);
+  if (violations.length > 0) {
+    const intro = bad.message ? `${bad.message}: ` : "";
+    return `${intro}${violations.join("; ")}`;
+  }
+  return typeof bad.message === "string" ? bad.message : null;
+}
+
+/** True when a 429 body says the processing-unit QUOTA is gone (not a
+ *  transient rate limit — retrying cannot help, the user must stop). */
+function isQuotaExhaustion(bodyText?: string): boolean {
+  return /quota|processing units|exhaust|no more credits/i.test(bodyText ?? "");
+}
+
 /** Maps CDSE HTTP statuses to clear JSON error contracts. Body text is truncated. */
 export function mapCdseStatus(status: number, bodyText?: string): CdseHttpError {
   const { oauthError, detail } = readAuthDetail(bodyText);
@@ -87,18 +134,39 @@ export function mapCdseStatus(status: number, bodyText?: string): CdseHttpError 
       "Copernicus authentication failed. Check CDSE_CLIENT_ID / CDSE_CLIENT_SECRET.",
     );
   }
+  if (status === 400) {
+    // Deterministic payload rejection — name the parameter and the rule so
+    // the UI never has to show raw upstream JSON. Never retried upstream.
+    const violation = readBadRequestDetail(bodyText);
+    return new CdseHttpError(
+      400,
+      "CDSE_BAD_REQUEST",
+      violation
+        ? `Copernicus rejected the request — ${violation}.`
+        : "Copernicus rejected the request payload (HTTP 400). Check the area and resolution settings.",
+    );
+  }
   if (status === 429) {
+    // Two very different causes share this status: the per-minute rate limit
+    // (retryable) and processing-unit exhaustion (stop immediately).
+    if (isQuotaExhaustion(bodyText)) {
+      return new CdseHttpError(
+        429,
+        "CDSE_QUOTA",
+        "The Copernicus processing-unit quota for this account is exhausted — no further requests were attempted. Check the Data Space dashboard.",
+      );
+    }
     return new CdseHttpError(
       429,
-      "CDSE_QUOTA",
-      "Monthly quota reached, try again later.",
+      "CDSE_RATE_LIMIT",
+      "Copernicus rate limit reached — retrying automatically. Frequent large requests can trigger this.",
     );
   }
   if (status === 402) {
     return new CdseHttpError(
       402,
       "CDSE_QUOTA",
-      "Monthly quota reached, try again later.",
+      "The Copernicus processing-unit quota is exhausted (HTTP 402) — no further requests were attempted. Check the Data Space dashboard.",
     );
   }
   const snippet = (bodyText ?? "").slice(0, 200).replace(/\s+/g, " ").trim();

@@ -171,10 +171,10 @@ function DesktopPanel() {
         collapsed ? "w-0 border-r-0" : "w-80",
       )}
     >
-      <div className="flex h-full w-80 flex-col">
-        <header className="flex h-11 shrink-0 items-center justify-between border-b border-border px-3">
-          <h2 className="text-sm font-semibold text-text">{TITLES[tab]}</h2>
-          <div className="flex items-center gap-1.5">
+        <div className="flex h-full w-80 flex-col">
+          <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
+            <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-text">{TITLES[tab]}</h2>
+            <div className="flex shrink-0 items-center gap-1.5">
             <kbd className="mono-nums hidden rounded-sm border border-border bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted xl:block">
               [
             </kbd>

@@ -54,12 +54,56 @@ test("mapCdseStatus keeps the generic credentials hint when there is no detail",
   );
 });
 
-test("mapCdseStatus still maps quota statuses and truncates generic bodies", () => {
-  assert.equal(mapCdseStatus(429).code, "CDSE_QUOTA");
+test("mapCdseStatus splits 429 rate limit from quota exhaustion, and truncates generic bodies", () => {
+  // A bare 429 is the per-minute rate limit — retryable upstream.
+  const rate = mapCdseStatus(429);
+  assert.equal(rate.code, "CDSE_RATE_LIMIT");
+  assert.match(rate.message, /rate limit/i);
+  assert.doesNotMatch(rate.message, /quota/i);
+  // A 429 that names the processing units is quota exhaustion — no retry.
+  const quota429 = mapCdseStatus(429, JSON.stringify({ message: "Your processing units have been exhausted" }));
+  assert.equal(quota429.code, "CDSE_QUOTA");
+  assert.match(quota429.message, /exhausted/);
+  assert.doesNotMatch(quota429.message, /retrying/i);
+  // 402 is quota exhaustion, distinct from the rate limit.
   assert.equal(mapCdseStatus(402).code, "CDSE_QUOTA");
   const upstream = mapCdseStatus(503, "<html>upstream boom</html>");
   assert.equal(upstream.code, "CDSE_UPSTREAM");
   assert.match(upstream.message, /upstream boom/);
+});
+
+test("mapCdseStatus turns a Process API 400 into the parameter + violation (no raw JSON)", () => {
+  // The exact COMMON_BAD_PAYLOAD shape from a 4096-px output rejection.
+  const err = mapCdseStatus(
+    400,
+    JSON.stringify({
+      error: {
+        status: 400,
+        reason: "Bad Request",
+        message: "Invalid request",
+        code: "COMMON_BAD_PAYLOAD",
+        errors: [
+          {
+            parameter: "output->width",
+            invalidValue: 4096,
+            violation: "must be less than or equal to 2500",
+          },
+        ],
+      },
+    }),
+  );
+  assert.equal(err.code, "CDSE_BAD_REQUEST");
+  assert.equal(err.status, 400);
+  assert.match(err.message, /output->width/);
+  assert.match(err.message, /4096/);
+  assert.match(err.message, /must be less than or equal to 2500/);
+  // The UI shows the human line, never the raw upstream JSON.
+  assert.doesNotMatch(err.message, /\{"error"/);
+  // No violation list → still a clear, non-raw message.
+  const bare = mapCdseStatus(400, JSON.stringify({ error: { message: "Invalid request" } }));
+  assert.equal(bare.code, "CDSE_BAD_REQUEST");
+  assert.match(bare.message, /Invalid request/);
+  assert.doesNotMatch(bare.message, /\{"error"/);
 });
 
 test("sanitizeCredential trims whitespace and strips surrounding quotes", () => {

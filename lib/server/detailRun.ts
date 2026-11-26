@@ -19,9 +19,9 @@ import { runCompare } from "@/lib/analysis/analyze";
 import {
   blockGeometry,
   combinedRatio,
-  DETAIL_SCREENING_MAX_PX,
   detailGid,
   planDetail,
+  screeningSize,
   screenDetailBlocks,
   seamUnionPairs,
   tilePxRect,
@@ -116,6 +116,9 @@ export interface DetailEstimate {
   cap: number;
   /** True when the run costs more PU than one quick analysis is allowed. */
   overQuickLimit: boolean;
+  /** Smart: the effective screening resolution (coarsens past 2500 px so a
+   *  district screens within the Process API limit) — shown on the card. */
+  screeningMeters: number | null;
 }
 
 /** One XYZ tile request against a finished detailed entry. */
@@ -230,16 +233,6 @@ function analysisPu(args: {
     pu += s1Pu + demPu;
   }
   return Math.round(pu * 100) / 100;
-}
-
-/** Screening raster size: ~40 m (native ÷ 4) capped for cost. */
-export function screeningSize(bbox: [number, number, number, number]): {
-  width: number;
-  height: number;
-} {
-  const native = Math.max(GRID_MIN_PX, Math.floor(nativeLongSidePx(bbox)));
-  const cap = Math.min(DETAIL_SCREENING_MAX_PX, native);
-  return computeOutputSize(bbox, cap);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1104,10 +1097,12 @@ export async function estimateDetail(resolved: ResolvedCompareParams): Promise<D
     );
   }
   let screeningPu = 0;
+  let screeningMeters: number | null = null;
   let chosen: DetailBlock[];
   if (resolved.detail === "smart") {
     const screening = await ensureScreening(resolved);
     screeningPu = screening.estimatedPu;
+    screeningMeters = Math.round(screening.metadata.metersPerPixel);
     const ratio = combinedRatio(
       inflateI8(screening.magnitudeGz.combined),
       inflateU8(screening.classGz),
@@ -1147,6 +1142,7 @@ export async function estimateDetail(resolved: ResolvedCompareParams): Promise<D
     estimatedPu,
     cap: env.COMPARE_MAX_BLOCKS,
     overQuickLimit: estimatedPu > env.PER_ANALYSIS_PU_LIMIT,
+    screeningMeters,
   };
 }
 

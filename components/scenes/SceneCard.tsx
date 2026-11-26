@@ -51,6 +51,10 @@ export default function SceneCard({ scene }: SceneCardProps) {
   const requestDownload = useAppStore((s) => s.requestDownload);
   const [copied, setCopied] = useState(false);
   const [showProducts, setShowProducts] = useState(false);
+  /** Thumbnail state: one automatic retry (rate-limited bursts recover),
+   *  then a graceful placeholder — never a broken-image glyph. */
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const [thumbRetry, setThumbRetry] = useState(false);
   const active = activeSceneId === scene.id;
   const utcTime = formatUtcTime(scene.time);
 
@@ -109,14 +113,38 @@ export default function SceneCard({ scene }: SceneCardProps) {
       )}
     >
       <div className="flex gap-2">
-        {/* eslint-disable-next-line @next/next/no-img-element -- data-URI catalogue thumbnail */}
-        <img
-          src={scene.thumbnail}
-          alt=""
-          width={64}
-          height={64}
-          className="h-16 w-16 shrink-0 rounded-sm border border-border object-cover"
-        />
+        {thumbFailed ? (
+          // Graceful placeholder — a failed thumbnail (rate-limited burst,
+          // upstream error, missing credentials) must never render the
+          // browser's broken-image glyph.
+          <span
+            aria-hidden
+            title="Preview unavailable"
+            className="grid h-16 w-16 shrink-0 place-items-center rounded-sm border border-border bg-surface-2 text-muted"
+          >
+            <ImageIcon size={18} aria-hidden />
+          </span>
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element -- data-URI catalogue thumbnail
+          <img
+            src={thumbRetry ? `${scene.thumbnail}&retry=1` : scene.thumbnail}
+            alt=""
+            width={64}
+            height={64}
+            loading="lazy"
+            decoding="async"
+            onError={() => {
+              if (!thumbRetry) {
+                // One quiet retry after a beat — a 429 rate-limit burst (many
+                // scene cards loading at once) recovers by the second try.
+                window.setTimeout(() => setThumbRetry(true), 2500);
+                return;
+              }
+              setThumbFailed(true);
+            }}
+            className="h-16 w-16 shrink-0 rounded-sm border border-border bg-surface-2 object-cover"
+          />
+        )}
         <div className="min-w-0 flex-1">
           <p
             className="mono-nums truncate pr-6 text-xs text-text"
