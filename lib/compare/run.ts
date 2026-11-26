@@ -1,4 +1,5 @@
 import type { AnalyzeResponse } from "@/lib/analysis/types";
+import type { CompareSpeckle, Sensitivity } from "@/lib/analysis/config";
 import type { CompareStage } from "@/store/useCompareStore";
 
 export interface AnalyzeRequestBody {
@@ -6,12 +7,18 @@ export interface AnalyzeRequestBody {
   level: "district" | "tehsil" | "ilr";
   dateA: string;
   dateB: string;
-  sensitivity: "low" | "medium" | "high";
+  sensitivity: Sensitivity;
   minPatchHa: number;
+  /** Phase 2 despeckle mode (server defaults to gentle when omitted). */
+  speckle?: CompareSpeckle;
   /** Engine v2 input mode (server ignores it while CHANGE_ENGINE=v1). */
   inputMode?: "single" | "composite";
   /** ±days around each date for composite inputs (0-15). */
   compositeWindowDays?: number;
+  /** Phase 3 detail mode (omitted = quick). */
+  detail?: "quick" | "detailed" | "smart";
+  /** Phase 3: client acknowledged the estimate card (detail runs only). */
+  confirm?: boolean;
 }
 
 /** Failures carry the same { code, message } contract as the API routes. */
@@ -26,7 +33,7 @@ export class CompareRunError extends Error {
 }
 
 type Frame =
-  | { type: "stage"; stage: CompareStage }
+  | { type: "stage"; stage: CompareStage; index?: number; total?: number }
   | {
       type: "result";
       key: string;
@@ -36,12 +43,26 @@ type Frame =
       /** Inline events (first ANALYZE_EVENTS_CAP) — the Events list/markers read
        *  them from here, no follow-up fetch. Optional for older servers. */
       events?: AnalyzeResponse["events"];
+      /** Phase 3: detailed/smart runs — the map switches to the tile source. */
+      detail?: AnalyzeResponse["detail"];
     }
   | { type: "error"; code: string; message: string };
 
+/** Phase 3 estimate card (POST /api/compare/detail/estimate). */
+export interface DetailEstimateResponse {
+  detail: "detailed" | "smart";
+  blocksTotal: number;
+  blocksSelected: number;
+  screeningPu: number;
+  blocksPu: number;
+  estimatedPu: number;
+  cap: number;
+  overQuickLimit: boolean;
+}
+
 interface StreamOptions {
   signal?: AbortSignal;
-  onStage?: (stage: CompareStage) => void;
+  onStage?: (stage: CompareStage, block?: { index: number; total: number }) => void;
 }
 
 /**
@@ -85,7 +106,12 @@ export async function streamAnalyze(
   const consume = (raw: string): AnalyzeResponse | null => {
     const frame = JSON.parse(raw) as Frame;
     if (frame.type === "stage") {
-      options.onStage?.(frame.stage);
+      options.onStage?.(
+        frame.stage,
+        frame.stage === "block"
+          ? { index: frame.index ?? 0, total: frame.total ?? 0 }
+          : undefined,
+      );
       return null;
     }
     if (frame.type === "error") {
@@ -97,6 +123,7 @@ export async function streamAnalyze(
       aiEnabled: frame.aiEnabled,
       stats: frame.stats,
       events: frame.events ?? [],
+      ...(frame.detail ? { detail: frame.detail } : {}),
     };
   };
 
@@ -118,4 +145,33 @@ export async function streamAnalyze(
     throw new CompareRunError("EMPTY_STREAM", "The analysis stream ended without a result.");
   }
   return result;
+}
+
+/**
+ * POSTs /api/compare/detail/estimate — the Phase 3 cost card shown before the
+ * confirm dialog. Smart estimates run the cached coarse screening first, so
+ * the first call can take as long as one quick analysis.
+ */
+export async function fetchDetailEstimate(
+  body: AnalyzeRequestBody,
+  options: { signal?: AbortSignal } = {},
+): Promise<DetailEstimateResponse> {
+  const response = await fetch("/api/compare/detail/estimate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
+  const payload = (await response.json().catch(() => null)) as
+    | (DetailEstimateResponse & { code?: string; message?: string })
+    | { code?: string; message?: string }
+    | null;
+  if (!response.ok || !payload || !("estimatedPu" in payload)) {
+    const error = payload as { code?: string; message?: string } | null;
+    throw new CompareRunError(
+      error?.code ?? `HTTP_${response.status}`,
+      error?.message ?? "Could not estimate this detailed comparison. Try again shortly.",
+    );
+  }
+  return payload as DetailEstimateResponse;
 }

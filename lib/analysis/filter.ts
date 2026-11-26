@@ -1,8 +1,9 @@
 /**
- * Spatial noise control: 2 passes of the 3×3 majority filter, small-hole
- * filling, then 8-connected-component labelling with a minimum-mapping-unit
- * (MMU) cutoff. Small speckles become "no change"; surviving patches keep
- * their labels — the same labels feed the statistics and the top hotspots.
+ * Spatial noise control: 2 passes of the 3×3 majority filter (legacy), the
+ * Phase 2 magnitude-aware gentle despeckle, small-hole filling, then
+ * 8-connected-component labelling with a minimum-mapping-unit (MMU) cutoff.
+ * Small speckles become "no change"; surviving patches keep their labels —
+ * the same labels feed the statistics and the top hotspots.
  * (Phase 3, audit weaknesses #11/#12.)
  */
 import {
@@ -11,6 +12,8 @@ import {
   M2_PER_HA,
   MMU_CONFIDENCE_HIGH_SHARE,
   MMU_CONFIDENCE_SIZE_FACTOR,
+  STRONG_SMALL_MAGNITUDE,
+  type ScaledThresholds,
 } from "./config";
 
 /**
@@ -143,6 +146,95 @@ export function minPatchPixels(minPatchHa: number, metersX: number, metersY: num
   return Math.max(1, Math.ceil((minPatchHa * M2_PER_HA) / pxAreaM2));
 }
 
+/** Index triple shared by v1 IndexRasters and v2 V2Indices (structural). */
+export interface IndexTriple {
+  ndvi: Float32Array;
+  mndwi: Float32Array;
+  ndbi: Float32Array;
+}
+
+/**
+ * Phase 2 per-pixel change magnitude: max over the three Δ-indices of
+ * |Δ_i| / threshold_i (thresholds = the values actually applied). 0 on
+ * invalid pixels. Drives the gentle despeckle, the strong-small-change MMU
+ * escape and the v1 confidence tiers.
+ */
+export function magnitudeGrid(
+  a: IndexTriple,
+  b: IndexTriple,
+  t: ScaledThresholds,
+  valid: Uint8Array,
+): Float32Array {
+  const ndviT = Math.max(Math.abs(t.vegLossD), Math.abs(t.vegGainD)) || 1;
+  const mndwiT = Math.max(Math.abs(t.waterGainD), Math.abs(t.waterLossD)) || 1;
+  const ndbiT = Math.abs(t.bareBuiltD) || 1;
+  const out = new Float32Array(a.ndvi.length);
+  for (let i = 0; i < out.length; i++) {
+    if (valid[i] !== 1) continue;
+    out[i] = Math.max(
+      Math.abs(b.ndvi[i] - a.ndvi[i]) / ndviT,
+      Math.abs(b.mndwi[i] - a.mndwi[i]) / mndwiT,
+      Math.abs(b.ndbi[i] - a.ndbi[i]) / ndbiT,
+    );
+  }
+  return out;
+}
+
+/**
+ * Phase 2 gentle despeckle — replaces the 3×3 majority passes. Removes
+ * change components smaller than `minPixels` whose mean magnitude is below
+ * STRONG_SMALL_MAGNITUDE (weak speckle), while a strong small change (a
+ * newly cleared plot, a small pond) survives. Returns removed components.
+ */
+export function gentleDespeckle(
+  classGrid: Uint8Array,
+  width: number,
+  height: number,
+  minPixels: number,
+  magnitude: Float32Array | null,
+): number {
+  if (!magnitude) return 0;
+  const n = classGrid.length;
+  const visited = new Uint8Array(n);
+  const stack: number[] = [];
+  let removed = 0;
+
+  for (let seed = 0; seed < n; seed++) {
+    const seedClass = classGrid[seed];
+    if (visited[seed] === 1 || seedClass < CLASS.vegGain || seedClass > CLASS.waterLoss) continue;
+    visited[seed] = 1;
+    stack.length = 0;
+    stack.push(seed);
+    const pixels: number[] = [];
+    while (stack.length > 0) {
+      const i = stack.pop()!;
+      pixels.push(i);
+      const row = Math.floor(i / width);
+      const col = i - row * width;
+      const r0 = Math.max(0, row - 1);
+      const r1 = Math.min(height - 1, row + 1);
+      const c0 = Math.max(0, col - 1);
+      const c1 = Math.min(width - 1, col + 1);
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          const j = r * width + c;
+          if (visited[j] === 1 || classGrid[j] !== seedClass) continue;
+          visited[j] = 1;
+          stack.push(j);
+        }
+      }
+    }
+    if (pixels.length >= minPixels) continue;
+    let sum = 0;
+    for (const i of pixels) sum += magnitude[i];
+    if (sum / pixels.length < STRONG_SMALL_MAGNITUDE) {
+      for (const i of pixels) classGrid[i] = CLASS.noChange;
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 export interface LabelResult {
   /** Label id per pixel, 0 = no kept patch. */
   labels: Int32Array;
@@ -153,10 +245,13 @@ export interface LabelResult {
 
 /**
  * 8-connected labelling over change classes (1-5). Patches with fewer than
- * `minPixels` pixels are erased (set to no-change, label 0) — unless `tiers`
- * is given (engine v2): a patch at ≥ MMU_CONFIDENCE_SIZE_FACTOR × MMU whose
- * pixels are ≥ MMU_CONFIDENCE_HIGH_SHARE high-confidence is real but small
- * (a pond, a cleared plot) and survives (Phase 3, weakness #11).
+ * `minPixels` pixels are erased (set to no-change, label 0) — unless an
+ * escape hatch fires:
+ *  - `tiers` (engine v2, and v1 since Phase 2): a patch at ≥
+ *    MMU_CONFIDENCE_SIZE_FACTOR × MMU whose pixels are ≥
+ *    MMU_CONFIDENCE_HIGH_SHARE high-confidence survives;
+ *  - `magnitude` (Phase 2 gentle mode): a patch whose mean magnitude reaches
+ *    STRONG_SMALL_MAGNITUDE survives at any size ("strong small change").
  * Mutates `classGrid` in place for removed patches (spec-compliant, saves a
  * copy); kept patches keep their class.
  */
@@ -166,6 +261,7 @@ export function labelPatches(
   height: number,
   minPixels: number,
   tiers?: Uint8Array | null,
+  magnitude?: Float32Array | null,
 ): LabelResult {
   const labels = new Int32Array(width * height);
   const stack: number[] = [];
@@ -208,6 +304,11 @@ export function labelPatches(
       let high = 0;
       for (const i of pixels) if (tiers[i] === 3) high += 1;
       kept = high >= highThreshold;
+    }
+    if (!kept && magnitude) {
+      let sum = 0;
+      for (const i of pixels) sum += magnitude[i];
+      if (sum / pixels.length >= STRONG_SMALL_MAGNITUDE) kept = true;
     }
     if (!kept) {
       removedCount += 1;

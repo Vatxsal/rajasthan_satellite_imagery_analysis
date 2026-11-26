@@ -36,7 +36,7 @@ export interface ShareLink {
   level: "district" | "tehsil" | "ilr";
   dateA: string;
   dateB: string;
-  sensitivity: "low" | "medium" | "high";
+  sensitivity: "low" | "medium" | "high" | "veryhigh" | "auto";
   minPatchHa: number;
   inputMode: "single" | "composite";
   tab: ShareTab;
@@ -49,8 +49,8 @@ const shareSchema = z
     l: z.enum(["district", "tehsil", "ilr"]),
     A: z.string().regex(DATE_PATTERN, "dateA must be YYYY-MM-DD"),
     B: z.string().regex(DATE_PATTERN, "dateB must be YYYY-MM-DD"),
-    s: z.enum(["low", "medium", "high"]).default("medium"),
-    m: z.coerce.number().min(0.01).max(100).default(0.2),
+    s: z.enum(["low", "medium", "high", "veryhigh", "auto"]).default("medium"),
+    m: z.coerce.number().min(0.01).max(100).default(0.05),
     im: z.enum(["single", "composite"]).default("composite"),
     tab: tabSchema.default("hotspots"),
     e: z.string().regex(SHARE_EVENT_ID_PATTERN, "bad event id").optional(),

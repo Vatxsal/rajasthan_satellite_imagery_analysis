@@ -38,8 +38,8 @@ const UnitsSchema = z.object({
 });
 
 const ChangeSchema = z.object({
-  sensitivity: z.enum(["low", "medium", "high"]).default("medium"),
-  minPatchHa: z.number().min(0.01).max(100).default(0.2),
+  sensitivity: z.enum(["low", "medium", "high", "veryhigh", "auto"]).default("medium"),
+  minPatchHa: z.number().min(0.01).max(100).default(0.05),
 });
 
 const ReportsSchema = z.object({

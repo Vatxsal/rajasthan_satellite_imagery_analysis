@@ -5,7 +5,8 @@ import { Check, Clipboard, ExternalLink, MapPin, Search, X } from "lucide-react"
 import type { Map as MapLibreMap } from "maplibre-gl";
 import BottomSheet from "@/components/ui/BottomSheet";
 import Button from "@/components/ui/Button";
-import { classColor } from "@/lib/analysis/config";
+import { classColor, type Sensitivity } from "@/lib/analysis/config";
+import type { ProbeResult } from "@/lib/analysis/probe";
 import { buildCopernicusBrowserUrl } from "@/lib/copernicusBrowser";
 import { patternClassLabel } from "@/lib/fields/colors";
 import { formatArea, formatCoords } from "@/lib/format";
@@ -167,11 +168,14 @@ function InspectorBody({ onClose, header }: { onClose: () => void; header: boole
   const location = useInspectorStore((s) => s.location);
   const lookup = useInspectorStore((s) => s.lookup);
   const change = useInspectorStore((s) => s.change);
+  const probe = useInspectorStore((s) => s.probe);
   const sample = useInspectorStore((s) => s.sample);
   const basemapWords = useInspectorStore((s) => s.basemapWords);
   const lookupPlace = useInspectorStore((s) => s.lookupPlace);
+  const probeChange = useInspectorStore((s) => s.probeChange);
   const sampleNdvi = useInspectorStore((s) => s.sampleNdvi);
   const selectAdminArea = useInspectorStore((s) => s.selectAdminArea);
+  const hasResult = useCompareStore((s) => Boolean(s.result));
 
   const basemap = useAppStore((s) => s.basemap);
   const pushToast = useAppStore((s) => s.pushToast);
@@ -376,6 +380,25 @@ function InspectorBody({ onClose, header }: { onClose: () => void; header: boole
             {change.status === "done" && change.info && (
               <ChangeView info={change.info} areaUnit={areaUnit} />
             )}
+            {hasResult && (change.status === "done" || change.status === "error") && (
+              <div className="space-y-1.5 pt-1.5">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={probe.status === "loading"}
+                  onClick={probeChange}
+                >
+                  {probe.status === "loading" ? "Probing…" : "Probe at native 10 m"}
+                </Button>
+                {probe.status === "loading" && (
+                  <p className="text-xs text-muted">
+                    Classifying a ~480 m window around this point…
+                  </p>
+                )}
+                {probe.status === "done" && probe.info && <ProbeView info={probe.info} />}
+                {probe.status === "error" && <p className="text-xs text-danger">{probe.error}</p>}
+              </div>
+            )}
           </section>
         )}
 
@@ -518,6 +541,112 @@ function ChangeView({
         </div>
       ) : (
         <p className="text-xs text-muted">Change pixel outside any mapped patch.</p>
+      )}
+    </div>
+  );
+}
+
+/** Sensitivity ladder for the probe's "re-run higher" suggestion. */
+const SENSITIVITY_NEXT: Record<Sensitivity, Sensitivity | null> = {
+  low: "medium",
+  medium: "high",
+  high: "veryhigh",
+  veryhigh: null,
+  auto: "veryhigh",
+};
+
+/**
+ * Phase 4 probe verdict: explains the point at native 10 m and offers the
+ * matching re-run action (higher sensitivity for near-misses, a smaller
+ * minimum patch when the MMU cut a real change).
+ */
+function ProbeView({ info }: { info: ProbeResult }) {
+  const result = useCompareStore((s) => s.result);
+  const setSensitivity = useCompareStore((s) => s.setSensitivity);
+  const setMinPatchHa = useCompareStore((s) => s.setMinPatchHa);
+  const run = useCompareStore((s) => s.run);
+
+  const probedSensitivity = result?.stats.metadata.sensitivity ?? "medium";
+  const higher = SENSITIVITY_NEXT[probedSensitivity] ?? null;
+
+  const thresholds = info.thresholds;
+  const ndviT = Math.max(Math.abs(thresholds.vegLossDNdvi ?? 0), Math.abs(thresholds.vegGainDNdvi ?? 0));
+  const mndwiT = Math.max(
+    Math.abs(thresholds.waterLossDMndwi ?? 0),
+    Math.abs(thresholds.waterGainDMndwi ?? 0),
+  );
+  const ndbiT = Math.abs(thresholds.bareBuiltDNdbi ?? 0);
+
+  const rerunHigher = () => {
+    if (!higher) return;
+    setSensitivity(higher);
+    void run();
+  };
+  const rerunSmaller = () => {
+    setMinPatchHa(0.01);
+    void run();
+  };
+
+  if (info.verdict === "kept") {
+    return (
+      <p className="text-xs text-text">
+        Confirmed at native 10 m: {info.classLabel} patch ≈ {info.patchHa?.toFixed(2)} ha
+        {info.clipped ? " (extends past the 480 m window)" : ""}
+        {info.confidence ? ` · ${info.confidence} confidence` : ""}.
+      </p>
+    );
+  }
+  if (info.verdict === "masked") {
+    const dateWord =
+      info.coverage === "a-missing"
+        ? " on date A"
+        : info.coverage === "b-missing"
+          ? " on date B"
+          : "";
+    return (
+      <p className="text-xs text-muted">
+        Cloud or missing data covers this spot{dateWord} — the probe cannot classify it.
+      </p>
+    );
+  }
+  if (info.verdict === "no-change") {
+    return (
+      <p className="text-xs text-muted">
+        No change signal here at native 10 m (ΔNDVI {info.deltas.ndvi.toFixed(2)} · ΔMNDWI{" "}
+        {info.deltas.mndwi.toFixed(2)} · ΔNDBI {info.deltas.ndbi.toFixed(2)}).
+      </p>
+    );
+  }
+  if (info.verdict === "sub-threshold") {
+    return (
+      <div className="space-y-1.5">
+        <p className="text-xs text-muted">
+          Deltas stay below the thresholds — ΔNDVI {info.deltas.ndvi.toFixed(2)} (±
+          {ndviT.toFixed(2)}) · ΔMNDWI {info.deltas.mndwi.toFixed(2)} (±{mndwiT.toFixed(2)}) ·
+          ΔNDBI {info.deltas.ndbi.toFixed(2)} (±{ndbiT.toFixed(2)}).
+        </p>
+        {higher ? (
+          <Button variant="secondary" size="sm" onClick={rerunHigher}>
+            Re-run with {higher === "veryhigh" ? "very high" : higher} sensitivity
+          </Button>
+        ) : (
+          <p className="text-[10px] text-muted">Already at the highest sensitivity.</p>
+        )}
+      </div>
+    );
+  }
+  // below-mmu
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs text-text">
+        {info.classLabel} detected — the patch (≈ {info.patchHa?.toFixed(2)} ha
+        {info.clipped ? ", extends past the window" : ""}) is below the{" "}
+        {info.minPatchHa.toFixed(2)} ha minimum patch size, so it was cut.
+      </p>
+      {info.minPatchHa > 0.01 && (
+        <Button variant="secondary" size="sm" onClick={rerunSmaller}>
+          Re-run with 0.01 ha patches
+        </Button>
       )}
     </div>
   );

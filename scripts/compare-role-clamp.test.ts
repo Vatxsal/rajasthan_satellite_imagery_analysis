@@ -28,7 +28,7 @@ test("role clamps sensitivity and minPatchHa before key derivation", async () =>
 
   const guest = resolveCompareParams(raw, { role: "guest" });
   assert.equal(guest.sensitivity, "medium");
-  assert.equal(guest.minPatchHa, 0.2);
+  assert.equal(guest.minPatchHa, 0.05);
 
   const sso = resolveCompareParams(raw, { role: "sso" });
   assert.equal(sso.sensitivity, "high");
@@ -37,7 +37,7 @@ test("role clamps sensitivity and minPatchHa before key derivation", async () =>
   // The clamped guest key equals the default-tuning key (clamps happen
   // before derivation), and differs from the unclamped SSO key.
   const guestDefaults = resolveCompareParams(
-    { ...raw, sensitivity: "medium", minPatchHa: 0.2 },
+    { ...raw, sensitivity: "medium", minPatchHa: 0.05 },
     { role: "guest" },
   );
   assert.equal(guest.key, guestDefaults.key);

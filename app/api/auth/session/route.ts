@@ -9,7 +9,7 @@ import { jsonError } from "@/lib/server/api";
 
 export const runtime = "nodejs";
 
-const QUOTA_KINDS: QuotaKind[] = ["search", "compare", "aiSummary", "inspectSample"];
+const QUOTA_KINDS: QuotaKind[] = ["search", "compare", "detailed", "aiSummary", "inspectSample"];
 
 /** Session cookie from a plain Request (same parser as lib/auth/guard.ts). */
 function readSessionCookie(request: Request): string | null {

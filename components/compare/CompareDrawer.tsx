@@ -18,6 +18,7 @@ import {
   useCompareStore,
   PANEL_WIDTH_MAX,
   PANEL_WIDTH_MIN,
+  type CompareMagnitudeIndex,
   type CompareTab,
 } from "@/store/useCompareStore";
 import { usePreferencesStore } from "@/store/usePreferencesStore";
@@ -410,6 +411,51 @@ function SwipeHelp() {
   );
 }
 
+/** Compact on/off switch row for the Change-map display + diagnostic layers. */
+function LayerSwitch({
+  checked,
+  onChange,
+  label,
+  hint,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  label: string;
+  hint: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onChange}
+        className={cn(
+          "flex w-full items-center gap-2 rounded border border-border bg-surface-2 px-2 py-1.5 text-left text-xs transition-colors duration-150",
+          checked ? "text-text" : "text-muted",
+        )}
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "inline-flex h-5 w-9 shrink-0 items-center rounded-full border px-0.5 transition-colors duration-150",
+            checked ? "border-accent bg-accent-soft" : "border-border bg-surface",
+          )}
+        >
+          <span
+            className={cn(
+              "inline-block h-3.5 w-3.5 rounded-full transition-transform duration-150",
+              checked ? "translate-x-4 bg-accent" : "translate-x-0 bg-muted",
+            )}
+          />
+        </span>
+        <span className="min-w-0 flex-1">{label}</span>
+      </button>
+      <p className="text-[10px] leading-snug text-muted">{hint}</p>
+    </div>
+  );
+}
+
 function ChangeMapTab() {
   const result = useCompareStore((s) => s.result);
   const areaUnit = usePreferencesStore((s) => s.values.units.areaUnit);
@@ -419,6 +465,16 @@ function ChangeMapTab() {
   const toggleClass = useCompareStore((s) => s.toggleClass);
   const boostVisibility = useCompareStore((s) => s.boostVisibility);
   const setBoostVisibility = useCompareStore((s) => s.setBoostVisibility);
+  const showUnchanged = useCompareStore((s) => s.showUnchanged);
+  const setShowUnchanged = useCompareStore((s) => s.setShowUnchanged);
+  const coverageLayer = useCompareStore((s) => s.coverageLayer);
+  const toggleCoverageLayer = useCompareStore((s) => s.toggleCoverageLayer);
+  const gapLayer = useCompareStore((s) => s.gapLayer);
+  const toggleGapLayer = useCompareStore((s) => s.toggleGapLayer);
+  const magnitudeLayer = useCompareStore((s) => s.magnitudeLayer);
+  const toggleMagnitudeLayer = useCompareStore((s) => s.toggleMagnitudeLayer);
+  const magnitudeIndex = useCompareStore((s) => s.magnitudeIndex);
+  const setMagnitudeIndex = useCompareStore((s) => s.setMagnitudeIndex);
   const [exporting, setExporting] = useState<"png" | "geotiff" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   // A cold server cache recomputes the analysis before the file can be served —
@@ -495,7 +551,9 @@ function ChangeMapTab() {
               aria-hidden
             />
             <span className="min-w-0 flex-1">No change</span>
-            <span className="shrink-0 text-[10px]">always transparent</span>
+            <span className="shrink-0 text-[10px]">
+              {showUnchanged ? "green tint when shown" : "always transparent"}
+            </span>
           </div>
         </li>
       </ul>
@@ -548,6 +606,50 @@ function ChangeMapTab() {
           <p className="text-[10px] leading-snug text-muted">
             Enlarges small patches on the map. Display only; statistics are unchanged.
           </p>
+        </div>
+        <LayerSwitch
+          checked={showUnchanged}
+          onChange={() => setShowUnchanged(!showUnchanged)}
+          label="Show unchanged"
+          hint="Tints analysed no-change areas so masked (grey hatch) and untouched (transparent) stand apart. Display only."
+        />
+      </section>
+
+      {/* ------------------------------------------ Phase 1 diagnostic layers */}
+      <section className="flex flex-col gap-2">
+        <p className="section-label">Diagnostic layers</p>
+        <LayerSwitch
+          checked={coverageLayer}
+          onChange={toggleCoverageLayer}
+          label="Data coverage"
+          hint="Analysed area in green; red = date A missing, orange = date B missing, yellow = cloud / shadow."
+        />
+        <LayerSwitch
+          checked={gapLayer}
+          onChange={toggleGapLayer}
+          label="Rescued coverage"
+          hint="Blue = pixels only analysed thanks to the wider ±window rescue render."
+        />
+        <div className="flex flex-col gap-1.5">
+          <LayerSwitch
+            checked={magnitudeLayer}
+            onChange={toggleMagnitudeLayer}
+            label="Change magnitude"
+            hint="How strongly each index moved against the applied thresholds (white → amber → red)."
+          />
+          {magnitudeLayer && (
+            <Segmented
+              ariaLabel="Magnitude layer index"
+              value={magnitudeIndex}
+              onChange={(value) => setMagnitudeIndex(value as CompareMagnitudeIndex)}
+              options={[
+                { value: "combined", label: "All" },
+                { value: "ndvi", label: "ΔNDVI" },
+                { value: "mndwi", label: "ΔMNDWI" },
+                { value: "ndbi", label: "ΔNDBI" },
+              ]}
+            />
+          )}
         </div>
       </section>
 

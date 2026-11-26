@@ -14,7 +14,8 @@
  *     A missing (no acquisition) → B missing → cloud/shadow (acquired but
  *     rejected) → unknown (breakdown unavailable — synthetic fixtures).
  */
-import { CLASS, type ScaledThresholds } from "./config";
+import { CLASS, MAGNITUDE_SCALE, type ScaledThresholds } from "./config";
+import type { IndexRasters } from "./types";
 
 /** Pixel counts per class code at one pipeline stage. */
 export interface ClassCounts {
@@ -169,6 +170,97 @@ export function computeCoverage(args: CoverageArgs): CoverageDiagnostics {
   };
 }
 
+/**
+ * Phase 1 — per-pixel coverage reason raster (the map version of the
+ * coverage breakdown above). Same precedence, plus `outside` for pixels
+ * outside the polygon so the layer can be rendered from one buffer:
+ *   0 analysed (valid on both dates) · 1 A missing · 2 B missing
+ *   3 cloud/shadow · 4 unknown · 5 outside the polygon
+ */
+export const COVERAGE_REASON = {
+  analysed: 0,
+  aMissing: 1,
+  bMissing: 2,
+  cloud: 3,
+  unknown: 4,
+  outside: 5,
+} as const;
+
+export function coverageReasonRaster(args: CoverageArgs): Uint8Array {
+  const { inside, validA, validB } = args;
+  const out = new Uint8Array(inside.length);
+  for (let i = 0; i < inside.length; i++) {
+    if (inside[i] !== 1) {
+      out[i] = COVERAGE_REASON.outside;
+      continue;
+    }
+    if (validA[i] === 1 && validB[i] === 1) {
+      out[i] = COVERAGE_REASON.analysed;
+      continue;
+    }
+    if (args.nodataA?.[i] === 1) out[i] = COVERAGE_REASON.aMissing;
+    else if (args.nodataB?.[i] === 1) out[i] = COVERAGE_REASON.bMissing;
+    else if (args.cloudyA?.[i] === 1 || args.cloudyB?.[i] === 1) out[i] = COVERAGE_REASON.cloud;
+    else out[i] = COVERAGE_REASON.unknown;
+  }
+  return out;
+}
+
+/** Phase 1 — Δ-index magnitude planes (int8, MAGNITUDE_SCALE) for the map's
+ *  magnitude layer: one signed plane per index plus a combined plane holding
+ *  the strongest |Δ| in threshold units (sign of the dominant index). */
+export interface MagnitudePlanes {
+  ndvi: Int8Array;
+  mndwi: Int8Array;
+  ndbi: Int8Array;
+  combined: Int8Array;
+}
+
+function quantiseDelta(delta: number): number {
+  if (!Number.isFinite(delta)) return 0;
+  return Math.max(-127, Math.min(127, Math.round(delta * MAGNITUDE_SCALE)));
+}
+
+export function magnitudePlanes(
+  idxA: IndexRasters,
+  idxB: IndexRasters,
+  t: ScaledThresholds,
+): MagnitudePlanes {
+  const n = idxA.ndvi.length;
+  const ndvi = new Int8Array(n);
+  const mndwi = new Int8Array(n);
+  const ndbi = new Int8Array(n);
+  const combined = new Int8Array(n);
+  // Representative threshold per index (largest applied gate = weakest change
+  // the classifier could accept), so 1.0 on the combined plane ≈ "threshold".
+  const tN = Math.max(Math.abs(t.vegLossD), Math.abs(t.vegGainD)) || 1e-6;
+  const tW = Math.max(Math.abs(t.waterLossD), Math.abs(t.waterGainD)) || 1e-6;
+  const tB = Math.abs(t.bareBuiltD) || 1e-6;
+  for (let i = 0; i < n; i++) {
+    const dN = idxB.ndvi[i] - idxA.ndvi[i];
+    const dW = idxB.mndwi[i] - idxA.mndwi[i];
+    const dB = idxB.ndbi[i] - idxA.ndbi[i];
+    ndvi[i] = quantiseDelta(dN);
+    mndwi[i] = quantiseDelta(dW);
+    ndbi[i] = quantiseDelta(dB);
+    const r1 = Math.abs(dN) / tN;
+    const r2 = Math.abs(dW) / tW;
+    const r3 = Math.abs(dB) / tB;
+    let dominant = r1;
+    let sign = dN;
+    if (r2 > dominant) {
+      dominant = r2;
+      sign = dW;
+    }
+    if (r3 > dominant) {
+      dominant = r3;
+      sign = dB;
+    }
+    combined[i] = quantiseDelta(sign >= 0 ? dominant : -dominant);
+  }
+  return { ndvi, mndwi, ndbi, combined };
+}
+
 /** 1 where an inside pixel lies within `radius` (Chebyshev) of a non-inside
  *  pixel — polygon-boundary proximity for the edge-event flag. */
 export function edgeProximityMask(
@@ -191,6 +283,52 @@ export function edgeProximityMask(
         const j = r * width + c;
         if (inside[j] === 1) out[j] = 1;
       }
+    }
+  }
+  return out;
+}
+
+/**
+ * Phase 2 — per-pixel edge flag for events: 1 where an analysable pixel
+ * touches (8-neighbour) the eroded polygon boundary, a masked pixel, or a
+ * gap-fill source seam. Patches carrying any flagged pixel are marked
+ * "edge, check" and excluded from headline totals unless the user opts in.
+ */
+export function edgeEventMask(
+  insideClass: Uint8Array,
+  valid: Uint8Array,
+  gapSource: Uint8Array | null,
+  width: number,
+  height: number,
+): Uint8Array {
+  const out = new Uint8Array(insideClass.length);
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const i = row * width + col;
+      if (insideClass[i] !== 1) continue;
+      const src = gapSource ? gapSource[i] : 0;
+      let edge = false;
+      for (let dr = -1; dr <= 1 && !edge; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const r = row + dr;
+          const c = col + dc;
+          if (r < 0 || r >= height || c < 0 || c >= width) {
+            edge = true;
+            break;
+          }
+          const j = r * width + c;
+          if (insideClass[j] !== 1 || valid[j] !== 1) {
+            edge = true;
+            break;
+          }
+          if (gapSource && gapSource[j] !== src) {
+            edge = true;
+            break;
+          }
+        }
+      }
+      out[i] = edge ? 1 : 0;
     }
   }
   return out;

@@ -44,6 +44,8 @@ export interface ComputeStatsArgs {
   conf?: Uint8Array | null;
   /** v2 short-gap flag for vegetation confidence tags (§2.6). */
   shortGap?: boolean;
+  /** Phase 2: per-pixel edge flag (boundary / masked / gap-fill seam). */
+  edgeMask?: Uint8Array | null;
 }
 
 const TIER_TEXT: Record<number, ConfidenceTier> = {
@@ -60,7 +62,8 @@ const CROP_SUBS = new Set<number>([
 ]);
 
 export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
-  const { classGrid, labels, grid, zones, zoneMeta, tiers, subs, persist, conf, shortGap } = args;
+  const { classGrid, labels, grid, zones, zoneMeta, tiers, subs, persist, conf, shortGap, edgeMask } =
+    args;
   const pxAreaHa = (grid.metersX * grid.metersY) / M2_PER_HA;
   const counts = new Uint32Array(256);
   const tierCounts = { high: 0, medium: 0, low: 0 };
@@ -70,6 +73,7 @@ export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
   let changedMaxCol = -1;
   let changedMinRow = -1;
   let changedMaxRow = -1;
+  let edgeChangedPixels = 0;
 
   for (let i = 0; i < classGrid.length; i++) {
     const code = classGrid[i];
@@ -77,6 +81,7 @@ export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
     insidePixels += 1;
     counts[code] += 1;
     if (code >= CLASS.vegGain && code <= CLASS.waterLoss) {
+      if (edgeMask && edgeMask[i] === 1) edgeChangedPixels += 1;
       if (tiers) {
         // Change pixels always carry a tier; imputed pixels fall back to low.
         const tierText = TIER_TEXT[tiers[i]] ?? "low";
@@ -133,6 +138,7 @@ export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
         : null,
     negligible: changedPixels === 0,
     ...(tiers ? { confidence: tierCounts } : {}),
+    ...(edgeMask ? { edgeHa: edgeChangedPixels * pxAreaHa } : {}),
   };
 
   if (zones && zoneMeta && zoneMeta.length > 0) {
@@ -172,6 +178,7 @@ export function computeStats(args: ComputeStatsArgs): CompareStatsCore {
     persist: persist ?? null,
     conf: conf ?? null,
     shortGap: shortGap ?? false,
+    edgeMask: edgeMask ?? null,
   });
   return stats;
 }
@@ -194,6 +201,8 @@ interface PatchAcc {
   /** Phase 3 fused: sum + n of 0-100 confidences over the patch pixels. */
   confSum: number;
   confN: number;
+  /** Phase 2: ≥1 pixel flagged edge (boundary / masked / seam). */
+  edge: boolean;
 }
 
 export interface AuxGrids {
@@ -203,6 +212,8 @@ export interface AuxGrids {
   /** Phase 3 fused: 0-100 confidence per pixel; absent for legacy runs. */
   conf?: Uint8Array | null;
   shortGap: boolean;
+  /** Phase 2: per-pixel edge flag — marks patches "edge, check". */
+  edgeMask?: Uint8Array | null;
 }
 
 /** Majority tier over a patch; ties resolve to the conservative (lower) tier. */
@@ -302,10 +313,12 @@ function computeHotspots(
         persistCounts: [0, 0],
         confSum: 0,
         confN: 0,
+        edge: false,
       };
       patches.set(label, acc);
     }
     acc.count += 1;
+    if (aux.edgeMask && aux.edgeMask[i] === 1) acc.edge = true;
     if (aux.tiers) {
       const tier = aux.tiers[i];
       if (tier >= TIER.low && tier <= TIER.high) acc.tierCounts[tier - 1] += 1;
@@ -393,6 +406,7 @@ function computeHotspots(
       ...(confidencePct !== undefined ? { confidencePct } : {}),
       ...(subText !== undefined ? { subLabel: subText } : {}),
       ...(tags ? { tags } : {}),
+      ...(acc.edge ? { edge: true } : {}),
     };
   });
 
@@ -430,6 +444,7 @@ export function buildPatchVectors(
       persistCounts: [number, number];
       confSum: number;
       confN: number;
+      edge: boolean;
     }
   >();
   for (let i = 0; i < labels.length; i++) {
@@ -447,10 +462,12 @@ export function buildPatchVectors(
         persistCounts: [0, 0],
         confSum: 0,
         confN: 0,
+        edge: false,
       };
       patches.set(label, acc);
     }
     acc.count += 1;
+    if (aux.edgeMask && aux.edgeMask[i] === 1) acc.edge = true;
     if (aux.tiers) {
       const tier = aux.tiers[i];
       if (tier >= TIER.low && tier <= TIER.high) acc.tierCounts[tier - 1] += 1;
@@ -561,6 +578,7 @@ export function buildPatchVectors(
         ...(subText !== undefined ? { subLabel: subText } : {}),
         ...(tags ? { tags } : {}),
         ...(tehsilName ? { tehsilName } : {}),
+        ...(acc.edge ? { edge: true } : {}),
       },
     });
   }

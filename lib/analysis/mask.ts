@@ -78,6 +78,35 @@ export function rasterizeAreaMask(
 }
 
 /**
+ * Phase 2 — 1-px erosion of a 0/1 mask: a pixel survives only when it and
+ * every neighbour within `radius` (Chebyshev) are 1. Classification, stats
+ * and events run on the eroded mask so boundary slivers never become
+ * phantom change patches; coverage/gap-fill diagnostics keep the full mask.
+ */
+export function erodeMask(mask: Uint8Array, width: number, height: number, radius = 1): Uint8Array {
+  const out = new Uint8Array(mask.length);
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const i = row * width + col;
+      if (mask[i] !== 1) continue;
+      let ok = true;
+      for (let dr = -radius; dr <= radius && ok; dr++) {
+        for (let dc = -radius; dc <= radius; dc++) {
+          const r = row + dr;
+          const c = col + dc;
+          if (r < 0 || r >= height || c < 0 || c >= width || mask[r * width + c] !== 1) {
+            ok = false;
+            break;
+          }
+        }
+      }
+      out[i] = ok ? 1 : 0;
+    }
+  }
+  return out;
+}
+
+/**
  * Rasterizes a set of zones (tehsils) onto the same grid. Returns the zone
  * index+1 per pixel, 0 = outside every zone. First-come wins on shared edges,
  * so results are deterministic. `zones` should be pre-filtered to those

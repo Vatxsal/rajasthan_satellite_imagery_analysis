@@ -15,7 +15,7 @@ import { analysisParamsQuery } from "@/lib/compare/params";
 import { formatArea, formatDateTime, type AreaUnit } from "@/lib/format";
 import type { CompareStats, ConfidenceTier } from "@/lib/analysis/types";
 import type { CompareDiagnostics, DeltaHistogram } from "@/lib/analysis/diagnostics";
-import type { Sensitivity } from "@/lib/analysis/config";
+import type { CompareSpeckle, Sensitivity } from "@/lib/analysis/config";
 import { classColor } from "@/lib/analysis/config";
 import { useCompareStore, type CompareInputMode } from "@/store/useCompareStore";
 import { useAppStore } from "@/store/useAppStore";
@@ -328,6 +328,10 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const setInputMode = useCompareStore((s) => s.setInputMode);
   const setSensitivity = useCompareStore((s) => s.setSensitivity);
   const setMinPatchHa = useCompareStore((s) => s.setMinPatchHa);
+  const speckle = useCompareStore((s) => s.speckle);
+  const setSpeckle = useCompareStore((s) => s.setSpeckle);
+  const showEdgeEvents = useCompareStore((s) => s.showEdgeEvents);
+  const setShowEdgeEvents = useCompareStore((s) => s.setShowEdgeEvents);
   const lockedSensitivity = useLocked("compare.adjust-sensitivity");
   const lockedMinPatch = useLocked("compare.adjust-min-patch");
   const role = useSession((s) => s.role);
@@ -374,6 +378,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   if (!result) return null;
   const stats: CompareStats = result.stats;
   const { metadata } = stats;
+  const cov = metadata.diagnostics?.coverage;
   const lowValid = stats.validPct < 70;
   const v2 = metadata.engine === "v2";
   // The card shows the analysed (frozen) pair — the header, Scene rows and
@@ -384,6 +389,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const stale =
     metadata.sensitivity !== sensitivity ||
     Math.abs(metadata.minPatchHa - minPatchHa) > 1e-9 ||
+    (metadata.speckle ?? "gentle") !== speckle ||
     (v2 && metadata.inputMode !== inputMode) ||
     pairChanged;
 
@@ -439,7 +445,11 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   if (tab === "hotspots") {
     const loading = eventsStatus === "loading";
     // One source for list rows AND map markers (bridge reads the same helper).
-    const visible = selectVisibleEvents(eventsItems, { confidenceFilter, limit: eventsLimit });
+    const visible = selectVisibleEvents(eventsItems, {
+      confidenceFilter,
+      limit: eventsLimit,
+      includeEdge: showEdgeEvents,
+    });
     const view = eventsViewState({ status: eventsStatus, error: eventsError, visibleCount: visible.length });
     // The retry banner rides on the status alone — an error with rows already
     // loaded keeps the list (header + rows) while still offering the retry.
@@ -447,9 +457,26 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
     const errorMessage = (eventsError ?? "").trim() || "Change events failed to load.";
     // Header count: exact raw total, or the probed filtered total when a
     // confidence filter is active (falls back to the visible rows while the
-    // probe is still in flight — never a bogus "0 patches").
-    const headerTotal = confidenceFilter !== null ? (eventsFilteredTotal ?? visible.length) : eventsTotal;
+    // probe is still in flight — never a bogus "0 patches"). Without a
+    // confidence filter the local total shrinks by the edge patches when the
+    // boundary toggle is off — no probe needed for a client-side filter.
+    const eventsEdgeTotal = stats.eventsEdgeTotal ?? 0;
+    const localTotal = showEdgeEvents ? eventsTotal : Math.max(0, eventsTotal - eventsEdgeTotal);
+    const headerTotal = confidenceFilter !== null ? (eventsFilteredTotal ?? visible.length) : localTotal;
     const hasMore = visible.length < headerTotal;
+    // Per-class breakdown (raw counts, edge split) — only while no confidence
+    // filter narrows the set (with a filter the probe owns the header number).
+    const labelByCode = new Map(stats.classes.map((cls) => [cls.code, cls.label]));
+    const eventsByClass = stats.eventsByClass ?? [];
+    const classCounts = !confidenceFilter
+      ? eventsByClass
+          .map((entry) => {
+            const shown = showEdgeEvents ? entry.count : entry.count - entry.edgeCount;
+            if (shown <= 0) return null;
+            return `${labelByCode.get(entry.classCode) ?? `Class ${entry.classCode}`} ${shown}`;
+          })
+          .filter((entry): entry is string => entry !== null)
+      : [];
 
     return (
       <div className="flex flex-col gap-2">
@@ -458,8 +485,11 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
             <p className="min-w-0 text-xs text-muted">
               Change events — {headerTotal.toLocaleString("en")}{" "}
               {headerTotal === 1 ? "patch" : "patches"}
-              {confidenceFilter ? ` matching ${confidenceFilter} confidence` : ""}, largest first.
-              Click one to zoom the map.
+              {confidenceFilter ? ` matching ${confidenceFilter} confidence` : ""}
+              {!showEdgeEvents && eventsEdgeTotal > 0
+                ? ` (${eventsEdgeTotal.toLocaleString("en")} boundary excluded)`
+                : ""}
+              , largest first. Click one to zoom the map.
             </p>
             <Button
               size="sm"
@@ -482,6 +512,9 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
               <FileJson size={13} />
               GeoJSON
             </Button>
+            {classCounts.length > 0 && (
+              <p className="mono-nums w-full text-[10px] text-muted">{classCounts.join(" · ")}</p>
+            )}
           </div>
         )}
 
@@ -504,6 +537,19 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
               ]}
             />
           </div>
+        )}
+
+        {eventsEdgeTotal > 0 && (
+          <label className="flex w-fit cursor-pointer items-center gap-2 text-[11px] text-muted">
+            <input
+              type="checkbox"
+              checked={showEdgeEvents}
+              onChange={(event) => setShowEdgeEvents(event.target.checked)}
+              className="h-3.5 w-3.5 accent-accent"
+            />
+            Show boundary patches ({eventsEdgeTotal.toLocaleString("en")}) — polygon edge / masked
+            seam
+          </label>
         )}
 
         {showError && (
@@ -530,9 +576,11 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
             <p>
               {confidenceFilter
                 ? "No events match this confidence filter."
-                : "No significant change events at these settings."}
+                : !showEdgeEvents && eventsTotal - eventsEdgeTotal <= 0 && eventsTotal > 0
+                  ? "Every patch sits on the polygon edge or a masked seam — turn on boundary patches above."
+                  : "No significant change events at these settings."}
             </p>
-            {!confidenceFilter && (
+            {!confidenceFilter && eventsTotal - eventsEdgeTotal > 0 && (
               <p>
                 Try lowering the minimum patch size or raising the sensitivity in the Statistics
                 tab, then re-run the analysis.
@@ -636,6 +684,14 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                         {confidencePct !== null ? ` · ${confidencePct}%` : ""}
                       </span>
                     )}
+                    {props.edge === true && (
+                      <span
+                        className="shrink-0 rounded-sm border border-border px-1 py-px"
+                        title="Touches the polygon edge or a masked seam"
+                      >
+                        edge
+                      </span>
+                    )}
                     <span className="mono-nums ml-auto shrink-0 whitespace-nowrap">{coords}</span>
                   </span>
                 </button>
@@ -677,6 +733,14 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
           treat the totals as a partial picture.
         </p>
       )}
+      {metadata.gapFill && cov && cov.validBothPct < 80 && (
+        <p className="flex items-start gap-2 rounded border border-warning/40 bg-warning/10 px-2.5 py-2 text-xs text-text">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warning" aria-hidden />
+          Even after the ±{metadata.gapFill.windowDays}-day coverage rescue, only{" "}
+          {cov.validBothPct.toFixed(0)}% of the area has usable data on both dates — the map below
+          is a partial picture.
+        </p>
+      )}
       {stats.negligible && (
         <p className="flex items-start gap-2 rounded border border-border bg-surface-2 px-2.5 py-2 text-xs text-text">
           <Info size={14} className="mt-0.5 shrink-0 text-muted" aria-hidden />
@@ -686,12 +750,39 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
       )}
 
       <div className="grid grid-cols-2 gap-2">
-        <Metric
-          label="Changed area"
-          value={ha(stats.changedHa, areaUnit)}
-          hint={`${(stats.changedHa / 100).toFixed(2)} km²`}
-        />
+        {(() => {
+          // Headline change area follows the boundary toggle: with edge
+          // patches hidden, the number excludes boundary/seam area.
+          const edgeHa = stats.edgeHa ?? 0;
+          const headlineHa =
+            showEdgeEvents || edgeHa <= 0 ? stats.changedHa : Math.max(0, stats.changedHa - edgeHa);
+          return (
+            <Metric
+              label="Changed area"
+              value={ha(headlineHa, areaUnit)}
+              hint={
+                edgeHa > 0 && !showEdgeEvents
+                  ? `${(headlineHa / 100).toFixed(2)} km² · −${ha(edgeHa, areaUnit)} boundary`
+                  : `${(headlineHa / 100).toFixed(2)} km²`
+              }
+            />
+          );
+        })()}
         <Metric label="Valid data" value={`${stats.validPct.toFixed(1)}%`} hint={`of ${ha(stats.areaHa, areaUnit)}`} />
+        {cov && (
+          <>
+            <Metric
+              label="Analysed"
+              value={`${cov.validBothPct.toFixed(1)}%`}
+              hint="usable on both dates"
+            />
+            <Metric
+              label="Not analysed"
+              value={`${(100 - cov.validBothPct).toFixed(1)}%`}
+              hint="missing / cloud / unknown"
+            />
+          </>
+        )}
       </div>
 
       {/* ---------------------------------------------------- class breakdown */}
@@ -867,6 +958,15 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
           </MethodRow>
           <MethodRow label="Analysed area">{haRound(stats.areaHa, areaUnit)}</MethodRow>
           <MethodRow label="Valid data">{stats.validPct.toFixed(1)}% of the area</MethodRow>
+          {metadata.gapFill && (
+            <MethodRow
+              label="Coverage rescue"
+              title={`A wider ±${metadata.gapFill.windowDays}-day composite was merged in only where the anchor dates had no usable data — see the Rescued coverage map layer.`}
+            >
+              {metadata.gapFill.sides.join(" + ")} · +{metadata.gapFill.filledPct.toFixed(1)}% of the
+              area
+            </MethodRow>
+          )}
           <MethodRow label="Date gap">{metadata.gapDays} days</MethodRow>
           <MethodRow label="Scene A">
             {metadata.dateA}
@@ -979,13 +1079,15 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                     { value: "low", label: "Low" },
                     { value: "medium", label: "Medium" },
                     { value: "high", label: "High" },
+                    { value: "veryhigh", label: "Very high" },
+                    { value: "auto", label: "Auto" },
                   ]}
                   className={lockedSensitivity ? "pointer-events-none opacity-50" : undefined}
                 />
                 <p className="text-[10px] text-muted">
                   {lockedSensitivity
                     ? "Guests run at the default sensitivity — sign in to adjust."
-                    : "Low = fewer, stronger changes · Medium = balanced · High = more, weaker changes"}
+                    : "Low/High shift the thresholds · Very high = most sensitive · Auto sets them from this pair's noise"}
                 </p>
               </div>
               <div className="flex flex-col gap-1.5">
@@ -1027,6 +1129,28 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                     setMinPatchHa(Number(event.target.value));
                   }}
                 />
+              </div>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-muted">Despeckle</p>
+                  <FeatureLock capability="compare.adjust-sensitivity" label="Adjust despeckle" />
+                </div>
+                <Segmented
+                  ariaLabel="Despeckle mode"
+                  value={speckle}
+                  onChange={(value) => {
+                    if (lockedSensitivity) return;
+                    setSpeckle(value as CompareSpeckle);
+                  }}
+                  options={[
+                    { value: "gentle", label: "Gentle" },
+                    { value: "legacy", label: "Legacy" },
+                  ]}
+                  className={lockedSensitivity ? "pointer-events-none opacity-50" : undefined}
+                />
+                <p className="text-[10px] text-muted">
+                  Gentle keeps strong small changes · Legacy = 3×3 majority (old behaviour)
+                </p>
               </div>
               <Button
                 variant="primary"

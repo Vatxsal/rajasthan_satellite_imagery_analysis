@@ -46,8 +46,10 @@ export interface EventPageQuery {
   offset?: number;
   /** Exact class-code filter (e.g. CLASS.vegLoss). */
   classCode?: number;
-  /** Minimum confidence tier; events without tiers (engine v1) are excluded. */
+  /** Minimum confidence tier; events without a tier are excluded. */
   confidence?: ConfidenceTier;
+  /** Phase 2: "exclude" drops edge-flagged patches (headline default). */
+  edge?: "include" | "exclude";
 }
 
 export interface EventPage {
@@ -72,6 +74,7 @@ export function pageEvents(features: readonly GeoJSON.Feature[], query: EventPag
   const filtered = features.filter((feature) => {
     const props = propsOf(feature);
     if (query.classCode !== undefined && Number(props.classCode) !== query.classCode) return false;
+    if (query.edge === "exclude" && props.edge === true) return false;
     if (minRank > 0) {
       const confidence = props.confidence as ConfidenceTier | undefined;
       if (!confidence) return false;

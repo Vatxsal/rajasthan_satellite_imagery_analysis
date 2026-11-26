@@ -12,6 +12,8 @@
 import {
   ADAPTIVE_SCALE_MAX,
   ADAPTIVE_SCALE_MIN,
+  AUTO_THRESHOLD_FLOOR,
+  THRESHOLDS,
   V2_REFERENCE_SIGMA,
   type ScaledThresholds,
 } from "../config";
@@ -20,6 +22,8 @@ import type { V2Indices } from "./indices";
 
 const SAMPLE_TARGET = 40_000;
 const MIN_SAMPLES = 100;
+/** Phase 2 auto-sensitivity: threshold = max(floor, 3 × robust σ of the Δ). */
+const AUTO_SIGMA_FACTOR = 3;
 
 export interface AdaptiveThresholds {
   /** Effective thresholds (base × sensitivity × adaptive scale). */
@@ -84,4 +88,52 @@ export function adaptiveThresholds(
     waterLossMndwiMin: base.waterLossMndwiMin,
   };
   return { t, scales, sigma };
+}
+
+/** Index triple shared by v1 IndexRasters and v2 V2Indices (structural). */
+interface IndexTriple {
+  ndvi: Float32Array;
+  mndwi: Float32Array;
+  ndbi: Float32Array;
+}
+
+/**
+ * Phase 2 "auto" sensitivity — thresholds derived from THIS pair's Δ-index
+ * noise: max(floor, 3 × 1.4826 × MAD) per index (median-centred, so a
+ * systematic bias cannot inflate or deflate the cut). State gates stay at
+ * their config values; floors are the AUTO_THRESHOLD_FLOOR minimums.
+ */
+export function autoThresholds(a: IndexTriple, b: IndexTriple, valid: Uint8Array): ScaledThresholds {
+  const n = valid.length;
+  const step = sampleStride(n, SAMPLE_TARGET);
+  const dNdvi: number[] = [];
+  const dMndwi: number[] = [];
+  const dNdbi: number[] = [];
+  for (let i = 0; i < n; i += step) {
+    if (valid[i] !== 1) continue;
+    dNdvi.push(b.ndvi[i] - a.ndvi[i]);
+    dMndwi.push(b.mndwi[i] - a.mndwi[i]);
+    dNdbi.push(b.ndbi[i] - a.ndbi[i]);
+  }
+
+  let ndviT: number = AUTO_THRESHOLD_FLOOR.ndvi;
+  let mndwiT: number = AUTO_THRESHOLD_FLOOR.mndwi;
+  let ndbiT: number = AUTO_THRESHOLD_FLOOR.ndbi;
+  if (dNdvi.length >= MIN_SAMPLES) {
+    ndviT = Math.max(ndviT, AUTO_SIGMA_FACTOR * robustSigma(dNdvi));
+    mndwiT = Math.max(mndwiT, AUTO_SIGMA_FACTOR * robustSigma(dMndwi));
+    ndbiT = Math.max(ndbiT, AUTO_SIGMA_FACTOR * robustSigma(dNdbi));
+  }
+
+  return {
+    waterGainD: mndwiT,
+    waterLossD: -mndwiT,
+    vegLossD: -ndviT,
+    vegGainD: ndviT,
+    bareBuiltD: ndbiT,
+    bareBuiltNdviMax: THRESHOLDS.bareBuilt.dNdviMax,
+    bareBuiltMaxMndwi: THRESHOLDS.bareBuilt.maxMndwi,
+    waterGainMndwiMin: THRESHOLDS.waterGain.mndwiAfter,
+    waterLossMndwiMin: THRESHOLDS.waterLoss.mndwiBefore,
+  };
 }

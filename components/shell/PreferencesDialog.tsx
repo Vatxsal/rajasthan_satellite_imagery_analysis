@@ -321,6 +321,8 @@ export default function PreferencesDialog({ open, onOpenChange }: PreferencesDia
                     { value: "low", label: "Low" },
                     { value: "medium", label: "Medium" },
                     { value: "high", label: "High" },
+                    { value: "veryhigh", label: "Very high" },
+                    { value: "auto", label: "Auto" },
                   ]}
                 />
               </Field>

@@ -54,6 +54,8 @@ const baseSchema = z.object({
   DAILY_RENDER_BUDGET: z.coerce.number().int().min(0).default(3000),
   /** Long-side cap (px) of the change-detection analysis grid. */
   COMPARE_MAX_PX: z.coerce.number().int().min(256).max(4096).default(1500),
+  /** Phase 3: max native 1024² blocks in one detailed comparison run. */
+  COMPARE_MAX_BLOCKS: z.coerce.number().int().min(1).max(5_000).default(500),
   /**
    * PU cap per analysis (2 Process renders, CDSE formula — audit §5).
    * Estimates run through prepareCompare before any fetch; 0 disables.
@@ -228,6 +230,8 @@ export interface ServerEnv {
   TILE_CACHE_DIR?: string;
   DAILY_RENDER_BUDGET: number;
   COMPARE_MAX_PX: number;
+  /** Phase 3: max native 1024² blocks in one detailed comparison run. */
+  COMPARE_MAX_BLOCKS: number;
   PER_ANALYSIS_PU_LIMIT: number;
   CHANGE_ENGINE: "v1" | "v2";
   CHANGE_RULES: "legacy" | "fused" | "ml";

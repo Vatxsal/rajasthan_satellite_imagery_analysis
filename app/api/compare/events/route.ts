@@ -30,10 +30,16 @@ const querySchema = z.object({
   level: z.enum(["district", "tehsil", "ilr"]).optional(),
   dateA: z.string().optional(),
   dateB: z.string().optional(),
-  sensitivity: z.enum(["low", "medium", "high"]).optional(),
+  sensitivity: z.enum(["low", "medium", "high", "veryhigh", "auto"]).optional(),
   minPatchHa: z.coerce.number().optional(),
+  /** Phase 2 despeckle mode — must round-trip into the cache-key derivation. */
+  speckle: z.enum(["gentle", "legacy"]).optional(),
+  detail: z.enum(["quick", "detailed", "smart"]).optional(),
   inputMode: z.enum(["single", "composite"]).optional(),
   compositeWindowDays: z.coerce.number().int().optional(),
+  /** Phase 2 edge-patch handling for the probe totals (list filtering is
+   *  client-side so the list can flip without refetching). */
+  edge: z.enum(["include", "exclude"]).default("include"),
 });
 
 /**
@@ -68,6 +74,7 @@ export async function GET(request: Request): Promise<Response> {
       offset: query.offset,
       classCode: query.classCode,
       confidence: query.confidence,
+      edge: query.edge,
     });
 
     const today = new Date().toISOString().slice(0, 10);

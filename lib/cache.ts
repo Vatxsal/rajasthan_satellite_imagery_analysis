@@ -69,7 +69,7 @@ export const tileCache: BlobCache = sharedInstance("rse.tileCache", () => new Me
 // ------------------------------------------------- change detection (compare)
 
 /** Bump when the analysis pipeline/class codes change (invalidates stored artifacts). */
-export const COMPARE_VERSION = "v1";
+export const COMPARE_VERSION = "v2";
 
 /** One cached comparison run: stats JSON + PNG overlay + deflated class raster. */
 export interface CompareArtifactEntry {
@@ -77,6 +77,12 @@ export interface CompareArtifactEntry {
   overlayPng: Buffer;
   /** Deflated raw class grid (inflate → encodeClassGeoTiff on export). */
   classGz: Buffer;
+  /** Phase 1: deflated per-pixel coverage-reason raster (COVERAGE_REASON codes). */
+  coverageGz: Buffer;
+  /** Phase 1: deflated gap-fill source flags (1 = value from the rescue window). */
+  sourceGz: Buffer;
+  /** Phase 1: deflated int8 Δ-index magnitude planes (MAGNITUDE_SCALE quantised). */
+  magnitudeGz: { ndvi: Buffer; mndwi: Buffer; ndbi: Buffer; combined: Buffer };
   width: number;
   height: number;
   bbox: [number, number, number, number];
@@ -84,6 +90,98 @@ export interface CompareArtifactEntry {
   geometry: import("@/lib/cdse/geometry").ClipGeometry;
   /** Full-coverage change events (patch vectors with stable ids, Phase 6 #13/#16). */
   events: GeoJSON.FeatureCollection;
+  /** Phase 3: present on detailed/smart runs — block lattice + seam unions
+   *  behind the XYZ tile route (the raster fields above are the ≤1500 px
+   *  downsampled preview assembled from the blocks). */
+  detail?: CompareDetailMeta;
+}
+
+/** Serialisable block-lattice metadata carried by a detailed entry. */
+export interface CompareDetailMeta {
+  mode: "detailed" | "smart";
+  /** Full native AOI grid the blocks tile (tiles map through this). */
+  grid: {
+    width: number;
+    height: number;
+    bbox: [number, number, number, number];
+    pxLon: number;
+    pxLat: number;
+  };
+  cols: number;
+  rows: number;
+  blockPx: number;
+  overlapPx: number;
+  blocks: Array<{
+    index: number;
+    i: number;
+    j: number;
+    core: [number, number, number, number];
+    expanded: [number, number, number, number];
+    bbox: [number, number, number, number];
+    width: number;
+    height: number;
+  }>;
+  /** Union-find seam pairs over (blockIndex·stride + label) ids. */
+  unions: Array<[number, number]>;
+  /** Lattice total before smart selection (blocks.length ≤ blocksTotal). */
+  blocksTotal: number;
+  /** Estimated PU of the whole detailed run (screening + selected blocks). */
+  estimatedPu: number;
+}
+
+/** One classified detail block (deflated planes + core-scope counts). */
+export interface CompareBlockEntry {
+  index: number;
+  /** Owned region in AOI-grid px (disjoint, full cover). */
+  core: [number, number, number, number];
+  /** Fetched region (core ± overlap, clamped). */
+  expanded: [number, number, number, number];
+  bbox: [number, number, number, number];
+  width: number;
+  height: number;
+  classGz: Buffer;
+  coverageGz: Buffer;
+  sourceGz: Buffer;
+  magnitudeGz: { ndvi: Buffer; mndwi: Buffer; ndbi: Buffer; combined: Buffer };
+  /** Deflated Int32 patch labels of the expanded region (seam merge). */
+  labelsGz: Buffer;
+  /** Block-local patch vectors (GeoJSON) — merged into the entry events. */
+  events: GeoJSON.FeatureCollection;
+  /** Owned-pixel counts (never double-counted across blocks). */
+  counts: {
+    /** Indexed by class code (0…6; 255 unused). */
+    classCounts: number[];
+    inside: number;
+    valid: number;
+    changed: number;
+    edgeChanged: number;
+    /** Changed-pixel extent in AOI-grid px (minCol, minRow, maxCol, maxRow). */
+    changedExtent: [number, number, number, number] | null;
+    confidence: { high: number; medium: number; low: number } | null;
+    zones: Array<{
+      zoneIndex: number;
+      inside: number;
+      valid: number;
+      changed: number;
+      classCounts: number[];
+    }> | null;
+  };
+  /** Block metadata (identical inputs across blocks — merged template). */
+  metadata: import("@/lib/analysis/types").CompareMetadata;
+  estimatedPu: number;
+}
+
+/** Coarse screening pass for smart mode (magnitude + class mask). */
+export interface CompareScreenEntry {
+  width: number;
+  height: number;
+  magnitudeGz: { ndvi: Buffer; mndwi: Buffer; ndbi: Buffer; combined: Buffer };
+  /** Deflated uint8 class grid (outside/masked suppression for screening). */
+  classGz: Buffer;
+  /** Screening metadata — the merged-stats template when smart selects no
+   *  blocks (identical inputs, block-scoped fields get overridden). */
+  metadata: import("@/lib/analysis/types").CompareMetadata;
+  estimatedPu: number;
 }
 
 /** Generic TTL + LRU eviction for non-binary entries. */
@@ -124,6 +222,41 @@ export class MemoryObjectLru<T> {
 export const compareResultCache = sharedInstance(
   "rse.compareResultCache",
   () => new MemoryObjectLru<CompareArtifactEntry>(6),
+);
+/** Phase 3: completed detailed runs (same entry shape + detail metadata). */
+export const detailResultCache = sharedInstance(
+  "rse.detailResultCache",
+  () => new MemoryObjectLru<CompareArtifactEntry>(4),
+);
+/** Phase 3: per-block artifacts — tiles inflate these on demand (memory half
+ *  of the block cache; disk persistence lives beside the tile cache). */
+export const detailBlockCache = sharedInstance(
+  "rse.detailBlockCache",
+  () => new MemoryObjectLru<CompareBlockEntry>(48),
+);
+/** Phase 3: smart-mode screening pass (one per analysis key). */
+export const detailScreenCache = sharedInstance(
+  "rse.detailScreenCache",
+  () => new MemoryObjectLru<CompareScreenEntry>(4),
+);
+/** Phase 3: encoded detail tiles (512² PNG per key × layer × zoom × xy). */
+export const detailTileCache = sharedInstance(
+  "rse.detailTileCache",
+  () => new MemoryObjectLru<Buffer>(64),
+);
+/** Phase 4: probe verdicts — point-keyed (rounded ~100 m), cheap repeat clicks. */
+export const probeCache = sharedInstance(
+  "rse.probeCache",
+  () => new MemoryObjectLru<import("@/lib/analysis/probe").ProbeResult>(32),
+);
+export function probeCacheKey(key: string, lng: number, lat: number): string {
+  return `${key}|probe|${lng.toFixed(3)},${lat.toFixed(3)}`;
+}
+/** Derived overlay-layer PNGs (coverage/magnitude/gap-fill/show-unchanged) —
+ *  encoded per request, so cache the encode per key × layer × variant. */
+export const overlayLayerCache = sharedInstance(
+  "rse.overlayLayerCache",
+  () => new MemoryObjectLru<Buffer>(16),
 );
 /** Gemini summary text, keyed by prompt hash (stats numbers → text, 30 min TTL). */
 export const aiSummaryCache: BlobCache = sharedInstance("rse.aiSummaryCache", () => new MemoryLruCache(64));
@@ -184,6 +317,8 @@ export function compareCacheKey(input: {
   dateB: string;
   sensitivity: string;
   minPatchHa: number;
+  /** Phase 2 despeckle mode (gentle | legacy). */
+  speckle?: string;
   engine: string;
   inputMode: string;
   compositeWindowDays: number;
@@ -195,6 +330,9 @@ export function compareCacheKey(input: {
   worldCover?: number;
   /** SHARPEN_SWIR (1/0) — regression SWIR sharpening changes NDBI/MNDWI/BSI. */
   sharpen?: number;
+  /** Phase 3 detail mode. "quick" (and absent) keep the legacy key shape so
+   *  pre-Phase-3 cache entries stay valid. */
+  detail?: string;
 }): string {
   const payload = JSON.stringify([
     COMPARE_VERSION,
@@ -204,6 +342,7 @@ export function compareCacheKey(input: {
     input.dateB,
     input.sensitivity,
     input.minPatchHa,
+    input.speckle ?? "gentle",
     input.engine,
     input.inputMode,
     input.compositeWindowDays,
@@ -211,8 +350,28 @@ export function compareCacheKey(input: {
     input.s1WindowDays ?? 0,
     input.worldCover ?? 0,
     input.sharpen ?? 0,
+    ...(input.detail && input.detail !== "quick" ? [input.detail] : []),
   ]);
   return createHash("sha256").update(payload).digest("hex");
+}
+
+/** Key helpers for the Phase 3 detail caches (derived from the base key). */
+export function detailScreenKey(key: string): string {
+  return `${key}|screen`;
+}
+export function detailBlockKey(key: string, index: number): string {
+  return `${key}|b${index}`;
+}
+export function detailTileKey(
+  key: string,
+  layer: string,
+  index: string,
+  z: number,
+  x: number,
+  y: number,
+  showUnchanged: boolean,
+): string {
+  return `${key}|${layer}|${index}|${z}/${x}/${y}|${showUnchanged ? 1 : 0}`;
 }
 
 /** Cache key for one AI summary request (analysis × language × imagery choice). */

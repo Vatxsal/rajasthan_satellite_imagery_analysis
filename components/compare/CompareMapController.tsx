@@ -33,6 +33,7 @@ export default function CompareMapController() {
   const setDivider = useCompareStore((s) => s.setDivider);
   const classVisible = useCompareStore((s) => s.classVisible);
   const boost = useCompareStore((s) => s.boostVisibility);
+  const showUnchanged = useCompareStore((s) => s.showUnchanged);
   const theme = useTheme((s) => s.theme);
   const dateA = useCompareStore((s) => s.dateA);
   const dateB = useCompareStore((s) => s.dateB);
@@ -59,7 +60,15 @@ export default function CompareMapController() {
       }
     };
 
-    if (!needsRecolor(classVisible, { boost })) {
+    // Phase 3: detailed/smart results use server-coloured XYZ tiles — the
+    // recolour blob never applies (class toggles + showUnchanged ride the
+    // tile URL; the bridge rebuilds the source when they change).
+    if (result.detail) {
+      apply(null);
+      return;
+    }
+
+    if (!needsRecolor(classVisible, { boost, force: showUnchanged })) {
       apply(null);
       return;
     }
@@ -67,8 +76,15 @@ export default function CompareMapController() {
     let cancelled = false;
     void (async () => {
       try {
-        const base = await loadOverlayImageData(result.key, result.overlayUrl);
-        const url = await buildOverlayBlobUrl(base, classVisible, { boost, theme });
+        // Phase 1: the show-unchanged tint lives in a server-rendered variant
+        // of the overlay PNG — fetched as its own cached base image.
+        const base = await loadOverlayImageData(
+          showUnchanged ? `${result.key}|uc` : result.key,
+          showUnchanged
+            ? `${result.overlayUrl}${result.overlayUrl.includes("?") ? "&" : "?"}showUnchanged=1`
+            : result.overlayUrl,
+        );
+        const url = await buildOverlayBlobUrl(base, classVisible, { boost, theme, force: showUnchanged });
         if (cancelled) {
           if (url) URL.revokeObjectURL(url);
           return;
@@ -81,7 +97,7 @@ export default function CompareMapController() {
     return () => {
       cancelled = true;
     };
-  }, [result, tab, classVisible, boost, theme]);
+  }, [result, tab, classVisible, boost, showUnchanged, theme]);
 
   useEffect(
     () => () => {

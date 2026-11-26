@@ -356,7 +356,7 @@ test("an identical recent send answers alreadySent and consumes no quota", async
     params: {
       ...validParams,
       sensitivity: "medium",
-      minPatchHa: 0.2,
+      minPatchHa: 0.05,
       inputMode: "composite",
       compositeWindowDays: 7,
     },
