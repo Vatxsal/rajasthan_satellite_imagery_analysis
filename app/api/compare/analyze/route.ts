@@ -25,7 +25,7 @@ import { compareResultCache, detailResultCache } from "@/lib/cache";
 export const runtime = "nodejs";
 // Detailed runs stream for as long as the block loop needs (self-hosted
 // Node does not enforce this; the quick path finishes far earlier).
-export const maxDuration = 900;
+export const maxDuration = 300;
 
 /**
  * POST /api/compare/analyze
