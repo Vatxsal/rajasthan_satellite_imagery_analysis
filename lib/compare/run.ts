@@ -1,5 +1,5 @@
 import type { AnalyzeResponse } from "@/lib/analysis/types";
-import type { CompareSpeckle, Sensitivity } from "@/lib/analysis/config";
+import type { CompareSpeckle, Sensitivity, ThresholdOverrides } from "@/lib/analysis/config";
 import type { CompareStage } from "@/store/useCompareStore";
 
 export interface AnalyzeRequestBody {
@@ -19,6 +19,8 @@ export interface AnalyzeRequestBody {
   detail?: "quick" | "detailed" | "smart";
   /** Phase 3: client acknowledged the estimate card (detail runs only). */
   confirm?: boolean;
+  /** Phase-thresholds: per-run overrides (omitted/null = preset thresholds). */
+  thresholds?: ThresholdOverrides | null;
 }
 
 /** Failures carry the same { code, message } contract as the API routes. */

@@ -239,6 +239,14 @@ export const detailScreenCache = sharedInstance(
   "rse.detailScreenCache",
   () => new MemoryObjectLru<CompareScreenEntry>(4),
 );
+/** Phase-thresholds: derived per-date index grids — keyed WITHOUT thresholds
+ *  (area, dates, grid, gap-fill settings) so preset/threshold re-runs
+ *  re-classify from it with zero Process API calls. Each entry is ~100-170 MB
+ *  of typed arrays at the 1500 px cap, so exactly one analysis is held. */
+export const indexRasterCache = sharedInstance(
+  "rse.indexRasterCache",
+  () => new MemoryObjectLru<import("@/lib/analysis/process").DerivedIndexGrids>(1),
+);
 /** Phase 3: encoded detail tiles (512² PNG per key × layer × zoom × xy). */
 export const detailTileCache = sharedInstance(
   "rse.detailTileCache",
@@ -333,6 +341,9 @@ export function compareCacheKey(input: {
   /** Phase 3 detail mode. "quick" (and absent) keep the legacy key shape so
    *  pre-Phase-3 cache entries stay valid. */
   detail?: string;
+  /** Phase-thresholds: SSO per-run overrides — Custom runs fork the
+   *  CLASSIFIED-result key; the derived-raster cache key never sees them. */
+  thresholds?: Record<string, number>;
 }): string {
   const payload = JSON.stringify([
     COMPARE_VERSION,
@@ -351,6 +362,9 @@ export function compareCacheKey(input: {
     input.worldCover ?? 0,
     input.sharpen ?? 0,
     ...(input.detail && input.detail !== "quick" ? [input.detail] : []),
+    ...(input.thresholds && Object.keys(input.thresholds).length > 0
+      ? [input.thresholds]
+      : []),
   ]);
   return createHash("sha256").update(payload).digest("hex");
 }

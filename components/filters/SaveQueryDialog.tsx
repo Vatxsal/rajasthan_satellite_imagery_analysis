@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { CompositeId } from "@/lib/data";
+import type { ThresholdOverrides } from "@/lib/analysis/config";
 import {
   STATE_AREA_ID,
   isQueryRepoError,
@@ -152,6 +153,13 @@ function SaveDialogInner({
   const [minPatchHa, setMinPatchHa] = useState(
     () => editing?.compare?.minPatchHa ?? useCompareStore.getState().minPatchHa,
   );
+  // Phase-thresholds: the current overrides ride the saved query (null =
+  // preset thresholds). Guests save presets only, like the other tuning.
+  const [thresholds, setThresholds] = useState(() =>
+    editing?.compare?.thresholds
+      ? (editing.compare.thresholds as ThresholdOverrides)
+      : useCompareStore.getState().thresholds,
+  );
 
   const [busy, setBusy] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -189,7 +197,15 @@ function SaveDialogInner({
       maxCloud: Math.min(100, Math.max(0, Math.round(maxCloud))),
       composite,
       // Guests keep the server defaults — the API would refuse tuning anyway.
-      ...(lockedCompare ? {} : { compare: { sensitivity, minPatchHa } }),
+      ...(lockedCompare
+        ? {}
+        : {
+            compare: {
+              sensitivity,
+              minPatchHa,
+              ...(thresholds ? { thresholds } : {}),
+            },
+          }),
     };
 
     setBusy(true);
@@ -439,6 +455,28 @@ function SaveDialogInner({
                   onChange={(event) => setMinPatchHa(Number(event.target.value))}
                   className="mono-nums h-8 w-24 rounded border border-border bg-surface px-2 text-sm text-text transition-colors duration-150 hover:border-muted focus:border-accent focus:outline-none"
                 />
+              </div>
+              <div className="md:col-span-2">
+                <label className="flex items-center gap-2 text-sm text-muted">
+                  <input
+                    type="checkbox"
+                    checked={thresholds !== null && Object.keys(thresholds).length > 0}
+                    disabled={useCompareStore.getState().thresholds === null}
+                    onChange={(event) => {
+                      // Include / exclude the current per-rule overrides.
+                      // (Only possible when some are actually set.)
+                      setThresholds(event.target.checked ? useCompareStore.getState().thresholds : null);
+                    }}
+                    aria-label="Include custom detection thresholds"
+                    className="h-3.5 w-3.5 accent-[color:var(--accent)]"
+                  />
+                  Include the current custom thresholds
+                  {useCompareStore.getState().thresholds === null ? (
+                    <span className="text-xs text-muted">
+                      — none set (tune them in Stats → Method &amp; settings after a run)
+                    </span>
+                  ) : null}
+                </label>
               </div>
             </>
           )}

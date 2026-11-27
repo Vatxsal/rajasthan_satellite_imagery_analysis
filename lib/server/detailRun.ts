@@ -260,9 +260,11 @@ async function ensureScreening(
         sensitivity: resolved.sensitivity,
         minPatchHa: resolved.minPatchHa,
         speckle: resolved.speckle,
+        ...(resolved.thresholds ? { thresholds: resolved.thresholds } : {}),
         outputSize: size,
         // The screening cost rides the estimate/confirm card — not the
-        // single-analysis PU cap (a 4096² district screening exceeds it).
+        // single-analysis PU cap (a clamped-to-2500px district screening
+        // exceeds it).
         puLimit: 0,
         sceneA: sceneMeta(scene.hitsA),
         sceneB: sceneMeta(scene.hitsB),
@@ -471,6 +473,7 @@ export async function ensureDetailBlock(
         sensitivity: resolved.sensitivity,
         minPatchHa: resolved.minPatchHa,
         speckle: resolved.speckle,
+        ...(resolved.thresholds ? { thresholds: resolved.thresholds } : {}),
         outputSize: { width: block.width, height: block.height },
         ...(hits
           ? { sceneA: sceneMeta(hits.hitsA), sceneB: sceneMeta(hits.hitsB) }

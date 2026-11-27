@@ -59,6 +59,32 @@ function dominantClass(row: TehsilZonalStat): string {
   return bestCode >= 0 && bestPixels > 0 ? classLabel(bestCode) : "—";
 }
 
+/** Threshold provenance for exports (CSV line, GeoJSON metadata, email). */
+export function thresholdProvenance(metadata: CompareStats["metadata"]): {
+  custom: boolean;
+  preset: string;
+  values: string;
+} {
+  const t = metadata.thresholds;
+  const values =
+    `ΔMNDWI gain ≥ +${(t.waterGainDMndwi ?? 0).toFixed(2)}, ΔMNDWI loss ≤ −${Math.abs(t.waterLossDMndwi ?? 0).toFixed(2)}, ` +
+    `ΔNDVI loss ≤ −${Math.abs(t.vegLossDNdvi ?? 0).toFixed(2)}, ΔNDVI gain ≥ +${(t.vegGainDNdvi ?? 0).toFixed(2)}, ` +
+    `ΔNDBI ≥ +${(t.bareBuiltDNdbi ?? 0).toFixed(2)} with ΔNDVI ≤ ${(t.bareBuiltDNdviMax ?? 0).toFixed(2)}`;
+  return {
+    custom: Boolean(metadata.thresholdsCustom),
+    preset: metadata.thresholdsPreset ?? metadata.sensitivity,
+    values,
+  };
+}
+
+/** One line naming the effective thresholds + the run's provenance. */
+function thresholdLine(metadata: CompareStats["metadata"]): string {
+  const provenance = thresholdProvenance(metadata);
+  return provenance.custom
+    ? `Custom thresholds (started from ${provenance.preset}): ${provenance.values}`
+    : `${provenance.preset} preset: ${provenance.values}`;
+}
+
 /** Full statistics dump: metadata, totals, classes, tehsils, hotspots. */
 export function buildStatsCsv(stats: CompareStats): string {
   const { metadata } = stats;
@@ -70,6 +96,13 @@ export function buildStatsCsv(stats: CompareStats): string {
     ["Date B (later)", metadata.dateB],
     ["Gap (days)", metadata.gapDays],
     ["Sensitivity", metadata.sensitivity],
+    ["Thresholds", thresholdLine(metadata)],
+    ...((() => {
+      const overrides = metadata.thresholdOverrides ?? {};
+      return (Object.entries(overrides) as Array<[string, number]>).map(
+        ([field, value]) => [`Threshold ${field}`, value],
+      );
+    })()),
     ["Minimum patch (ha)", metadata.minPatchHa],
     ["Resolution (m/px)", metadata.metersPerPixel],
     ["Coarse grid", metadata.coarse ? "yes" : "no"],
@@ -157,6 +190,11 @@ export async function downloadEventsGeoJson(
   key: string,
   dates: { dateA: string; dateB: string },
   params?: URLSearchParams,
+  thresholdsMeta?: {
+    custom: boolean;
+    preset: string;
+    values: string;
+  },
 ): Promise<void> {
   const paramSuffix = params ? `&${params.toString()}` : "";
   const features: GeoJSON.Feature[] = [];
@@ -177,8 +215,20 @@ export async function downloadEventsGeoJson(
     offset += data.events.length;
     if (offset >= total) break;
   }
+  // Phase-thresholds: the collection carries its threshold provenance so a
+  // custom run can never be mistaken for preset settings in GIS records.
+  const metadata: Record<string, unknown> = {
+    exportedAt: new Date().toISOString(),
+    ...(thresholdsMeta
+      ? {
+          thresholds: thresholdsMeta.custom
+            ? `Custom (started from ${thresholdsMeta.preset}): ${thresholdsMeta.values}`
+            : `${thresholdsMeta.preset} preset: ${thresholdsMeta.values}`,
+        }
+      : {}),
+  };
   saveText(
-    JSON.stringify({ type: "FeatureCollection", features }, null, 2),
+    JSON.stringify({ type: "FeatureCollection", features, metadata }, null, 2),
     `change_${dates.dateA}_${dates.dateB}_events.geojson`,
     "application/geo+json",
   );

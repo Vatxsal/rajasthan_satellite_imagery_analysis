@@ -39,6 +39,24 @@ export interface AdaptiveThresholds {
  * State gates (mndwi minima, maxMndwi) are NOT scaled — they are absolute
  * spectral positions, not noise margins.
  */
+/** Applies per-index adaptive scales to a threshold set (pure). */
+export function scaleThresholds(
+  base: ScaledThresholds,
+  scales: Record<string, number>,
+): ScaledThresholds {
+  return {
+    waterGainD: base.waterGainD * scales.mndwi,
+    waterLossD: base.waterLossD * scales.mndwi,
+    vegLossD: base.vegLossD * scales.ndvi,
+    vegGainD: base.vegGainD * scales.ndvi,
+    bareBuiltD: base.bareBuiltD * scales.ndbi,
+    bareBuiltNdviMax: base.bareBuiltNdviMax * scales.ndvi,
+    bareBuiltMaxMndwi: base.bareBuiltMaxMndwi,
+    waterGainMndwiMin: base.waterGainMndwiMin,
+    waterLossMndwiMin: base.waterLossMndwiMin,
+  };
+}
+
 export function adaptiveThresholds(
   a: V2Indices,
   b: V2Indices,
@@ -76,17 +94,7 @@ export function adaptiveThresholds(
     }
   }
 
-  const t: ScaledThresholds = {
-    waterGainD: base.waterGainD * scales.mndwi,
-    waterLossD: base.waterLossD * scales.mndwi,
-    vegLossD: base.vegLossD * scales.ndvi,
-    vegGainD: base.vegGainD * scales.ndvi,
-    bareBuiltD: base.bareBuiltD * scales.ndbi,
-    bareBuiltNdviMax: base.bareBuiltNdviMax * scales.ndvi,
-    bareBuiltMaxMndwi: base.bareBuiltMaxMndwi,
-    waterGainMndwiMin: base.waterGainMndwiMin,
-    waterLossMndwiMin: base.waterLossMndwiMin,
-  };
+  const t: ScaledThresholds = scaleThresholds(base, scales);
   return { t, scales, sigma };
 }
 

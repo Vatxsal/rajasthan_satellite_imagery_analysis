@@ -12,6 +12,7 @@ import {
 } from "@/lib/analysis/prompt";
 import { aiSummaryCache, summaryCacheKey, type CompareArtifactEntry } from "@/lib/cache";
 import { buildShareUrl } from "@/lib/compare/shareLink";
+import { thresholdProvenance } from "@/lib/compare/export";
 import { authorize, forbiddenRoleResponse } from "@/lib/auth/guard";
 import { bumpGlobalCounter } from "@/lib/auth/quota";
 import { can } from "@/lib/auth/permissions";
@@ -272,6 +273,11 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const metadata = entry.stats.metadata;
+    // Phase-thresholds: custom runs are labelled as custom, with the values.
+    const provenance = thresholdProvenance(metadata);
+    const thresholdLine = provenance.custom
+      ? `Custom thresholds (started from ${provenance.preset}): ${provenance.values}`
+      : `${provenance.preset} preset: ${provenance.values}`;
     const dataWithoutImage = buildReportEmailData({
       language: body.language,
       mode: fixedRecipient ? "fixed" : "open",
@@ -282,6 +288,7 @@ export async function POST(request: Request): Promise<Response> {
       dateB: metadata.dateB,
       gapDays: metadata.gapDays,
       sensitivity: metadata.sensitivity,
+      thresholds: thresholdLine,
       minPatchHa: metadata.minPatchHa,
       inputMode: metadata.inputMode,
       stats: {

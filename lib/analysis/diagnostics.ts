@@ -398,7 +398,9 @@ export interface DeltaHistogram {
   thresholds: number[];
 }
 
-export const HISTOGRAM_BINS = 40;
+/** Phase-thresholds: 200 bins — fine-grained enough for the editor's live
+ *  share math while staying a few hundred numbers per index. */
+export const HISTOGRAM_BINS = 200;
 export const HISTOGRAM_MIN = -1;
 export const HISTOGRAM_MAX = 1;
 

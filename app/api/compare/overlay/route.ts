@@ -53,6 +53,19 @@ const querySchema = z.object({
   minPatchHa: z.coerce.number().optional(),
   speckle: z.enum(["gentle", "legacy"]).optional(),
   detail: z.enum(["quick", "detailed", "smart"]).optional(),
+  // Phase-thresholds: JSON-encoded override map (paramsToQuery form) —
+  // decoded here so the canonical schema validates + clamps the values.
+  thresholds: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (!value) return undefined;
+      try {
+        return JSON.parse(value) as unknown;
+      } catch {
+        return undefined;
+      }
+    }),
   inputMode: z.enum(["single", "composite"]).optional(),
   compositeWindowDays: z.coerce.number().int().optional(),
 });

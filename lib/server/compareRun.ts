@@ -13,18 +13,29 @@ import { z } from "zod";
 import { searchCatalog, type CatalogHit } from "@/lib/cdse/catalog";
 import { bboxAreaKm2, type ClipGeometry } from "@/lib/cdse/geometry";
 import { runCompare, type CompareStage } from "@/lib/analysis/analyze";
+import { processCompare } from "@/lib/analysis/process";
 import {
   COMPOSITE_WINDOW_DAYS_DEFAULT,
   COMPOSITE_WINDOW_DAYS_MAX,
+  clampThresholdValue,
+  hasThresholdOverrides,
+  THRESHOLD_BOUNDS,
   type CompareSpeckle,
   type Sensitivity,
+  type ThresholdField,
+  type ThresholdOverrides,
 } from "@/lib/analysis/config";
 import type {
   CompareEngine,
   CompareInputMode,
   DateSceneMeta,
 } from "@/lib/analysis/types";
-import { compareCacheKey, compareResultCache, type CompareArtifactEntry } from "@/lib/cache";
+import {
+  compareCacheKey,
+  compareResultCache,
+  indexRasterCache,
+  type CompareArtifactEntry,
+} from "@/lib/cache";
 import { paramsToQuery } from "@/lib/compare/params";
 import { ensureCached } from "@/lib/compare/ensureArtifact";
 import { dataSource, getServerEnv, resolveChangeRules } from "@/lib/env";
@@ -47,6 +58,25 @@ export const MOCK_SOURCE_MESSAGE =
  * overlay and summary routes accept them (query string or body) to rebuild
  * the key and recompute after a cache miss. Coercions handle strings.
  */
+/**
+ * Phase-thresholds: per-run threshold overrides — validated and CLAMPED to
+ * the honest bounds in lib/analysis/config.ts (THRESHOLD_BOUNDS). Any field
+ * present marks the run "Custom"; the raw values ride the cache key of the
+ * classified result (never of the derived-raster cache) and the metadata.
+ */
+export const thresholdsSchema = z.object(
+  Object.fromEntries(
+    (Object.keys(THRESHOLD_BOUNDS) as ThresholdField[]).map((field) => [
+      field,
+      z.coerce
+        .number()
+        .finite()
+        .transform((value) => clampThresholdValue(field, value))
+        .optional(),
+    ]),
+  ) as Record<ThresholdField, z.ZodOptional<z.ZodEffects<z.ZodNumber, number, number>>>,
+);
+
 export const compareParamsSchema = z
   .object({
     areaId: z.string().trim().min(1),
@@ -73,6 +103,8 @@ export const compareParamsSchema = z
     detail: z.enum(["quick", "detailed", "smart"]).default("quick"),
     /** Phase 3: client-side PU estimate acknowledgement (detail runs only). */
     confirm: z.boolean().optional(),
+    /** Phase-thresholds: SSO per-run overrides (clamped to THRESHOLD_BOUNDS). */
+    thresholds: thresholdsSchema.optional(),
   })
   .refine((value) => value.dateA !== value.dateB, {
     message: "Pick two different dates to compare.",
@@ -110,6 +142,12 @@ export interface ResolvedCompareParams {
   detail: "quick" | "detailed" | "smart";
   /** Phase 3: client acknowledged the PU estimate (required for detail). */
   confirm: boolean;
+  /** Phase-thresholds: clamped overrides; any present marks the run Custom. */
+  thresholds: ThresholdOverrides | null;
+  /** Phase-thresholds: the derived-raster cache key — everything EXCEPT the
+   *  threshold overrides (area, dates, grid, gap-fill settings), so preset
+   *  and threshold re-runs re-classify with zero Process API calls. */
+  rasterKey: string;
 }
 
 export function sceneMeta(hits: CatalogHit[]): DateSceneMeta {
@@ -193,7 +231,32 @@ export function resolveCompareParams(
     );
   }
 
+  const thresholds: ThresholdOverrides | null =
+    body.thresholds && hasThresholdOverrides(body.thresholds)
+      ? body.thresholds
+      : null;
+
   const key = compareCacheKey({
+    areaId: area.id,
+    level: area.level,
+    dateA,
+    dateB,
+    sensitivity: body.sensitivity,
+    minPatchHa: body.minPatchHa,
+    speckle: body.speckle,
+    engine,
+    inputMode,
+    compositeWindowDays,
+    rules,
+    s1WindowDays: evidencePlan?.s1WindowDays ?? 0,
+    worldCover: rules !== "legacy" && env.WORLDCOVER_ENABLED ? 1 : 0,
+    sharpen: env.SHARPEN_SWIR ? 1 : 0,
+    detail: body.detail,
+    ...(thresholds ? { thresholds: thresholds as Record<string, number> } : {}),
+  });
+  // The derived-raster cache key: identical inputs minus the threshold
+  // overrides — re-classification from the cached grids must not fork.
+  const rasterKey = compareCacheKey({
     areaId: area.id,
     level: area.level,
     dateA,
@@ -228,6 +291,8 @@ export function resolveCompareParams(
     maxPx: env.COMPARE_MAX_PX,
     detail: body.detail,
     confirm: body.confirm === true,
+    thresholds,
+    rasterKey,
   };
 }
 
@@ -247,6 +312,7 @@ export function compareParamsQueryString(resolved: ResolvedCompareParams): strin
     compositeWindowDays: resolved.compositeWindowDays,
     speckle: resolved.speckle,
     detail: resolved.detail,
+    ...(resolved.thresholds ? { thresholds: resolved.thresholds } : {}),
   }).toString();
 }
 
@@ -326,39 +392,35 @@ export async function ensureCompare(
     compareResultCache,
     resolved.key,
     async (): Promise<CompareArtifactEntry> => {
-      const hits = options.sceneHits ?? (await validateScenes(resolved));
-      const env = getServerEnv();
-      const artifact = await runCompare(
-        {
-          geometry: resolved.area.geometry,
-          dateA: resolved.dateA,
-          dateB: resolved.dateB,
-          areaName: resolved.area.name,
-          areaLevel: resolved.area.level,
-          areaId: resolved.area.id,
-          sensitivity: resolved.sensitivity,
-          minPatchHa: resolved.minPatchHa,
-          speckle: resolved.speckle,
-          maxPx: resolved.maxPx,
-          sceneA: sceneMeta(hits.hitsA),
-          sceneB: sceneMeta(hits.hitsB),
-          zones: districtZones(resolved.area),
-          engine: resolved.engine,
-          inputMode: resolved.inputMode,
-          compositeWindowDays: resolved.compositeWindowDays,
-          rules: resolved.rules,
-          sharpen: resolved.sharpen,
-          evidencePlan:
-            resolved.rules !== "legacy"
-              ? {
-                  s1WindowDays: env.S1_ENABLED ? env.S1_WINDOW_DAYS : null,
-                  terrain: true,
-                }
-              : null,
-        },
-        options.onStage,
-      );
-      return {
+      const buildInput = (captureDerived: boolean) => ({
+        geometry: resolved.area.geometry,
+        dateA: resolved.dateA,
+        dateB: resolved.dateB,
+        areaName: resolved.area.name,
+        areaLevel: resolved.area.level,
+        areaId: resolved.area.id,
+        sensitivity: resolved.sensitivity,
+        minPatchHa: resolved.minPatchHa,
+        speckle: resolved.speckle,
+        maxPx: resolved.maxPx,
+        ...(resolved.thresholds ? { thresholds: resolved.thresholds } : {}),
+        zones: districtZones(resolved.area),
+        engine: resolved.engine,
+        inputMode: resolved.inputMode,
+        compositeWindowDays: resolved.compositeWindowDays,
+        rules: resolved.rules,
+        sharpen: resolved.sharpen,
+        evidencePlan:
+          resolved.rules !== "legacy"
+            ? {
+                s1WindowDays: getServerEnv().S1_ENABLED ? getServerEnv().S1_WINDOW_DAYS : null,
+                terrain: true,
+              }
+            : null,
+        captureDerived,
+      });
+
+      const toEntry = (artifact: Awaited<ReturnType<typeof runCompare>>): CompareArtifactEntry => ({
         stats: artifact.result,
         overlayPng: artifact.overlayPng,
         classGz: artifact.classGz,
@@ -370,7 +432,28 @@ export async function ensureCompare(
         bbox: artifact.bbox,
         geometry: resolved.area.geometry,
         events: artifact.patchVectors,
-      };
+      });
+
+      // Phase-thresholds: a thresholds-only re-run re-classifies from the
+      // cached derived grids — zero Process API calls, seconds not minutes.
+      // The raster key ignores thresholds on purpose; miss = the usual fetch.
+      const env = getServerEnv();
+      const cached = indexRasterCache.get(resolved.rasterKey);
+      if (cached) {
+        const artifact = processCompare(buildInput(false), {}, {}, cached);
+        return toEntry(artifact);
+      }
+
+      const hits = options.sceneHits ?? (await validateScenes(resolved));
+      const input = buildInput(true);
+      const artifact = await runCompare(
+        { ...input, sceneA: sceneMeta(hits.hitsA), sceneB: sceneMeta(hits.hitsB) },
+        options.onStage,
+      );
+      if (artifact.derived) {
+        indexRasterCache.set(resolved.rasterKey, artifact.derived, env.IMAGERY_CACHE_TTL_SECONDS);
+      }
+      return toEntry(artifact);
     },
     { inflight, ttlSeconds: getServerEnv().IMAGERY_CACHE_TTL_SECONDS },
   );

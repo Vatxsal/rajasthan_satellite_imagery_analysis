@@ -10,13 +10,14 @@ import FeatureLock, { useLocked } from "@/components/ui/FeatureLock";
 import { cn } from "@/components/ui/cn";
 import { focusHotspot, focusTehsil } from "@/lib/compare/bridge";
 import { eventsViewState, selectVisibleEvents } from "@/lib/compare/eventList";
-import { downloadEventsGeoJson, downloadStatsCsv } from "@/lib/compare/export";
+import { downloadEventsGeoJson, downloadStatsCsv, thresholdProvenance } from "@/lib/compare/export";
 import { analysisParamsQuery } from "@/lib/compare/params";
 import { formatArea, formatDateTime, type AreaUnit } from "@/lib/format";
 import type { CompareStats, ConfidenceTier } from "@/lib/analysis/types";
 import type { CompareDiagnostics, DeltaHistogram } from "@/lib/analysis/diagnostics";
-import type { CompareSpeckle, Sensitivity } from "@/lib/analysis/config";
+import type { CompareSpeckle, Sensitivity, ThresholdOverrides } from "@/lib/analysis/config";
 import { classColor } from "@/lib/analysis/config";
+import ThresholdEditor from "./ThresholdEditor";
 import { useCompareStore, type CompareInputMode } from "@/store/useCompareStore";
 import { useAppStore } from "@/store/useAppStore";
 import { usePreferencesStore } from "@/store/usePreferencesStore";
@@ -324,6 +325,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   const dateB = useCompareStore((s) => s.dateB);
   const sensitivity = useCompareStore((s) => s.sensitivity);
   const minPatchHa = useCompareStore((s) => s.minPatchHa);
+  const thresholds = useCompareStore((s) => s.thresholds);
   const inputMode = useCompareStore((s) => s.inputMode);
   const setInputMode = useCompareStore((s) => s.setInputMode);
   const setSensitivity = useCompareStore((s) => s.setSensitivity);
@@ -386,10 +388,25 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
   // run only marks the card stale; it can never desync the displayed pair.
   const pairChanged =
     (dateA !== null && dateA !== metadata.dateA) || (dateB !== null && dateB !== metadata.dateB);
+  // Phase-thresholds: custom state must also mark the card stale (Re-run
+  // hint) — compares the STORE overrides with the run's recorded overrides.
+  const overridesEqual = (a: ThresholdOverrides | null, b: ThresholdOverrides | null): boolean => {
+    const keys = new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})]);
+    for (const key of keys) {
+      const av = (a ?? {})[key as keyof ThresholdOverrides];
+      const bv = (b ?? {})[key as keyof ThresholdOverrides];
+      const an = typeof av === "number" ? av : undefined;
+      const bn = typeof bv === "number" ? bv : undefined;
+      if (an === undefined && bn === undefined) continue;
+      if (an === undefined || bn === undefined || Math.abs(an - bn) > 1e-9) return false;
+    }
+    return true;
+  };
   const stale =
     metadata.sensitivity !== sensitivity ||
     Math.abs(metadata.minPatchHa - minPatchHa) > 1e-9 ||
     (metadata.speckle ?? "gentle") !== speckle ||
+    !overridesEqual(metadata.thresholdOverrides ?? null, thresholds) ||
     (v2 && metadata.inputMode !== inputMode) ||
     pairChanged;
 
@@ -399,38 +416,14 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
       : "v1 · single-day";
 
   const t = metadata.thresholds;
-  const mainThresholdRows: Array<{ label: string; value: string }> = [
-    { label: "Water gain", value: `ΔMNDWI ≥ ${fmtDelta(t.waterGainDMndwi ?? 0)}` },
-    { label: "Water loss", value: `ΔMNDWI ≤ ${fmtDelta(t.waterLossDMndwi ?? 0)}` },
-    { label: "Vegetation loss", value: `ΔNDVI ≤ ${fmtDelta(t.vegLossDNdvi ?? 0)}` },
-    { label: "Vegetation gain", value: `ΔNDVI ≥ ${fmtDelta(t.vegGainDNdvi ?? 0)}` },
-    {
-      label: "Bare / built-up increase",
-      value: `ΔNDBI ≥ ${fmtDelta(t.bareBuiltDNdbi ?? 0)} and ΔNDVI ≤ ${fmtDelta(t.bareBuiltDNdviMax ?? 0)}`,
-    },
-  ];
-  const advancedThresholdRows: Array<{ label: string; value: string; hint: string }> = [
-    {
-      label: "Bare / built-up max MNDWI",
-      value: `≤ ${(t.bareBuiltMaxMndwi ?? 0).toFixed(2)}`,
-      hint: "Skips pixels that look like open water on either date.",
-    },
-    {
-      label: "Water gain min MNDWI",
-      value: `> ${(t.waterGainMndwiMin ?? 0).toFixed(2)}`,
-      hint: "Date B must actually look like open water for a water-gain patch.",
-    },
-    {
-      label: "Water loss min MNDWI",
-      value: `> ${(t.waterLossMndwiMin ?? 0).toFixed(2)}`,
-      hint: "Date A must have looked like open water for a water-loss patch.",
-    },
-    {
-      label: "Grid size (px)",
-      value: `${metadata.width}×${metadata.height}`,
-      hint: "Analysis grid actually rendered — the long side is capped for large areas.",
-    },
-  ];
+  void t; // effective values are rendered inside ThresholdEditor now
+  const presetLabels: Record<Sensitivity, string> = {
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    veryhigh: "Very high",
+    auto: "Auto",
+  };
 
   /** Commits the minimum-patch text input (blur / Enter) with clamping. */
   const commitPatchDraft = (): void => {
@@ -490,6 +483,11 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                 ? ` (${eventsEdgeTotal.toLocaleString("en")} boundary excluded)`
                 : ""}
               , largest first. Click one to zoom the map.
+              {metadata.thresholdsCustom ? (
+                <span className="ml-1 rounded-sm border border-warning/40 bg-warning/10 px-1 py-px text-[10px] text-text">
+                  Custom thresholds
+                </span>
+              ) : null}
             </p>
             <Button
               size="sm"
@@ -500,6 +498,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                   result.key,
                   { dateA: metadata.dateA, dateB: metadata.dateB },
                   analysisParamsQuery(metadata),
+                  thresholdProvenance(metadata),
                 ).catch((error: unknown) => {
                   const message =
                     error instanceof Error && error.message
@@ -746,6 +745,16 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
           <Info size={14} className="mt-0.5 shrink-0 text-muted" aria-hidden />
           No significant change survived the thresholds and minimum patch size for this pair. Try
           High sensitivity or a smaller minimum patch below.
+        </p>
+      )}
+      {metadata.thresholdsCustom && (
+        <p className="flex flex-wrap items-center gap-1.5 rounded border border-warning/40 bg-warning/10 px-2.5 py-2 text-xs text-text">
+          <span className="font-medium">Custom thresholds</span>
+          <span className="text-muted">
+            — this run started from the{" "}
+            {presetLabels[metadata.thresholdsPreset ?? metadata.sensitivity] ?? "Medium"} preset and
+            was hand-adjusted (values in Method &amp; settings).
+          </span>
         </p>
       )}
 
@@ -1169,7 +1178,7 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
               )}
             </div>
 
-            {/* Section 3 — thresholds used (accordion, default closed) */}
+            {/* Section 3 — thresholds (editable, SSO; read-only for guests) */}
             <div className="rounded border border-border bg-surface px-2 py-1.5">
               <button
                 type="button"
@@ -1177,7 +1186,16 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                 onClick={() => setThresholdsOpen((open) => !open)}
                 className="flex w-full items-center justify-between gap-2 text-[11px] font-medium text-text transition-colors duration-150 hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
               >
-                Thresholds used
+                <span className="flex min-w-0 flex-wrap items-baseline gap-1.5">
+                  Thresholds used
+                  <span className="font-normal text-muted">
+                    {metadata.thresholdsCustom
+                      ? `Custom · started from ${
+                          presetLabels[metadata.thresholdsPreset ?? metadata.sensitivity] ?? "Medium"
+                        }`
+                      : `${presetLabels[metadata.sensitivity] ?? "Medium"} preset`}
+                  </span>
+                </span>
                 <ChevronDown
                   size={13}
                   className={cn("text-muted transition-transform duration-150", thresholdsOpen && "rotate-180")}
@@ -1185,43 +1203,12 @@ export default function CompareStatsTab({ tab }: CompareStatsTabProps) {
                 />
               </button>
               {thresholdsOpen && (
-                <div className="mt-2 flex flex-col gap-2">
-                  <dl className="flex flex-col gap-1 text-[11px]">
-                    {mainThresholdRows.map((row) => (
-                      <MethodRow key={row.label} label={row.label}>
-                        {row.value}
-                      </MethodRow>
-                    ))}
-                  </dl>
-                  <div className="rounded border border-border bg-surface-2 px-2 py-1.5">
-                    <button
-                      type="button"
-                      aria-expanded={advancedOpen}
-                      onClick={() => setAdvancedOpen((open) => !open)}
-                      className="flex w-full items-center justify-between gap-2 text-[11px] text-text transition-colors duration-150 hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
-                    >
-                      Advanced
-                      <ChevronDown
-                        size={13}
-                        className={cn("text-muted transition-transform duration-150", advancedOpen && "rotate-180")}
-                        aria-hidden
-                      />
-                    </button>
-                    {advancedOpen && (
-                      <div className="mt-2 flex flex-col gap-1.5 text-[11px]">
-                        {advancedThresholdRows.map((row) => (
-                          <div key={row.label} className="flex flex-col gap-0.5">
-                            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                              <span className="shrink-0 text-muted">{row.label}</span>
-                              <span className="mono-nums min-w-0 text-right text-text">{row.value}</span>
-                            </div>
-                            <p className="text-[10px] leading-snug text-muted">{row.hint}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <ThresholdEditor
+                  metadata={metadata}
+                  histograms={stats.histograms}
+                  advancedOpen={advancedOpen}
+                  onToggleAdvanced={() => setAdvancedOpen((open) => !open)}
+                />
               )}
             </div>
 

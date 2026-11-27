@@ -66,6 +66,9 @@ export interface ReportEmailData {
   dateB: string;
   gapDays: number;
   sensitivity: "low" | "medium" | "high" | "veryhigh" | "auto";
+  /** Phase-thresholds provenance ("Custom thresholds (started from …)" or
+   *  "<preset> preset" + values) — custom runs must never read as default. */
+  thresholds: string;
   minPatchHa: number;
   inputMode: "single" | "composite";
   changedHa: number;
@@ -287,6 +290,10 @@ export interface ReportSourceInput {
   gapDays: number;
   sensitivity: "low" | "medium" | "high" | "veryhigh" | "auto";
   minPatchHa: number;
+  /** Phase-thresholds: provenance line — "Custom thresholds (started from …)"
+   *  or "<preset> preset" plus the applied values. Custom runs must never be
+   *  presented as default settings in an emailed report. */
+  thresholds: string;
   inputMode: "single" | "composite";
   stats: ReportStatsSource;
   events: GeoJSON.Feature[];
@@ -367,6 +374,7 @@ export function buildReportEmailData(input: ReportSourceInput): ReportEmailData 
     dateB: input.dateB,
     gapDays: input.gapDays,
     sensitivity: input.sensitivity,
+    thresholds: input.thresholds,
     minPatchHa: input.minPatchHa,
     inputMode: input.inputMode,
     changedHa: stats.changedHa,

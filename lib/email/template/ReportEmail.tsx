@@ -304,6 +304,8 @@ export function ReportEmail(data: ReportEmailData): ReactNode {
                             {copy.sensitivityLabel}:{" "}
                             <strong>{copy.sensitivity[data.sensitivity]}</strong>
                             {" · "}
+                            {data.thresholds}
+                            {" · "}
                             {copy.minPatchLabel}:{" "}
                             <strong>{formatHa(data.minPatchHa)}</strong>
                             {" · "}

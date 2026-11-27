@@ -2,7 +2,7 @@
 export { deriveV2Indices, type RecentIndices, type V2Indices } from "./indices";
 export { normalizeBands, NORMALIZE_CLAMP, NORMALIZE_SKIP, type NormalizeResult } from "./normalize";
 export { applyShift, estimateShift, type CoRegResult } from "./coregister";
-export { adaptiveThresholds, autoThresholds, type AdaptiveThresholds } from "./thresholds";
+export { adaptiveThresholds, autoThresholds, scaleThresholds, type AdaptiveThresholds } from "./thresholds";
 export {
   classifyV2,
   PERSIST,

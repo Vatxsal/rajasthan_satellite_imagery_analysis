@@ -477,6 +477,24 @@ test("fields/pattern: guest is FORBIDDEN_ROLE, SSO passes", async () => {
 
 // ---------------------------------------------------- compare detail (Phase 3)
 
+test("analyze thresholds: guest overrides are clamped away, not rejected", async () => {
+  // The guest body carries threshold overrides; clampCompareTuning strips
+  // them (compare.thresholds is SSO-only) and the request proceeds to the
+  // mock-source sentinel exactly like a plain guest analysis.
+  const plain = await call(
+    analyzePost,
+    post(ANALYZE_URL, ANALYZE_BODY, await guestCookie("guest:thresh")),
+  );
+  const withThresholds = await call(
+    analyzePost,
+    post(ANALYZE_URL, { ...ANALYZE_BODY, thresholds: { vegLossD: -0.1 } }, await guestCookie("guest:thresh")),
+  );
+  assert.equal(plain.status, 400);
+  assert.equal(plain.body?.code, "CDSE_CONFIG");
+  assert.equal(withThresholds.status, 400);
+  assert.equal(withThresholds.body?.code, "CDSE_CONFIG");
+});
+
 test("analyze detail: guest is FORBIDDEN_ROLE (compare.detailed)", async () => {
   const result = await call(
     analyzePost,

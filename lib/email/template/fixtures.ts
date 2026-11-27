@@ -152,6 +152,7 @@ function baseInput(overrides: Partial<ReportSourceInput>): ReportSourceInput {
     dateB: "2026-10-25",
     gapDays: 15,
     sensitivity: "medium",
+    thresholds: "medium preset: ΔMNDWI gain ≥ +0.20, ΔMNDWI loss ≤ −0.20, ΔNDVI loss ≤ −0.15, ΔNDVI gain ≥ +0.15, ΔNDBI ≥ +0.10 with ΔNDVI ≤ −0.05",
     minPatchHa: 0.2,
     inputMode: "composite",
     rules: "legacy",

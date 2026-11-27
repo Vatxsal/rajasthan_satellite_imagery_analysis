@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  clampThresholdValue,
+  THRESHOLD_BOUNDS,
+  type ThresholdField,
+} from "@/lib/analysis/config";
 
 /**
  * Saved queries — a user's named filter presets (area, date window, cloud
@@ -119,6 +124,24 @@ export const queryCompareSchema = z
   .object({
     sensitivity: z.enum(["low", "medium", "high", "veryhigh", "auto"]),
     minPatchHa: z.number().min(0.01).max(100),
+    /** Phase-thresholds: per-run overrides saved with the query — bounded
+     *  and clamped exactly like the analyze route (guest-applied queries run
+     *  at presets: the server clamps by role). */
+    thresholds: z
+      .object(
+        Object.fromEntries(
+          (Object.keys(THRESHOLD_BOUNDS) as ThresholdField[]).map((field) => [
+            field,
+            z
+              .number()
+              .finite()
+              .transform((value) => clampThresholdValue(field, value))
+              .optional(),
+          ]),
+        ) as Record<ThresholdField, z.ZodOptional<z.ZodEffects<z.ZodNumber, number, number>>>,
+      )
+      .strict()
+      .optional(),
   })
   .strict();
 

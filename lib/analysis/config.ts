@@ -96,6 +96,78 @@ export interface ScaledThresholds {
   waterLossMndwiMin: number;
 }
 
+/**
+ * Phase-thresholds — server-side bounds for SSO threshold overrides. These
+ * are the honest edges of each rule: below the minimum a rule fires on
+ * sensor/seasonal noise, above the maximum it only catches catastrophic
+ * change. The zod schema (compareParamsSchema) mirrors these numbers.
+ */
+export const THRESHOLD_BOUNDS = {
+  /** Vegetation loss ΔNDVI (negative). */
+  vegLossD: { min: -0.4, max: -0.03 },
+  /** Vegetation gain ΔNDVI (positive). */
+  vegGainD: { min: 0.03, max: 0.4 },
+  /** Water gain ΔMNDWI (positive). */
+  waterGainD: { min: 0.05, max: 0.5 },
+  /** Water loss ΔMNDWI (negative). */
+  waterLossD: { min: -0.5, max: -0.05 },
+  /** Bare/built-up ΔNDBI (positive). */
+  bareBuiltD: { min: 0.03, max: 0.3 },
+  /** Bare/built-up guard: ΔNDVI must be at or below this (≤ 0). */
+  bareBuiltNdviMax: { min: -0.3, max: 0 },
+  /** Bare/built-up is suppressed when MNDWI exceeds this (not open water). */
+  bareBuiltMaxMndwi: { min: -0.2, max: 0.3 },
+  /** Water gain after-state: MNDWI(B) minimum. */
+  waterGainMndwiMin: { min: -0.2, max: 0.3 },
+  /** Water loss before-state: MNDWI(A) minimum. */
+  waterLossMndwiMin: { min: -0.2, max: 0.3 },
+} as const;
+
+export type ThresholdField = keyof typeof THRESHOLD_BOUNDS;
+
+/** Per-run threshold overrides (all optional; any present → Custom). */
+export type ThresholdOverrides = Partial<
+  Record<ThresholdField, number>
+>;
+
+export function clampThresholdValue(field: ThresholdField, value: number): number {
+  const { min, max } = THRESHOLD_BOUNDS[field];
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+/** True when at least one threshold override is set (the run is Custom). */
+export function hasThresholdOverrides(
+  overrides: ThresholdOverrides | null | undefined,
+): boolean {
+  if (!overrides) return false;
+  return (Object.keys(THRESHOLD_BOUNDS) as ThresholdField[]).some(
+    (field) => typeof overrides[field] === "number" && Number.isFinite(overrides[field]),
+  );
+}
+
+/**
+ * Applies user overrides onto the preset thresholds. Values are clamped to
+ * THRESHOLD_BOUNDS server-side, so a tampered request can never push a rule
+ * into pure noise. Used by prepareCompare for BOTH engines: a run with any
+ * override skips v2 adaptive scaling (what you set is what applies), and the
+ * metadata records the preset the run started from.
+ */
+export function applyThresholdOverrides(
+  base: ScaledThresholds,
+  overrides: ThresholdOverrides | null | undefined,
+): ScaledThresholds {
+  if (!overrides) return base;
+  const out: ScaledThresholds = { ...base };
+  for (const field of Object.keys(THRESHOLD_BOUNDS) as ThresholdField[]) {
+    const value = overrides[field];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      out[field] = clampThresholdValue(field, value);
+    }
+  }
+  return out;
+}
+
 /** Applies the sensitivity multiplier to every threshold. */
 export function scaledThresholds(sensitivity: Sensitivity): ScaledThresholds {
   const m = SENSITIVITY_MULTIPLIER[sensitivity];
@@ -110,6 +182,20 @@ export function scaledThresholds(sensitivity: Sensitivity): ScaledThresholds {
     waterGainMndwiMin: THRESHOLDS.waterGain.mndwiAfter,
     waterLossMndwiMin: THRESHOLDS.waterLoss.mndwiBefore,
   };
+}
+
+/**
+ * The threshold values a slider UI shows for a preset: the base thresholds
+ * scaled by the sensitivity factor, clamped into the editable bounds so the
+ * sliders never open outside their own range.
+ */
+export function presetThresholds(sensitivity: Sensitivity): ScaledThresholds {
+  const scaled = scaledThresholds(sensitivity);
+  const out = { ...scaled };
+  for (const field of Object.keys(THRESHOLD_BOUNDS) as ThresholdField[]) {
+    out[field] = clampThresholdValue(field, scaled[field]);
+  }
+  return out;
 }
 
 /** Class codes stored in the classified raster (uint8). */
