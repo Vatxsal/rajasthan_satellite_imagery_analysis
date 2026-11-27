@@ -90,9 +90,23 @@ export function buildSummaryPrompt(stats: CompareStats, events?: GeoJSON.Feature
   lines.push(`Valid data: ${stats.validPct.toFixed(1)}% of the area is analysable`);
   lines.push(`Area: ${stats.areaHa.toFixed(1)} ha total, ${stats.validHa.toFixed(1)} ha analysable`);
   lines.push(`Detected change: ${stats.changedHa.toFixed(1)} ha (negligible: ${stats.negligible ? "yes" : "no"})`);
-  lines.push(
-    `Sensitivity: ${m.sensitivity} (thresholds: |dNDVI| >= ${Math.abs(m.thresholds.vegGainDNdvi).toFixed(2)}, |dMNDWI| >= ${Math.abs(m.thresholds.waterGainDMndwi).toFixed(2)}, dNDBI >= ${m.thresholds.bareBuiltDNdbi.toFixed(2)}, minimum patch ${m.minPatchHa} ha)`,
-  );
+  if (m.thresholdsCustom) {
+    // Custom runs must never be described as default/preset: name the preset
+    // the user started from and the exact per-rule values applied.
+    const entries = (Object.keys(m.thresholdOverrides ?? {}) as string[])
+      .map((key) => `${key} ${Number((m.thresholdOverrides ?? {})[key as keyof typeof m.thresholdOverrides]).toFixed(2)}`)
+      .join(", ");
+    lines.push(
+      `Thresholds: CUSTOM (started from the ${m.thresholdsPreset ?? m.sensitivity} preset, hand-adjusted by the user; applied: ${entries || "see values above"}). State plainly that the detection thresholds were customised and are not the default settings.`,
+    );
+    lines.push(
+      `Custom values: |dNDVI| >= ${Math.abs(m.thresholds.vegGainDNdvi).toFixed(2)}, |dMNDWI| >= ${Math.abs(m.thresholds.waterGainDMndwi).toFixed(2)}, dNDBI >= ${m.thresholds.bareBuiltDNdbi.toFixed(2)}, bare/built-up guard dNDVI <= ${m.thresholds.bareBuiltDNdviMax.toFixed(2)}, minimum patch ${m.minPatchHa} ha`,
+    );
+  } else {
+    lines.push(
+      `Sensitivity: ${m.sensitivity} (thresholds: |dNDVI| >= ${Math.abs(m.thresholds.vegGainDNdvi).toFixed(2)}, |dMNDWI| >= ${Math.abs(m.thresholds.waterGainDMndwi).toFixed(2)}, dNDBI >= ${m.thresholds.bareBuiltDNdbi.toFixed(2)}, minimum patch ${m.minPatchHa} ha)`,
+    );
+  }
   if (m.rules) {
     lines.push(`Rules: ${m.rules} (engine ${m.engine})`);
   }

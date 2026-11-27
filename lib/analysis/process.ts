@@ -32,12 +32,15 @@ import {
   GRID_MIN_PX,
   M2_PER_HA,
   V2_SHORT_GAP_DAYS,
+  applyThresholdOverrides,
+  hasThresholdOverrides,
   scaledThresholds,
   seasonalTag,
   type CompareRules,
   type CompareSpeckle,
   type ScaledThresholds,
   type Sensitivity,
+  type ThresholdOverrides,
 } from "./config";
 import { combineValidity, classifyChange, dilateInvalid } from "./classify";
 import {
@@ -93,6 +96,7 @@ import {
   deriveV2Indices,
   estimateShift,
   normalizeBands,
+  scaleThresholds,
 } from "./v2";
 import type {
   CompareEngine,
@@ -137,6 +141,14 @@ export interface RunCompareInput {
    *  screening pass is governed by the estimate/confirm card instead of the
    *  single-analysis cap. */
   puLimit?: number;
+  /** Phase-thresholds: SSO per-run overrides (already clamped by the zod
+   *  schema / applyThresholdOffsets). Any value present marks the run
+   *  "Custom" and bypasses v2 adaptive scaling for deterministic results. */
+  thresholds?: ThresholdOverrides | null;
+  /** Phase-thresholds: capture the derived per-date index grids on the
+   *  artifact (`derived`) so a thresholds-only re-run can re-classify with
+   *  zero Process API calls (set by ensureCompare for whole-AOI runs). */
+  captureDerived?: boolean;
   sceneA?: DateSceneMeta | null;
   sceneB?: DateSceneMeta | null;
   /** Tehsil polygons for the zonal breakdown (district level only). */
@@ -197,6 +209,10 @@ export interface CompareArtifact {
   magnitude: MagnitudePlanes;
   edgeMask: Uint8Array | null;
   tiers: Uint8Array | null;
+  /** Phase-thresholds: present on whole-AOI runs — the derived per-date
+   *  grids for zero-PU threshold re-classification (consumed and dropped by
+   *  ensureCompare; never stored in the cache entry artifacts). */
+  derived?: DerivedIndexGrids;
 }
 
 /** One v1 side: parsed index rasters for a single UTC day. */
@@ -285,7 +301,12 @@ export function prepareCompare(input: RunCompareInput, options: PrepareOptions =
   assertProcessOutputSize(width, height);
   const grid = makeAnalysisGrid(bbox, width, height);
   const minPatchHa = input.minPatchHa ?? DEFAULT_MIN_PATCH_HA;
-  const baseThresholds = scaledThresholds(input.sensitivity);
+  // Phase-thresholds: preset values, then any SSO override (clamped) — a run
+  // with overrides is "Custom" and skips v2 adaptive scaling downstream.
+  const baseThresholds = applyThresholdOverrides(
+    scaledThresholds(input.sensitivity),
+    input.thresholds,
+  );
 
   const engine: CompareEngine = input.engine ?? "v1";
   // v2 always reads raw bands (even in "single" mode: window 0 → one day).
@@ -352,14 +373,58 @@ export function prepareCompare(input: RunCompareInput, options: PrepareOptions =
 }
 
 /**
+ * Phase-thresholds: the derived per-date grids one analysis actually
+ * classified from (post co-registration / normalisation / index derivation,
+ * post gap-fill merge) plus the fused evidence grids and the small engine
+ * stats needed to rebuild identical metadata. Cached per (area, dates,
+ * grid, gap-fill settings) — WITHOUT thresholds — so a thresholds-only
+ * re-run re-classifies with zero Process API calls.
+ */
+export interface DerivedIndexGrids {
+  engine: CompareEngine;
+  width: number;
+  height: number;
+  /** v2: the full derived index stack (classify reads ndmi/ndwi/bsi/awei/
+   *  brightness/nbr too — 9 planes per side); v1: the NDVI/MNDWI/NDBI triple. */
+  idxA: V2Indices | IndexRasters;
+  idxB: V2Indices | IndexRasters;
+  validA: Uint8Array;
+  validB: Uint8Array;
+  nodataA: Uint8Array | null;
+  nodataB: Uint8Array | null;
+  cloudyA: Uint8Array | null;
+  cloudyB: Uint8Array | null;
+  preCombined: Uint8Array;
+  valid: Uint8Array;
+  aRecent: RecentIndices | null;
+  bRecent: RecentIndices | null;
+  gapSource: Uint8Array;
+  gapFillInfo: GapFillInfo | null;
+  evidence: EvidenceInputs;
+  engineMeta: {
+    normalization: ReturnType<typeof normalizeBands> | null;
+    coReg: ReturnType<typeof estimateShift> | null;
+    sharpen: {
+      a: { b11: { r2: number; applied: boolean }; b12: { r2: number; applied: boolean } };
+      b: { b11: { r2: number; applied: boolean }; b12: { r2: number; applied: boolean } };
+    } | null;
+    adaptiveScales: Record<string, number>;
+    adaptiveSigma: Record<string, number>;
+  };
+}
+
+/**
  * Runs classify → denoise → MMU → stats → overlay on already-parsed inputs.
  * Size checks guarantee the rasters match the prepared analysis grid.
  * `evidence` feeds the fused rules only (legacy ignores it entirely).
+ * `cached` (Phase-thresholds) re-classifies from a previous run's derived
+ * grids — no fetch, no derive — for zero-PU threshold/preset re-runs.
  */
 export function processCompare(
   input: RunCompareInput,
   inputs: RasterInputs,
   evidence: EvidenceInputs = {},
+  cached?: DerivedIndexGrids,
 ): CompareArtifact {
   const prep = prepareCompare(input);
   const { bbox, grid, width, height, baseThresholds, windowDays, gapDays, minPatchHa, engine, inputMode, estimatedPu } = prep;
@@ -368,6 +433,9 @@ export function processCompare(
   const rules: CompareRules =
     input.rules && input.rules !== "legacy" && engine === "v2" ? input.rules : "legacy";
   const speckle: CompareSpeckle = input.speckle ?? "gentle";
+  // Phase-thresholds: any override makes the run Custom (recorded in the
+  // metadata; v2 adaptive scaling is bypassed for deterministic results).
+  const customThresholds = hasThresholdOverrides(input.thresholds);
   // Consume the inputs object up front (it is a throwaway for every caller):
   // raw bands are released as soon as their index stacks are derived, exactly
   // like the original fetch path, so peak memory stays one side at a time.
@@ -405,8 +473,8 @@ export function processCompare(
   const insideClass = erodeMask(inside, width, height, 1);
   const haloRadius = engine === "v2" ? COMPOSITE_ERODE_RADIUS : 1;
 
-  let classGrid: Uint8Array;
-  let valid: Uint8Array;
+  let classGrid: Uint8Array | null = null;
+  let valid: Uint8Array | null = null;
   let effective: ScaledThresholds = baseThresholds;
   let tiers: Uint8Array | null = null;
   let subs: Uint8Array | null = null;
@@ -428,88 +496,42 @@ export function processCompare(
   let nodataB: Uint8Array | null = null;
   let cloudyA: Uint8Array | null = null;
   let cloudyB: Uint8Array | null = null;
+  // Phase-thresholds: also hoisted for the derived-grids capture (re-runs
+  // with new thresholds re-classify from these with zero Process API calls).
+  let aRecent: RecentIndices | null = null;
+  let bRecent: RecentIndices | null = null;
+  let normalization: ReturnType<typeof normalizeBands> | null = null;
+  let co: ReturnType<typeof estimateShift> | null = null;
+  let adaptiveScales: Record<string, number> | null = null;
+  let adaptiveSigma: Record<string, number> | null = null;
 
-  if (engine === "v2" && parsedA && parsedB) {
-    const pa = parsedA;
-    const pb = parsedB;
-
-    // 2.2 co-registration — before any radiometry (raw luminance match).
-    const preMask = combineValidity(pa.valid, pb.valid, inside);
-    const co = estimateShift(pa, pb, preMask, width, height);
-    if (co.applied) applyShift(pa, pa.valid, co.dx, co.dy, width, height);
-
-    // 2.1 normalisation — A's reflectances median-matched onto B (guarded).
-    const normMask = co.applied
-      ? combineValidity(pa.valid, pb.valid, inside)
-      : preMask;
-    const normalization = normalizeBands(pa, pb, normMask);
-
-    // SHARPEN_SWIR (opt-in) — regression-based B11/B12 sharpening between
-    // normalisation and index derivation: NDBI/MNDWI/BSI gain 10 m detail.
-    // Recent-orbit indices arrive pre-computed and stay unsharpened (see
-    // sharpen.ts). v1 legacy inputs are untouched (baseline comparability).
-    sharpenStats = input.sharpen
-      ? {
-          a: sharpenSwir(pa, width, height, pa.valid),
-          b: sharpenSwir(pb, width, height, pb.valid),
-        }
-      : null;
-
-    // 2.3 index stacks — A last, so both raw sides stay alive for co-reg only.
-    const aIdx: V2Indices = deriveV2Indices(pa);
-    const bIdx: V2Indices = deriveV2Indices(pb);
-    const aRecent: RecentIndices = {
-      ndvi: pa.recentNdvi,
-      mndwi: pa.recentMndwi,
-      ndbi: pa.recentNdbi,
-    };
-    const bRecent: RecentIndices = {
-      ndvi: pb.recentNdvi,
-      mndwi: pb.recentMndwi,
-      ndbi: pb.recentNdbi,
-    };
-    const sideValidA = pa.valid;
-    const sideValidB = pb.valid;
-    // Phase 0 diagnostics: coverage flags, pre-dilation mask + indices.
-    const flagsA = compositeSideFlags(pa);
-    const flagsB = compositeSideFlags(pb);
-    validA = sideValidA;
-    validB = sideValidB;
-    nodataA = flagsA.nodata;
-    nodataB = flagsB.nodata;
-    cloudyA = flagsA.cloudy;
-    cloudyB = flagsB.cloudy;
-    idxA = aIdx;
-    idxB = bIdx;
-    preCombined = combineValidity(sideValidA, sideValidB, inside);
-    parsedA = null;
-    parsedB = null;
-
-    valid = dilateInvalid(preCombined, width, height, haloRadius);
-
-    // 2.4 adaptive thresholds, then 2.5-2.8 classification. Phase 2 "auto"
-    // sensitivity derives thresholds from this pair's noise instead and
-    // bypasses the adaptive scale (all scales report as 1).
-    const adaptive = adaptiveThresholds(aIdx, bIdx, valid, baseThresholds);
-    const autoT = input.sensitivity === "auto" ? autoThresholds(aIdx, bIdx, valid) : null;
-    effective = autoT ?? adaptive.t;
-    const appliedScales = autoT ? { ndvi: 1, mndwi: 1, ndbi: 1, bsi: 1 } : adaptive.scales;
+  // Phase 2.5-2.8 classification — shared by the fresh v2 path AND the
+  // Phase-thresholds cached re-classification (same grids, new thresholds).
+  const classifyV2FromGrids = (
+    aIdx: V2Indices,
+    bIdx: V2Indices,
+    aRecentSrc: RecentIndices,
+    bRecentSrc: RecentIndices,
+    validMask: Uint8Array,
+    appliedScales: Record<string, number>,
+    sigmaSrc: Record<string, number>,
+  ): void => {
     const seasonalLossTag = seasonalTag(input.dateB, "loss");
     const seasonalGainTag = seasonalTag(input.dateB, "gain");
-    shortGap = gapDays >= 0 && gapDays < V2_SHORT_GAP_DAYS;
-
+    const shortGapLocal = gapDays >= 0 && gapDays < V2_SHORT_GAP_DAYS;
+    shortGap = shortGapLocal;
     const base = {
       a: aIdx,
       b: bIdx,
-      aRecent,
-      bRecent,
-      valid,
+      aRecent: aRecentSrc,
+      bRecent: bRecentSrc,
+      valid: validMask,
       inside: insideClass,
       t: effective,
       scales: appliedScales,
       seasonalLossTag,
       seasonalGainTag,
-      shortGap,
+      shortGap: shortGapLocal,
     };
     let out: ClassifyV2Output;
     if (rules === "fused") {
@@ -547,9 +569,11 @@ export function processCompare(
     persist = out.persistGrid;
     const decided = out.persistentPixels + out.transientPixels;
     engineStats = {
-      normalization,
-      coReg: co,
-      adaptive: { scales: appliedScales, sigma: adaptive.sigma },
+      // Non-null by construction: the fresh v2 path always derives both and
+      // the cached path restores them from its own v2 capture.
+      normalization: normalization as NonNullable<typeof normalization>,
+      coReg: co as NonNullable<typeof co>,
+      adaptive: { scales: appliedScales, sigma: sigmaSrc },
       persistence: {
         checked: decided > 0,
         persistentPct:
@@ -559,6 +583,141 @@ export function processCompare(
       cvaMean: out.cvaMean,
       ...(sharpenStats ? { sharpen: sharpenStats } : {}),
     };
+  };
+
+  if (cached) {
+    // Phase-thresholds re-classification: restore the captured per-date
+    // grids (post co-registration/normalisation/derive) and the evidence —
+    // no fetch, no derive; classify → denoise → MMU → stats below as usual.
+    checkSize(cached.width, cached.height);
+    idxA = cached.idxA;
+    idxB = cached.idxB;
+    validA = cached.validA;
+    validB = cached.validB;
+    nodataA = cached.nodataA;
+    nodataB = cached.nodataB;
+    cloudyA = cached.cloudyA;
+    cloudyB = cached.cloudyB;
+    preCombined = cached.preCombined;
+    valid = cached.valid;
+    aRecent = cached.aRecent;
+    bRecent = cached.bRecent;
+    normalization = cached.engineMeta.normalization;
+    co = cached.engineMeta.coReg;
+    sharpenStats = cached.engineMeta.sharpen;
+    adaptiveScales = cached.engineMeta.adaptiveScales;
+    adaptiveSigma = cached.engineMeta.adaptiveSigma;
+    if (rules === "fused" || rules === "ml") {
+      Object.assign(evidence, cached.evidence);
+    }
+    if (input.sensitivity === "auto" && !customThresholds) {
+      effective = autoThresholds(cached.idxA, cached.idxB, cached.valid);
+    } else if (engine === "v2" && !customThresholds) {
+      effective = scaleThresholds(baseThresholds, cached.engineMeta.adaptiveScales);
+    }
+    // Classify from the restored grids — zero Process API calls.
+    const scalesForRun = customThresholds
+      ? { ndvi: 1, mndwi: 1, ndbi: 1, bsi: 1 }
+      : (adaptiveScales ?? { ndvi: 1, mndwi: 1, ndbi: 1, bsi: 1 });
+    if (engine === "v2" && cached.aRecent && cached.bRecent) {
+      classifyV2FromGrids(
+        cached.idxA as V2Indices,
+        cached.idxB as V2Indices,
+        cached.aRecent,
+        cached.bRecent,
+        valid,
+        scalesForRun,
+        adaptiveSigma ?? {},
+      );
+    } else {
+      classGrid = classifyChange(cached.idxA, cached.idxB, valid, insideClass, effective);
+    }
+  } else if (engine === "v2" && parsedA && parsedB) {
+    const pa = parsedA;
+    const pb = parsedB;
+
+    // 2.2 co-registration — before any radiometry (raw luminance match).
+    const preMask = combineValidity(pa.valid, pb.valid, inside);
+    co = estimateShift(pa, pb, preMask, width, height);
+    if (co.applied) applyShift(pa, pa.valid, co.dx, co.dy, width, height);
+
+    // 2.1 normalisation — A's reflectances median-matched onto B (guarded).
+    const normMask = co.applied
+      ? combineValidity(pa.valid, pb.valid, inside)
+      : preMask;
+    normalization = normalizeBands(pa, pb, normMask);
+
+    // SHARPEN_SWIR (opt-in) — regression-based B11/B12 sharpening between
+    // normalisation and index derivation: NDBI/MNDWI/BSI gain 10 m detail.
+    // Recent-orbit indices arrive pre-computed and stay unsharpened (see
+    // sharpen.ts). v1 legacy inputs are untouched (baseline comparability).
+    sharpenStats = input.sharpen
+      ? {
+          a: sharpenSwir(pa, width, height, pa.valid),
+          b: sharpenSwir(pb, width, height, pb.valid),
+        }
+      : null;
+
+    // 2.3 index stacks — A last, so both raw sides stay alive for co-reg only.
+    const aIdx: V2Indices = deriveV2Indices(pa);
+    const bIdx: V2Indices = deriveV2Indices(pb);
+    const aRecentDerived: RecentIndices = {
+      ndvi: pa.recentNdvi,
+      mndwi: pa.recentMndwi,
+      ndbi: pa.recentNdbi,
+    };
+    const bRecentDerived: RecentIndices = {
+      ndvi: pb.recentNdvi,
+      mndwi: pb.recentMndwi,
+      ndbi: pb.recentNdbi,
+    };
+    aRecent = aRecentDerived;
+    bRecent = bRecentDerived;
+    const sideValidA = pa.valid;
+    const sideValidB = pb.valid;
+    // Phase 0 diagnostics: coverage flags, pre-dilation mask + indices.
+    const flagsA = compositeSideFlags(pa);
+    const flagsB = compositeSideFlags(pb);
+    validA = sideValidA;
+    validB = sideValidB;
+    nodataA = flagsA.nodata;
+    nodataB = flagsB.nodata;
+    cloudyA = flagsA.cloudy;
+    cloudyB = flagsB.cloudy;
+    idxA = aIdx;
+    idxB = bIdx;
+    preCombined = combineValidity(sideValidA, sideValidB, inside);
+    parsedA = null;
+    parsedB = null;
+
+    valid = dilateInvalid(preCombined, width, height, haloRadius);
+
+    // 2.4 adaptive thresholds, then 2.5-2.8 classification. Phase 2 "auto"
+    // sensitivity derives thresholds from this pair's noise instead and
+    // bypasses the adaptive scale (all scales report as 1). Phase-thresholds:
+    // a Custom run uses exactly the values shown in the editor — no adaptive
+    // rescale (the live histogram math must match what applies).
+    const adaptive = adaptiveThresholds(aIdx, bIdx, valid, baseThresholds);
+    adaptiveScales = adaptive.scales;
+    adaptiveSigma = adaptive.sigma;
+    const autoT =
+      input.sensitivity === "auto" && !customThresholds ? autoThresholds(aIdx, bIdx, valid) : null;
+    effective = autoT ?? (customThresholds ? baseThresholds : adaptive.t);
+    const appliedScales = customThresholds
+      ? { ndvi: 1, mndwi: 1, ndbi: 1, bsi: 1 }
+      : autoT
+        ? { ndvi: 1, mndwi: 1, ndbi: 1, bsi: 1 }
+        : adaptive.scales;
+    // 2.5-2.8 classification (shared closure — see classifyV2FromGrids).
+    classifyV2FromGrids(
+      aIdx,
+      bIdx,
+      aRecentDerived,
+      bRecentDerived,
+      valid,
+      appliedScales,
+      adaptive.sigma,
+    );
   } else if (sideA && sideB) {
     // Phase 0 diagnostics: coverage flags + pre-dilation mask + indices.
     const flagsA = singleSideFlags(sideA.valid, sideA.nodata ?? null);
@@ -573,9 +732,16 @@ export function processCompare(
     idxB = sideB.indices;
     preCombined = combineValidity(sideA.valid, sideB.valid, inside);
     valid = dilateInvalid(preCombined, width, height, haloRadius);
-    if (input.sensitivity === "auto") effective = autoThresholds(sideA.indices, sideB.indices, valid);
+    if (input.sensitivity === "auto" && !customThresholds) {
+      effective = autoThresholds(sideA.indices, sideB.indices, valid);
+    }
     classGrid = classifyChange(sideA.indices, sideB.indices, valid, insideClass, effective);
   } else {
+    throw Object.assign(new Error("Missing analysis inputs."), { status: 500 });
+  }
+  // The classify closures above are opaque to control-flow analysis — prove
+  // the assignment here so the rest of the pipeline sees non-null grids.
+  if (!classGrid || !valid) {
     throw Object.assign(new Error("Missing analysis inputs."), { status: 500 });
   }
 
@@ -756,6 +922,15 @@ export function processCompare(
         waterGainMndwiMin: effective.waterGainMndwiMin,
         waterLossMndwiMin: effective.waterLossMndwiMin,
       },
+      // Phase-thresholds: mark Custom runs and the preset they started from,
+      // and echo the raw overrides so saved queries / re-runs round-trip.
+      ...(customThresholds
+        ? {
+            thresholdsCustom: true,
+            thresholdsPreset: input.sensitivity,
+            thresholdOverrides: input.thresholds ?? undefined,
+          }
+        : {}),
       ...(engineStats ? { engineStats } : {}),
       diagnostics,
       // Phase 1: coverage-rescue statement for the method card (absent when
@@ -772,11 +947,47 @@ export function processCompare(
       generatedAt: new Date().toISOString(),
     },
     // Full event count for the Events tab header; the client only receives
-    // the first ANALYZE_EVENTS_CAP features inline (fetched in analyze.ts).
+    // the first ANALYZE_EVENTS_CAP events inline (fetched in analyze.ts).
     eventsTotal: patchVectors.features.length,
     eventsEdgeTotal,
     eventsByClass,
+    // Phase-thresholds: compact Δ histograms for the editor's live feedback.
+    histograms: diagnostics.histograms,
   };
+
+  // Phase-thresholds: capture the derived grids (post derive / co-reg /
+  // normalisation / gap-fill merge) so a thresholds-only re-run re-classifies
+  // with zero Process API calls. Only whole-AOI runs ask for this.
+  let derived: DerivedIndexGrids | undefined;
+  if (input.captureDerived && !cached && idxA && idxB && validA && validB && preCombined) {
+    derived = {
+      engine,
+      width,
+      height,
+      idxA,
+      idxB,
+      validA,
+      validB,
+      nodataA,
+      nodataB,
+      cloudyA,
+      cloudyB,
+      preCombined,
+      valid,
+      aRecent,
+      bRecent,
+      gapSource,
+      gapFillInfo: gapFill,
+      evidence,
+      engineMeta: {
+        normalization,
+        coReg: co,
+        sharpen: sharpenStats,
+        adaptiveScales: adaptiveScales ?? { ndvi: 1, mndwi: 1, ndbi: 1, bsi: 1 },
+        adaptiveSigma: adaptiveSigma ?? {},
+      },
+    };
+  }
 
   const overlayPng = encodePng(classToRgba(classGrid, width), width, height);
   const classGz = deflateSync(classGrid);
@@ -807,5 +1018,6 @@ export function processCompare(
     width,
     height,
     bbox,
+    ...(derived ? { derived } : {}),
   };
 }

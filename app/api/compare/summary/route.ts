@@ -21,7 +21,7 @@ import {
   generateWithFallback,
   type GeminiImagePart,
 } from "@/lib/server/gemini";
-import { entryForKey } from "@/lib/server/compareRun";
+import { entryForKey, thresholdsSchema } from "@/lib/server/compareRun";
 import { buildSummaryImages } from "@/lib/server/summaryImages";
 import {
   errorResponse,
@@ -52,6 +52,9 @@ const summaryBodySchema = z.object({
   minPatchHa: z.coerce.number().optional(),
   speckle: z.enum(["gentle", "legacy"]).optional(),
   detail: z.enum(["quick", "detailed", "smart"]).optional(),
+  // Phase-thresholds: nested override map (POST body — validated + clamped by
+  // the canonical schema at resolve time).
+  thresholds: thresholdsSchema.optional(),
   inputMode: z.enum(["single", "composite"]).optional(),
   compositeWindowDays: z.coerce.number().int().optional(),
 });

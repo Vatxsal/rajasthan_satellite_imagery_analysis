@@ -5,7 +5,7 @@ import { authorize, forbiddenRoleResponse } from "@/lib/auth/guard";
 import { can } from "@/lib/auth/permissions";
 import { inspectChangeAt } from "@/lib/inspect/changeGrid";
 import { errorResponse, rateLimitGuard } from "@/lib/server/api";
-import { entryForKey } from "@/lib/server/compareRun";
+import { entryForKey, thresholdsSchema } from "@/lib/server/compareRun";
 
 export const runtime = "nodejs";
 /** 60 s — a cold cache now recomputes the analysis (same cost as analyze). */
@@ -25,6 +25,9 @@ const bodySchema = z.object({
   minPatchHa: z.coerce.number().optional(),
   speckle: z.enum(["gentle", "legacy"]).optional(),
   detail: z.enum(["quick", "detailed", "smart"]).optional(),
+  // Phase-thresholds: nested override map (POST body — validated + clamped by
+  // the canonical schema at resolve time).
+  thresholds: thresholdsSchema.optional(),
   inputMode: z.enum(["single", "composite"]).optional(),
   compositeWindowDays: z.coerce.number().int().optional(),
 });

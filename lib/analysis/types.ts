@@ -1,5 +1,5 @@
-import type { CompareSpeckle, Sensitivity } from "./config";
-import type { CompareDiagnostics } from "./diagnostics";
+import type { CompareSpeckle, Sensitivity, ThresholdOverrides } from "./config";
+import type { CompareDiagnostics, DeltaHistogram } from "./diagnostics";
 
 /** Analysis grid: linear mapping of the request bbox onto width × height pixels
  *  (the Process API renders the EPSG:4326 bbox linearly, so pixel centres are
@@ -163,6 +163,14 @@ export interface CompareMetadata {
   estimatedPu: number;
   /** Threshold values actually applied (after sensitivity scaling). */
   thresholds: Record<string, number>;
+  /** Phase-thresholds: true when the SSO user overrode any rule value —
+   *  exports, the AI summary and the email must say "Custom thresholds". */
+  thresholdsCustom?: boolean;
+  /** The preset the run started from (the sensitivity position; meaningful
+   *  especially for Custom runs — "started from High"). */
+  thresholdsPreset?: Sensitivity;
+  /** Phase-thresholds: the user's raw overrides (echoed for re-run/query). */
+  thresholdOverrides?: ThresholdOverrides;
   /** v2 only: engine diagnostics (normalisation, co-reg, adaptive scales, …). */
   engineStats?: EngineStats;
   /** Phase 0: coverage/stage/patch/histogram diagnostics (Method card + dev log). */
@@ -202,6 +210,10 @@ export interface CompareStats {
   /** Phase 2: patch counts per change class for the Events header
    *  (count = all patches, edgeCount = the edge-flagged subset). */
   eventsByClass?: Array<{ classCode: number; count: number; edgeCount: number }>;
+  /** Phase-thresholds: compact Δ-index histograms over the analysed pixels —
+   *  the editor's live feedback (draggable markers, share-beyond warnings)
+   *  computes entirely from these, with no re-run. */
+  histograms?: { ndvi: DeltaHistogram; mndwi: DeltaHistogram; ndbi: DeltaHistogram };
 }
 
 /** Result of an /api/compare/analyze call (final NDJSON frame). */

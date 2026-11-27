@@ -23,7 +23,7 @@
  * ./guard.ts — the policy itself never changes at runtime.
  */
 import type { AreaLevel } from "../data/types";
-import type { CompareSpeckle, Sensitivity } from "../analysis/config";
+import type { CompareSpeckle, Sensitivity, ThresholdOverrides } from "../analysis/config";
 
 export type { AreaLevel, Sensitivity };
 
@@ -50,6 +50,8 @@ export const CAPABILITIES = [
   "compare.adjust-min-patch",
   /** Phase 3: detailed (tiled, native-resolution) comparison runs + tiles. */
   "compare.detailed",
+  /** Phase-thresholds: per-run detection threshold overrides (SSO only). */
+  "compare.thresholds",
   /** PNG imagery renders, up to the role's pixel cap. */
   "downloads.png",
   /** GeoTIFF renders (visual + analysis). */
@@ -99,6 +101,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   "compare.adjust-sensitivity": "Adjust sensitivity",
   "compare.adjust-min-patch": "Adjust minimum patch",
   "compare.detailed": "Detailed comparison",
+  "compare.thresholds": "Detection threshold overrides",
   "downloads.png": "PNG preview download",
   "downloads.geotiff": "GeoTIFF download",
   "downloads.copernicus": "Copernicus Browser links",
@@ -168,6 +171,7 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       "compare.adjust-sensitivity": false,
       "compare.adjust-min-patch": false,
       "compare.detailed": false,
+      "compare.thresholds": false,
       "downloads.png": true,
       "downloads.geotiff": false,
       "downloads.copernicus": true,
@@ -217,6 +221,7 @@ export const PERMISSIONS: Readonly<Record<Role, RolePolicy>> = {
       "compare.adjust-sensitivity": true,
       "compare.adjust-min-patch": true,
       "compare.detailed": true,
+      "compare.thresholds": true,
       "downloads.png": true,
       "downloads.geotiff": true,
       "downloads.copernicus": true,
@@ -338,10 +343,16 @@ export const DEFAULT_MIN_PATCH_HA = 0.05;
  * Forces sensitivity/minPatchHa back to the defaults for roles that may not
  * adjust them (clamping, not rejecting: tuning is a convenience, not a lock).
  * Phase 2: the despeckle mode rides the same capability — guests always run
- * the default gentle despeckle.
+ * the default gentle despeckle. Phase-thresholds: overrides ride
+ * compare.thresholds — guests always run preset thresholds.
  */
 export function clampCompareTuning<
-  T extends { sensitivity: Sensitivity; minPatchHa: number; speckle?: CompareSpeckle },
+  T extends {
+    sensitivity: Sensitivity;
+    minPatchHa: number;
+    speckle?: CompareSpeckle;
+    thresholds?: ThresholdOverrides | null;
+  },
 >(role: Role, params: T): T {
   const policy = policyFor(role);
   return {
@@ -357,6 +368,13 @@ export function clampCompareTuning<
           speckle: policy.capabilities["compare.adjust-sensitivity"]
             ? params.speckle
             : ("gentle" as CompareSpeckle),
+        }
+      : {}),
+    ...(params.thresholds !== undefined && params.thresholds !== null
+      ? {
+          thresholds: policy.capabilities["compare.thresholds"]
+            ? params.thresholds
+            : null,
         }
       : {}),
   };

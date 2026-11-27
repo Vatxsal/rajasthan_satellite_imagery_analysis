@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import type { CompareSpeckle, Sensitivity } from "@/lib/analysis/config";
+import type {
+  CompareSpeckle,
+  Sensitivity,
+  ThresholdField,
+  ThresholdOverrides,
+} from "@/lib/analysis/config";
 import type {
   AnalyzeDetail,
   CompareStats,
@@ -129,6 +134,12 @@ interface CompareState {
   showEdgeEvents: boolean;
   /** Phase 2 despeckle mode for the next run (gentle = magnitude-aware). */
   speckle: CompareSpeckle;
+  /** Phase-thresholds: per-rule overrides for the NEXT run (null = the
+   *  sensitivity preset's values; any value set = a Custom run). */
+  thresholds: ThresholdOverrides | null;
+  /** Phase-thresholds: the sensitivity position the sliders started from —
+   *  recorded into the result metadata for transparency. */
+  thresholdsPreset: Sensitivity;
   /** Phase 3 detail mode for the next run. */
   detail: CompareDetail;
   /** Phase 3: user explicitly picked a detail mode (auto-defaults stop). */
@@ -207,6 +218,12 @@ interface CompareState {
   setShowUnchanged: (value: boolean) => void;
   setShowEdgeEvents: (value: boolean) => void;
   setSpeckle: (value: CompareSpeckle) => void;
+  /** Phase-thresholds: set one rule's override (any set = Custom run). */
+  setThreshold: (field: ThresholdField, value: number) => void;
+  /** Phase-thresholds: back to the sensitivity preset's values. */
+  clearThresholds: () => void;
+  /** Phase-thresholds: replace the whole override map (saved-query apply). */
+  replaceThresholds: (value: ThresholdOverrides | null) => void;
   toggleCoverageLayer: () => void;
   toggleGapLayer: () => void;
   toggleMagnitudeLayer: () => void;
@@ -315,6 +332,8 @@ export const useCompareStore = create<CompareState>((set, get) => ({
   showUnchanged: false,
   showEdgeEvents: false,
   speckle: "gentle" as CompareSpeckle,
+  thresholds: null as ThresholdOverrides | null,
+  thresholdsPreset: initialPrefs.change.sensitivity as Sensitivity,
   detail: "quick" as CompareDetail,
   detailTouched: false,
   detailEstimating: false,
@@ -483,6 +502,8 @@ export const useCompareStore = create<CompareState>((set, get) => ({
           minPatchHa: state.minPatchHa,
           speckle: state.speckle,
           inputMode: state.inputMode,
+          // Phase-thresholds: overrides ride every run; the server clamps.
+          ...(state.thresholds ? { thresholds: state.thresholds } : {}),
           ...(isDetail ? { detail, confirm } : {}),
         },
         {
@@ -729,6 +750,14 @@ export const useCompareStore = create<CompareState>((set, get) => ({
       if (get().confidenceFilter && get().result) void get().probeEventsTotal();
     },
     setSpeckle: (value) => set({ speckle: value }),
+  setThreshold: (field, value) =>
+    set((s) => ({
+      thresholds: { ...(s.thresholds ?? {}), [field]: value },
+      thresholdsPreset: s.sensitivity,
+    })),
+  clearThresholds: () => set({ thresholds: null }),
+  replaceThresholds: (value) =>
+    set((s) => ({ thresholds: value, thresholdsPreset: s.sensitivity })),
     toggleCoverageLayer: () => set((s) => ({ coverageLayer: !s.coverageLayer })),
     toggleGapLayer: () => set((s) => ({ gapLayer: !s.gapLayer })),
     toggleMagnitudeLayer: () => set((s) => ({ magnitudeLayer: !s.magnitudeLayer })),

@@ -193,7 +193,27 @@ A side of the analysis with < 95 % usable coverage triggers a **coverage rescue*
 | ΔNDVI ≥ +0.15 | Vegetation gain |
 | ΔNDBI ≥ +0.10 and ΔNDVI ≤ −0.05 | Bare / built-up increase |
 
-Thresholds live in `lib/analysis/config.ts`; **sensitivity** scales them — low ×1.5, medium ×1, high ×0.7, **very high** ×0.5, and **Auto** derives them from the scene's own noise (3× the robust σ per index, with floors). They are heuristics: treat events as places to check, not confirmed changes. Valid data below 70% triggers a warning.
+Thresholds live in `lib/analysis/config.ts`; **sensitivity** scales them — low ×1.5, medium ×1, high ×0.7, **very high** ×0.5, and **Auto** derives them from the scene's own noise (3× the robust σ per index, with floors). On the v2 engine the **adaptive** step then rescales each index by its measured noise (×0.7–1.5), which is why the Method card can show, say, vegetation loss at −0.16 on High (−0.15 × 0.7 × a ~1.5 noisy-scene factor) — the card always shows the values actually applied. They are heuristics: treat events as places to check, not confirmed changes. Valid data below 70% triggers a warning.
+
+### 🎚️ Tuning the thresholds yourself (SSO)
+
+*Stats → Method & settings → Thresholds used* is editable for SSO users (the `compare.thresholds` capability; guests see read-only values). Each rule gets a slider + numeric input bounded by the server's clamps (ΔNDVI 0.03–0.40, ΔMNDWI 0.05–0.50, ΔNDBI 0.03–0.30, ΔNDVI guard −0.30–0, MNDWI limits −0.20–0.30), presets (Low / Medium / High / Very high / Auto) fill the sliders, any edit marks the run **Custom** (with the preset it started from), and *Reset to preset* drops the custom values. Nothing applies until you press **Re-run**.
+
+What each rule means, in plain words:
+
+| Threshold | Plain words | Typical range | Risk of going very low |
+| --- | --- | --- | --- |
+| Water gain ΔMNDWI | "this pixel became wetter" — new ponds, canal fills, floods | +0.10 to +0.30 | below ~+0.08: wet mud after rain and irrigation sheen become "water" |
+| Water loss ΔMNDWI | "this used to be water and dried" | −0.30 to −0.10 | below ~−0.08: seasonal drying noise floods the map |
+| Vegetation loss ΔNDVI | "green cover dropped" — clearing, stress, harvest | −0.30 to −0.10 | below ~−0.06: crop rotation and soil-moisture swings flag everywhere |
+| Vegetation gain ΔNDVI | "new green appeared" — regrowth, plantations | +0.10 to +0.30 | below ~+0.06: seasonal green-up dominates |
+| Bare / built-up ΔNDBI | "bare or constructed surface grew" | +0.05 to +0.20 | below ~+0.04: ploughed fields and dry soil masquerade as construction |
+| Bare/built-up ΔNDVI guard | vegetation must ALSO drop for bare/built-up | −0.15 to 0 | near 0: dry-soil false alarms return |
+| Bare/built-up max MNDWI | suppress bare/built-up on open water | 0 to 0.30 | below 0: shallow-water building noise |
+| Water gain min MNDWI (B) | date B must really look like open water | 0 to 0.30 | below 0: damp fields count as new water |
+| Water loss min MNDWI (A) | date A must really have been open water | 0 to 0.30 | below 0: damp fields count as lost water |
+
+The editor also draws the run's Δ-index histograms (≈200 bins over the analysed pixels) with **draggable threshold markers** and live counts: "N pixels · X% of the analysed area beyond this threshold", with a ⚠ likely-noise warning once a rule's share passes ~5%. That feedback is pure browser math — nothing is sent until Re-run. A threshold or preset re-run **re-classifies from the cached per-date index rasters** (zero new Copernicus renders, seconds instead of minutes); thresholds fork the *classified result* cache key, never the raster cache, so nothing recomputes twice. Custom runs are labelled **"Custom thresholds"** with their values and starting preset in the Stats and Events headers, the CSV / GeoJSON exports, the emailed report and the AI summary input (the model is instructed never to describe a custom run as default).
 
 ### 🧱 Detailed & smart runs (Phase 3)
 
@@ -336,6 +356,7 @@ Exactly two roles exist — **guest** and **sso**. There is no admin/member tier
 | Adjust sensitivity | 🔒 | ✅ |
 | Adjust minimum patch | 🔒 | ✅ |
 | Detailed comparison | 🔒 | ✅ |
+| Detection threshold overrides | 🔒 | ✅ |
 | PNG preview download | ✅ | ✅ |
 | GeoTIFF download | 🔒 | ✅ |
 | Copernicus Browser links | ✅ | ✅ |

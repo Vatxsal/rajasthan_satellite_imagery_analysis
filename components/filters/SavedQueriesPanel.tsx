@@ -372,6 +372,8 @@ export default function SavedQueriesPanel() {
       const compare = useCompareStore.getState();
       compare.setSensitivity(query.compare.sensitivity);
       compare.setMinPatchHa(query.compare.minPatchHa);
+      // Phase-thresholds: apply the saved overrides (null = presets).
+      compare.replaceThresholds(query.compare.thresholds ?? null);
     }
 
     setApplied(query.id);

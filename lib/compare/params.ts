@@ -9,7 +9,7 @@
  * normalised inputs the key was built from.
  */
 import type { CompareMetadata } from "@/lib/analysis/types";
-import type { CompareSpeckle, Sensitivity } from "@/lib/analysis/config";
+import type { CompareSpeckle, Sensitivity, ThresholdOverrides } from "@/lib/analysis/config";
 
 export interface AnalysisParams {
   areaId: string;
@@ -25,6 +25,8 @@ export interface AnalysisParams {
   /** Phase 3 detail mode (omitted for quick runs — keeps quick keys/query
    *  byte-identical to pre-Phase-3 callers). */
   detail?: "quick" | "detailed" | "smart";
+  /** Phase-thresholds: Custom-run overrides (omitted for preset runs). */
+  thresholds?: ThresholdOverrides;
 }
 
 export function analysisParamsFromMetadata(metadata: CompareMetadata): AnalysisParams {
@@ -39,6 +41,9 @@ export function analysisParamsFromMetadata(metadata: CompareMetadata): AnalysisP
     compositeWindowDays: metadata.compositeWindowDays,
     ...(metadata.speckle ? { speckle: metadata.speckle } : {}),
     ...(metadata.detail ? { detail: metadata.detail } : {}),
+    ...(metadata.thresholdOverrides && Object.keys(metadata.thresholdOverrides).length > 0
+      ? { thresholds: metadata.thresholdOverrides }
+      : {}),
   };
 }
 
@@ -59,6 +64,11 @@ export function paramsToQuery(params: AnalysisParams): URLSearchParams {
   query.set("compositeWindowDays", String(params.compositeWindowDays));
   if (params.speckle) query.set("speckle", params.speckle);
   if (params.detail && params.detail !== "quick") query.set("detail", params.detail);
+  if (params.thresholds && Object.keys(params.thresholds).length > 0) {
+    // One JSON-encoded param keeps the URL readable and the key stable; the
+    // GET routes decode it before the canonical schema validates + clamps.
+    query.set("thresholds", JSON.stringify(params.thresholds));
+  }
   return query;
 }
 
